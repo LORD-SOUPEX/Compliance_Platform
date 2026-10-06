@@ -445,6 +445,9 @@ function Resolve-CandidateTool {
     if ($runtimeIndex -and $runtimeIndex.PSObject.Properties.Name -contains 'error') {
         return [pscustomobject]@{ name = $Name; command = $Command; status = 'runtime_error'; source = $null; version = $null; runtime_managed = $true; platform = $platform.id; reason = "Index Tool Runtime invalide: $($runtimeIndex.error)" }
     }
+    if ($platform.os -eq 'windows' -and $Command -in @('ansible', 'ansible-lint', 'molecule')) {
+        return [pscustomobject]@{ name = $Name; command = $Command; status = 'incompatible'; source = $null; version = $null; runtime_managed = $false; platform = $platform.id; reason = 'Controleur Ansible/Molecule natif Windows non supporte; la presence du paquet ne prouve pas son execution.' }
+    }
     if ($runtimeIndex) {
         $platformRecord = $runtimeIndex.data.platforms.PSObject.Properties[$platform.id]
         if ($platformRecord) {
@@ -547,11 +550,11 @@ function Get-CapabilityProfile {
             [pscustomobject]@{ name = 'security'; tools = @(@{ name = 'Trivy'; command = 'trivy' }) }
         ) }
         'kubernetes' { return @(
-            [pscustomobject]@{ name = 'security'; tools = @(@{ name = 'Checkov'; command = 'checkov' }, @{ name = 'Trivy'; command = 'trivy' }) },
+            [pscustomobject]@{ name = 'security'; selection_policy = 'alternative'; tools = @(@{ name = 'Checkov'; command = 'checkov' }, @{ name = 'Trivy'; command = 'trivy' }) },
             [pscustomobject]@{ name = 'policy validation'; tools = @(@{ name = 'Checkov'; command = 'checkov' }) }
         ) }
         'helm' { return @(
-            [pscustomobject]@{ name = 'security'; tools = @(@{ name = 'Checkov'; command = 'checkov' }, @{ name = 'Trivy'; command = 'trivy' }) },
+            [pscustomobject]@{ name = 'security'; selection_policy = 'alternative'; tools = @(@{ name = 'Checkov'; command = 'checkov' }, @{ name = 'Trivy'; command = 'trivy' }) },
             [pscustomobject]@{ name = 'policy validation'; tools = @(@{ name = 'Checkov'; command = 'checkov' }) }
         ) }
         'shell' { return @([pscustomobject]@{ name = 'linting'; tools = @(@{ name = 'ShellCheck'; command = 'shellcheck' }) }) }
@@ -568,6 +571,8 @@ function Get-CapabilityMatrix {
     $entries = foreach ($discovery in $Discoveries) {
             $capabilityProfile = @(Get-CapabilityProfile -Technology $discovery.technology)
             $capabilities = foreach ($capability in $capabilityProfile) {
+                $selectionPolicy = if ($capability.PSObject.Properties.Name -contains 'selection_policy') { $capability.selection_policy } else { 'all' }
+                if ($selectionPolicy -notin @('all', 'alternative')) { throw 'Politique de selection de capacite invalide.' }
                 $toolStates = @($capability.tools | ForEach-Object {
                     Resolve-CandidateTool -Name $_.name -Command $_.command
                 })
@@ -575,6 +580,7 @@ function Get-CapabilityMatrix {
             $availability = if ($discovery.status -eq 'ambiguous') { 'ambiguous' }
                 elseif ($discovery.status -eq 'absent') { 'not_applicable' }
                 elseif ($toolStates.Count -eq 0) { 'unconfigured' }
+                elseif ($selectionPolicy -eq 'alternative' -and $availableTools.Count -gt 0) { 'available' }
                 elseif ($availableTools.Count -eq $toolStates.Count) { 'available' }
                 elseif ($availableTools.Count -gt 0) { 'partially_available' }
                 else { 'unavailable' }
@@ -583,10 +589,12 @@ function Get-CapabilityMatrix {
             elseif ($discovery.status -eq 'absent') { $reasons.Add("La technologie est absente; la capacité n’est pas applicable.") }
             elseif ($toolStates.Count -eq 0) { $reasons.Add("Aucun outil candidat n'est configure pour cette capacite.") }
             elseif ($availableTools.Count -eq 0) { $reasons.Add("Aucun outil candidat n'est disponible sur cette plateforme.") }
+            elseif ($selectionPolicy -eq 'alternative' -and $availableTools.Count -gt 0) { $reasons.Add('Une alternative est disponible; le premier candidat disponible sera retenu selon l ordre du profil.') }
             elseif ($availableTools.Count -lt $toolStates.Count) { $reasons.Add("Certains outils candidats sont disponibles; d'autres restent indisponibles sur cette plateforme.") }
             else { $reasons.Add('Au moins un outil candidat est disponible; la sélection finale appartient au Tool Resolver.') }
             [pscustomobject]@{
                 name = $capability.name
+                selection_policy = $selectionPolicy
                     required = ($discovery.status -eq 'detected')
                 availability = $availability
                 candidate_tools = @($toolStates)
@@ -611,11 +619,15 @@ function Get-CapabilityMatrix {
 function Resolve-CapabilityTool {
     param([object[]]$CapabilityMatrix)
     foreach ($technology in $CapabilityMatrix) {
+        $timer = [Diagnostics.Stopwatch]::StartNew()
+        $selectedAssignments = 0
         $selectedByCommand = @{}
         $unresolved = New-Object System.Collections.Generic.List[object]
         if ($technology.technology_status -eq 'detected') {
             foreach ($capability in $technology.capabilities) {
                 if (-not $capability.required) { continue }
+                $selectionPolicy = if ($capability.PSObject.Properties.Name -contains 'selection_policy') { $capability.selection_policy } else { 'all' }
+                if ($selectionPolicy -notin @('all', 'alternative')) { throw 'Politique de selection de capacite invalide.' }
                 $availableCandidates = @($capability.candidate_tools | Where-Object status -eq 'available')
                 if ($availableCandidates.Count -eq 0) {
                     $unresolved.Add([pscustomobject]@{
@@ -625,7 +637,9 @@ function Resolve-CapabilityTool {
                     })
                     continue
                 }
+                if ($selectionPolicy -eq 'alternative') { $availableCandidates = @($availableCandidates | Select-Object -First 1) }
                 foreach ($candidate in $availableCandidates) {
+                    $selectedAssignments++
                     if (-not $selectedByCommand.ContainsKey($candidate.command)) {
                         $selectedByCommand[$candidate.command] = [pscustomobject]@{
                             name = $candidate.name
@@ -637,7 +651,7 @@ function Resolve-CapabilityTool {
                     $selected = $selectedByCommand[$candidate.command]
                     if (-not $selected.capabilities.Contains($capability.name)) { $selected.capabilities.Add($capability.name) }
                 }
-                if ($capability.availability -eq 'partially_available') {
+                if ($selectionPolicy -eq 'all' -and $capability.availability -eq 'partially_available') {
                     $unresolved.Add([pscustomobject]@{
                         capability = $capability.name
                         status = 'partially_available'
@@ -658,6 +672,7 @@ function Resolve-CapabilityTool {
             elseif ($unresolved.Count -gt 0 -and $selectedTools.Count -gt 0) { 'partial' }
             elseif ($unresolved.Count -gt 0) { 'unavailable' }
             else { 'ready' }
+        $timer.Stop()
         [pscustomobject]@{
             technology = $technology.technology
             technology_status = $technology.technology_status
@@ -665,6 +680,14 @@ function Resolve-CapabilityTool {
             status = $resolutionStatus
             selected_tools = $selectedTools
             unresolved_capabilities = @($unresolved.ToArray())
+            metrics = [pscustomobject]@{
+                required_capabilities = @($technology.capabilities | Where-Object required).Count
+                candidate_occurrences = @($technology.capabilities | ForEach-Object { $_.candidate_tools }).Count
+                selected_commands = $selectedTools.Count
+                reused_assignments = $selectedAssignments - $selectedTools.Count
+                unresolved_capabilities = $unresolved.Count
+                duration_ms = $timer.ElapsedMilliseconds
+            }
             reasons = if ($technology.technology_status -eq 'ambiguous') { @($technology.reasons) }
                 elseif ($technology.technology_status -eq 'absent') { @('Technologie absente; aucun outil sélectionné.') }
                 else { @() }

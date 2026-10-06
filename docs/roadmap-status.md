@@ -4,9 +4,9 @@ Synthèse de [la roadmap existante dans plan.md](../plan.md#roadmap), mise à jo
 
 | Phase/composant | Statut | Preuve et reste principal |
 | --- | --- | --- |
-| Stabilisation du socle | PHASE EN COURS | 38 tests reussis; cache repare, Markdownlint et Quick passent. Audit de dependances et qualification poste neuf restent ouverts. |
-| Discovery Engine | PHASE EN COURS | RepositoryPath, JSON, preuves, racines, ambiguïtés et détecteurs; précision non mesurée sur corpus réel. |
-| Tool Bootstrap & Tool Resolver | PHASE EN COURS | Bootstrap termine en code 0 et marqueur `windows-x64: qualified`; paquets/modules, integrite a l'usage et qualification produit restent ouverts. |
+| Stabilisation du socle | PHASE EN COURS | 44 tests reussis; cache repare, Markdownlint et Quick passent. Full reste bloque par les dependances; poste neuf non qualifie. |
+| Discovery Engine | PHASE EN COURS | Racines IaC mixtes et diagnostics de scan partiel testes; corpus reel, overrides et autres layouts complexes restent ouverts. |
+| Tool Bootstrap & Tool Resolver | PHASE EN COURS | Bootstrap termine, integrite des binaires indexes, alternatives et compteurs testes; paquets/modules, provenance et qualification produit restent ouverts. |
 | Compliance Engine | PHASE NON COMMENCÉE | L'orchestration reste dans le Quality Gate monolithique. |
 | Control Catalog | PHASE NON COMMENCÉE | Profils capacités/outils codés dans PowerShell; pas de catalogue indépendant. |
 | Reporting Engine | PHASE NON COMMENCÉE | JSON Discovery et Quality Gate présents, sans contrat commun ni composant dédié. |

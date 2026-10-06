@@ -76,6 +76,12 @@ par racine, monorepo Terraform/OpenTofu mixte, ambiguite partielle conservative,
 erreurs de parcours et lecture restituees. `DiscoveryOnly` expose `scan_complete`
 et `scan_errors` et conserve le JSON sur scan incomplet avec code 2.
 
+Le cycle Resolver porte la suite a 44 tests reussis. Les profils peuvent
+declarer `all` (outils complementaires) ou `alternative` (premier disponible,
+priorite du profil). Les compteurs et duree de selection sont exposes par
+technologie. Ansible/Molecule natif Windows n'est plus declare disponible sur
+la seule presence d'un lanceur. Les autres preuves d'execution restent ouvertes.
+
 ## Principes proposés
 
 - Séparer la présence d'une technologie, la disponibilité de ses outils et la
@@ -1084,7 +1090,7 @@ capacités d'analyse et les usages volontaires de la plateforme.
 - [ ] Définir la qualification sur poste neuf et runner, ainsi que les scénarios
   réseau, hors ligne et d'échec; préparer les preuves attendues.
 - [x] Préserver et étendre les tests du socle: `scripts/test.ps1` exécute
-  actuellement 37 scénarios avec 37 PASS, réobservés dans Full pendant cet audit.
+  actuellement 44 scenarios avec 44 PASS; les 37 scenarios d'origine sont conserves.
 - [x] Recréer l'environnement Python local et vérifier les lanceurs Python/TOML.
 - [x] Corriger les tests de processus pour qu'ils valident les codes de sortie,
   les arguments et les délais sans dépendre de Python.
@@ -1103,7 +1109,7 @@ Réutilisation: scripts, tests, conventions, rapports et documentation existants
 
 Critères de sortie proposés: blocages de sécurité résolus ou arbitrés;
 environnement de test reproductible; 37 scénarios verts; Quick/Full reproductibles
-et limites documentees. Les 38 tests et Quick passent; Full reste bloque
+et limites documentees. Les 44 tests et Quick passent; Full reste bloque
 uniquement par l'audit des dependances. Poste neuf/runner non qualifies.
 
 ## Phase 2: Discovery Engine
@@ -1175,8 +1181,14 @@ les capacités et outils réellement nécessaires à chaque repository analysé.
   y compris les copies historiques; refuser empreinte absente, alteration,
   plateforme non qualifiee et schema invalide, avec regression negative.
 - [ ] Distinguer présence de commande et exécution réellement supportée, résoudre
-  les alternatives et les divergences Doctor/bootstrap sur Python et Terragrunt.
-- [ ] Mesurer le coût de résolution et l'absence d'outils inutiles sur des fixtures.
+  les divergences Doctor/bootstrap sur Python et Terragrunt et qualifier les
+  commandes natives au-dela du refus Ansible/Molecule Windows maintenant teste.
+- [x] Gerer les alternatives explicites avec priorite du profil sans retirer
+  d'outil complementaire ni modifier les controles executes; fixtures validees.
+- [x] Exposer compteurs de candidats, commandes retenues, reutilisations,
+  capacites non resolues et duree de selection par technologie, avec assertions.
+- [ ] Qualifier le cout total incluant scan, hash et probes, sur corpus reel;
+  les compteurs du resolver seul ne prouvent pas des invocations evitees par le gate.
 
 Critères de sortie proposés: 37 tests verts; matrice et résolution sérialisées;
 versions d'outils binaires vérifiées; `windows-x64` reste expérimental tant que le

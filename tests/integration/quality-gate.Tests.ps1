@@ -206,6 +206,30 @@ try {
         Assert-Condition ($resolution.status -eq 'partial' -and $resolution.selected_tools.Count -eq 1) 'Le plan ne sélectionne pas seulement les outils disponibles.'
         Assert-Condition ($resolution.selected_tools[0].command -eq 'ruff' -and $resolution.selected_tools[0].capabilities.Count -eq 2) 'L''outil partagé n''est pas dédupliqué avec ses capacités.'
         Assert-Condition ($resolution.unresolved_capabilities.Count -eq 2) 'Les capacités partielles/indisponibles ne sont pas restituées.'
+        Assert-Condition ($resolution.metrics.selected_commands -eq 1 -and $resolution.metrics.reused_assignments -eq 1 -and $resolution.metrics.required_capabilities -eq 3) 'Compteurs de resolution incoherents.'
+        Assert-Condition ($resolution.metrics.duration_ms -ge 0) 'Duree de resolution invalide.'
+    }
+    Invoke-TestCase 'Resolver alternatives explicites et priorite du profil' {
+        $primary = [pscustomobject]@{ name = 'primary'; command = 'primary'; status = 'not_installed'; source = $null }
+        $fallback = [pscustomobject]@{ name = 'fallback'; command = 'fallback'; status = 'available'; source = 'fixture/fallback.exe' }
+        $capability = [pscustomobject]@{ name = 'security'; required = $true; selection_policy = 'alternative'; availability = 'partially_available'; candidate_tools = @($primary, $fallback); reasons = @('Alternative disponible') }
+        $matrix = @([pscustomobject]@{ technology = 'fixture'; technology_status = 'detected'; platform = Get-ExecutionPlatform; capabilities = @($capability); reasons = @() })
+        $resolution = @(Resolve-CapabilityTool -CapabilityMatrix $matrix)[0]
+        Assert-Condition ($resolution.status -eq 'ready' -and $resolution.selected_tools.Count -eq 1 -and $resolution.selected_tools[0].command -eq 'fallback' -and $resolution.unresolved_capabilities.Count -eq 0) 'Alternative disponible non resolue.'
+        $primary.status = 'available'
+        $primary.source = 'fixture/primary.exe'
+        $resolution = @(Resolve-CapabilityTool -CapabilityMatrix $matrix)[0]
+        Assert-Condition ($resolution.selected_tools.Count -eq 1 -and $resolution.selected_tools[0].command -eq 'primary') 'Priorite du profil ignoree.'
+        Write-Fixture '.tools/bin/trivy.exe' 'fixture-presence'
+        $discoveries = @([pscustomobject]@{ technology = 'kubernetes'; status = 'detected'; ambiguities = @() })
+        $computed = @(Get-CapabilityMatrix -Discoveries $discoveries)[0]
+        $security = $computed.capabilities | Where-Object name -eq 'security'
+        Assert-Condition ($security.selection_policy -eq 'alternative' -and $security.availability -eq 'available') 'Une alternative disponible est encore declaree partielle dans la matrice.'
+    }
+    Invoke-TestCase 'Presence Ansible ne signifie pas execution native Windows' {
+        Write-Fixture '.venv/Scripts/ansible-lint.exe' 'fixture-presence'
+        $tool = Resolve-CandidateTool -Name 'ansible-lint' -Command 'ansible-lint'
+        Assert-Condition ($tool.status -eq 'incompatible' -and $tool.reason -match 'Windows') 'Un lanceur present a qualifie a tort un controleur Windows.'
     }
     Invoke-TestCase 'Tool Resolver ne sélectionne pas une technologie ambiguë' {
         $matrix = @([pscustomobject]@{

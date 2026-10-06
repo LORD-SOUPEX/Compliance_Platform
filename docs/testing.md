@@ -2,6 +2,8 @@
 
 ## Cycle d'implementation courant
 
+Cycle Resolver: **44 PASS, 0 FAIL**. Les nouvelles regressions couvrent alternative de secours, priorite du profil quand plusieurs candidats sont disponibles, disponibilite alternative dans la matrice et incompatibilite native Ansible Windows malgre un lanceur present. Les compteurs de selection et reutilisation sont verifies dans le scenario Python complementaire.
+
 Cycle Discovery: **42 PASS, 0 FAIL**. Trois scenarios supplementaires couvrent le monorepo IaC mixte avec une racine non selectionnee, la lecture d'un YAML verrouille (JSON et rapport partiels, code 2, erreur dedupliquee), et l'erreur d'enumeration. Les scenarios precedents restent verts. Ces fixtures ne remplacent pas un corpus autorise de repositories reels.
 
 Cycle integrite: **39 PASS, 0 FAIL**. La nouvelle regression couvre un artefact intact, une alteration du runtime, une copie historique alteree bloquee avant execution, une empreinte absente et un schema d'index invalide. Les preuves cache ci-dessous decrivent le cycle precedent.
