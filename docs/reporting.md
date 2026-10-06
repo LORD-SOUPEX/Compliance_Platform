@@ -2,6 +2,8 @@
 
 Deux sorties JSON existent actuellement.
 
+Le module Compliance introduit aussi un Execution Plan autonome `schema_version: 1`, serialisable avec `ConvertTo-Json -Depth 12`. Le rapport Compliance et son verdict ne sont pas encore branches dans ce premier cycle de modele. Voir [compliance-engine.md](compliance-engine.md).
+
 ## DiscoveryOnly
 
 `-DiscoveryOnly` ecrit sur stdout un objet `schema_version: 1` contenant repository, technologies, project_roots, ambiguities, capability_matrix, tool_resolution, scan_complete et scan_errors. `-ReportPath` ecrit une copie sous `reports/` de la plateforme, ou au chemin absolu indique. Une erreur de parcours ou lecture ne supprime plus cet inventaire partiel.

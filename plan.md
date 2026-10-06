@@ -1196,15 +1196,19 @@ bootstrap ne termine pas; autres plateformes et dépendances runtime non couvert
 
 ## Phase 4: Compliance Engine
 
-Statut: **PHASE NON COMMENCÉE**.
+Statut: **PHASE EN COURS**.
 
-Le Quality Gate orchestre des contrôles fixes, mais aucun Compliance Engine
-autonome ne planifie et agrège un modèle générique de contrôles.
+La Phase 4 est autorisee sans attendre la fermeture des phases 1 a 3. Le module
+`src/Compliance.Engine.psm1` construit maintenant un plan autonome a partir des
+contrats Discovery, Matrix et Resolver. Le gate historique reste disponible.
 
 Objectif: transformer l'inventaire du consommateur et sa politique en plan
 d'exécution, résultats agrégés et décision explicable.
 
 - [ ] Séparer sélection, planification, exécution, agrégation et décision.
+- [x] Construire et serialiser un Execution Plan v1 avec identifiant, nom,
+  technologie, capacite, outil, racine, applicabilite, ordre, timeout et effets;
+  huit tests unitaires de contrat, des six statuts et des racines sont verts.
 - [ ] Définir dépendances, capacités, délais, permissions et effets de bord des
   contrôles.
 - [ ] Normaliser les statuts et preuves, y compris les erreurs techniques et les

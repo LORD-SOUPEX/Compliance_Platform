@@ -7,7 +7,7 @@ Synthèse de [la roadmap existante dans plan.md](../plan.md#roadmap), mise à jo
 | Stabilisation du socle | PHASE EN COURS | 44 tests reussis; cache repare, Markdownlint et Quick passent. Full reste bloque par les dependances; poste neuf non qualifie. |
 | Discovery Engine | PHASE EN COURS | Racines IaC mixtes et diagnostics de scan partiel testes; corpus reel, overrides et autres layouts complexes restent ouverts. |
 | Tool Bootstrap & Tool Resolver | PHASE EN COURS | Bootstrap termine, integrite des binaires indexes, alternatives et compteurs testes; paquets/modules, provenance et qualification produit restent ouverts. |
-| Compliance Engine | PHASE NON COMMENCÉE | L'orchestration reste dans le Quality Gate monolithique. |
+| Compliance Engine | PHASE EN COURS | Plan autonome v1 et huit tests unitaires livres; execution, aggregation et verdict en cours d'integration. |
 | Control Catalog | PHASE NON COMMENCÉE | Profils capacités/outils codés dans PowerShell; pas de catalogue indépendant. |
 | Reporting Engine | PHASE NON COMMENCÉE | JSON Discovery et Quality Gate présents, sans contrat commun ni composant dédié. |
 | Policy Engine | PHASE NON COMMENCÉE | YAML descriptif, non autoritaire à l'exécution. |
@@ -22,6 +22,6 @@ Les résultats détaillés et leur provenance sont centralisés dans [testing.md
 
 `PHASE TERMINÉE`: aucune phase complète, car aucun ensemble de critères de sortie n'est entièrement démontré. Cela ne remet pas en cause les fonctionnalités livrées: CLI Discovery externe, JSON v1, preuves/racines/ambiguïtés, matrice calculée, resolver descriptif et index runtime multiversion sont implémentés et testés.
 
-Les phases 1 a 3 restent `PHASE EN COURS`: vulnerabilites, reproductibilite poste neuf/runner, qualification Discovery sur corpus et runtime multi-plateforme restent ouverts. Le cache pre-commit est repare et Quick passe. Les phases 4 a 8 et Policy Engine restent `PHASE NON COMMENCÉE` au sens de composants autonomes livres.
+Les phases 1 a 3 restent `PHASE EN COURS`, sans bloquer le developpement autorise de la Phase 4. Compliance Engine est maintenant `PHASE EN COURS`. Les phases 5 a 8 et Policy Engine restent `PHASE NON COMMENCÉE` au sens de composants autonomes livres.
 
 Le partage sans écriture dans les dépôts consommateurs, l'exécution pilotée par le resolver, les alternatives de capacités et la neutralité des futurs adaptateurs ne sont pas encore démontrés. Les tâches détaillées sont maintenues uniquement dans [plan.md](../plan.md).
