@@ -28,6 +28,7 @@ $script:Results = New-Object System.Collections.Generic.List[object]
 $script:RunFull = $Mode -in @('Full', 'Ci')
 $script:StartedAt = Get-Date
 $script:Files = @()
+$script:ScanErrors = New-Object System.Collections.Generic.List[object]
 $script:Technologies = $null
 $script:ProcessTimeoutSeconds = $TimeoutSeconds
 if ($NoColor) { $env:NO_COLOR = '1' }
@@ -49,13 +50,39 @@ function Test-Category {
     return ($script:Category -eq 'All' -or $script:Category -eq $Name)
 }
 
+function Add-ScanError {
+    param([string]$Path, [string]$Operation, [Exception]$Exception)
+    $relativePath = Get-RepositoryRelativePath -Path $Path -RepositoryRoot $repoRoot
+    if (@($script:ScanErrors | Where-Object { $_.path -eq $relativePath -and $_.operation -eq $Operation }).Count -eq 0) {
+        $script:ScanErrors.Add([pscustomobject]@{
+            path = $relativePath
+            operation = $Operation
+            error_type = $Exception.GetType().Name
+            message = $Exception.Message.Replace($repoRoot, '<repository>')
+        })
+    }
+}
+
+function Get-DiscoveryFileContent {
+    param([System.IO.FileInfo]$File)
+    try { return [IO.File]::ReadAllText($File.FullName, [Text.Encoding]::UTF8) }
+    catch { Add-ScanError -Path $File.FullName -Operation 'read' -Exception $_.Exception }
+}
+
 function Get-ProjectFile {
     param([string]$Root = $repoRoot)
+    $script:ScanErrors = New-Object System.Collections.Generic.List[object]
     $excluded = @('.git', '.venv', '.tools', 'reports', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.cache', '.terraform', '.terragrunt-cache')
     $pending = New-Object System.Collections.Generic.Stack[string]
     $pending.Push($Root)
     while ($pending.Count -gt 0) {
-        foreach ($item in Get-ChildItem -LiteralPath $pending.Pop() -Force) {
+        $directory = $pending.Pop()
+        try { $items = @(Get-ChildItem -LiteralPath $directory -Force -ErrorAction Stop) }
+        catch {
+            Add-ScanError -Path $directory -Operation 'enumerate' -Exception $_.Exception
+            continue
+        }
+        foreach ($item in $items) {
             if ($item.PSIsContainer) {
                 if ($item.Name -notin $excluded -and -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $pending.Push($item.FullName) }
             } else { $item }
@@ -219,18 +246,19 @@ function Get-Technology {
     $terraformVersion = @($files | Where-Object Name -eq '.terraform-version')
     $opentofuMarkers = @($files | Where-Object Name -In @('.opentofu-version', '.tofurc'))
     foreach ($file in $opentofuFiles + $opentofuMarkers) { Add-TechnologyEvidence -State $states.opentofu -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $file.DirectoryName }
-    if ($terraformFiles.Count -gt 0 -and $opentofuFiles.Count -eq 0 -and $opentofuMarkers.Count -eq 0 -and $terraformVersion.Count -eq 0) {
-        foreach ($file in $terraformFiles) {
-            $ambiguity = 'Les fichiers .tf sont compatibles avec Terraform et OpenTofu; aucun marqueur de sélection explicite.'
-            Add-TechnologyEvidence -State $states.terraform -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $file.DirectoryName -Status ambiguous -Ambiguity $ambiguity
-            Add-TechnologyEvidence -State $states.opentofu -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $file.DirectoryName -Status ambiguous -Ambiguity $ambiguity
-        }
-    } elseif ($terraformFiles.Count -gt 0 -and $opentofuFiles.Count -eq 0 -and $opentofuMarkers.Count -eq 0) {
-        foreach ($file in $terraformFiles + $terraformVersion) { Add-TechnologyEvidence -State $states.terraform -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $file.DirectoryName }
-    } elseif ($terraformFiles.Count -gt 0 -and ($opentofuFiles.Count -gt 0 -or $opentofuMarkers.Count -gt 0)) {
-        foreach ($file in $terraformFiles) {
-            $ambiguity = 'Le dépôt contient des marqueurs OpenTofu et des fichiers .tf; la portée des fichiers partagés reste à confirmer.'
-            Add-TechnologyEvidence -State $states.terraform -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $file.DirectoryName -Status ambiguous -Ambiguity $ambiguity
+    foreach ($file in $terraformFiles) {
+        $projectRoot = Get-NearestProjectRoot -File $file -RepositoryRoot $RepositoryRoot -Markers @('.terraform-version', '.opentofu-version', '.tofurc')
+        $hasTerraform = Test-Path -LiteralPath (Join-Path $projectRoot '.terraform-version') -PathType Leaf
+        $hasOpenTofu = (Test-Path -LiteralPath (Join-Path $projectRoot '.opentofu-version') -PathType Leaf) -or (Test-Path -LiteralPath (Join-Path $projectRoot '.tofurc') -PathType Leaf)
+        if ($hasTerraform -and -not $hasOpenTofu) {
+            Add-TechnologyEvidence -State $states.terraform -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $projectRoot
+            foreach ($marker in @($terraformVersion | Where-Object DirectoryName -eq $projectRoot)) { Add-TechnologyEvidence -State $states.terraform -File $marker -RepositoryRoot $RepositoryRoot -ProjectRoot $projectRoot }
+        } elseif ($hasOpenTofu -and -not $hasTerraform) {
+            Add-TechnologyEvidence -State $states.opentofu -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $projectRoot
+        } else {
+            $ambiguity = if ($hasTerraform -and $hasOpenTofu) { 'Marqueurs Terraform et OpenTofu contradictoires dans la meme racine.' } else { 'Fichiers .tf sans marqueur de selection dans leur racine.' }
+            Add-TechnologyEvidence -State $states.terraform -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $projectRoot -Status ambiguous -Ambiguity $ambiguity
+            Add-TechnologyEvidence -State $states.opentofu -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $projectRoot -Status ambiguous -Ambiguity $ambiguity
         }
     }
 
@@ -261,7 +289,7 @@ function Get-Technology {
     }
     if ($states.ansible.status -eq 'absent') {
         foreach ($file in $yamlFiles) {
-            $content = [System.IO.File]::ReadAllText($file.FullName, [System.Text.Encoding]::UTF8)
+            $content = Get-DiscoveryFileContent -File $file
             if ($content -match '(?m)^\s*(?:-\s*)?hosts\s*:') {
                 $ambiguity = 'La clé hosts: dans un YAML est un signal faible; le fichier peut être un playbook Ansible ou un YAML générique.'
                 Add-TechnologyEvidence -State $states.ansible -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $file.DirectoryName -Status ambiguous -Ambiguity $ambiguity
@@ -271,7 +299,7 @@ function Get-Technology {
 
     $kubernetesKinds = 'Pod|Deployment|StatefulSet|DaemonSet|ReplicaSet|Job|CronJob|Service|ConfigMap|Secret|Ingress|PersistentVolume|PersistentVolumeClaim|Namespace|ServiceAccount|Role|RoleBinding|ClusterRole|ClusterRoleBinding|CustomResourceDefinition'
     foreach ($file in $yamlFiles) {
-        $content = [System.IO.File]::ReadAllText($file.FullName, [System.Text.Encoding]::UTF8)
+        $content = Get-DiscoveryFileContent -File $file
         if ($content -match '(?m)^\s*apiVersion\s*:\s*\S+' -and $content -match "(?m)^\s*kind\s*:\s*($kubernetesKinds)\s*(?:#.*)?$") {
             $status = if ($content -match '\{\{') { 'ambiguous' } else { 'detected' }
             $ambiguity = if ($status -eq 'ambiguous') { "Le YAML contient des marqueurs de template Helm; la ressource rendue n'est pas confirmée." } else { $null }
@@ -287,7 +315,7 @@ function Get-Technology {
     $technologyResults = @($states.Values | ForEach-Object {
         [pscustomobject]@{
             technology = $_.technology
-            status = $_.status
+            status = if ($_.ambiguities.Count -gt 0) { 'ambiguous' } else { $_.status }
             evidence = @($_.evidence.ToArray())
             roots = @($_.roots.ToArray())
             ambiguities = @($_.ambiguities.ToArray())
@@ -313,8 +341,8 @@ function Get-Technology {
         powershell_files = $powerShellFiles
         shell = ($shellFiles.Count -gt 0)
         shell_files = $shellFiles
-        terraform = ($terraformFiles.Count -gt 0 -and $states.terraform.status -eq 'detected')
-        terraform_ambiguous = ($states.terraform.status -eq 'ambiguous')
+        terraform = ($terraformFiles.Count -gt 0 -and $states.terraform.status -eq 'detected' -and $states.terraform.ambiguities.Count -eq 0)
+        terraform_ambiguous = ($states.terraform.ambiguities.Count -gt 0)
         terraform_files = $terraformFiles
         terragrunt = ($terragruntFiles.Count -gt 0)
         hcl_files = $hclFiles
@@ -328,6 +356,8 @@ function Get-Technology {
         ambiguities = $ambiguities
         capability_matrix = $capabilityMatrix
         tool_resolution = $toolResolution
+        scan_complete = ($script:ScanErrors.Count -eq 0)
+        scan_errors = @($script:ScanErrors.ToArray())
     }
 }
 
@@ -878,7 +908,7 @@ function Invoke-FixMode {
 
 try {
     Push-Location $repoRoot
-    $script:Files = Get-ProjectFile -Root $repoRoot
+    $script:Files = @(Get-ProjectFile -Root $repoRoot)
     $script:Technologies = Get-Technology -RepositoryRoot $repoRoot
     if ($DiscoveryOnly) {
         $discoveryResult = [pscustomobject]@{
@@ -889,6 +919,8 @@ try {
             ambiguities = $script:Technologies.ambiguities
             capability_matrix = $script:Technologies.capability_matrix
             tool_resolution = $script:Technologies.tool_resolution
+            scan_complete = $script:Technologies.scan_complete
+            scan_errors = $script:Technologies.scan_errors
         }
         $discoveryJson = $discoveryResult | ConvertTo-Json -Depth 12
         if ($ReportPath) {
@@ -898,9 +930,11 @@ try {
             Set-Content -LiteralPath $discoveryReportPath -Value $discoveryJson -Encoding UTF8
         }
         Write-Output $discoveryJson
+        if (-not $script:Technologies.scan_complete) { exit 2 }
         exit 0
     }
     Write-Information -InformationAction Continue '[INFO] Détection des technologies du dépôt.'
+    if (-not $script:Technologies.scan_complete) { Add-Check ERROR 'Discovery' 'Scan incomplet; consulter scan_errors dans le rapport.' }
     foreach ($detection in $script:Technologies.discoveries) {
         if ($detection.status -eq 'detected') { Write-Information -InformationAction Continue "[INFO] Technologie détectée : $($detection.technology)." }
         elseif ($detection.status -eq 'ambiguous') { Write-Information -InformationAction Continue "[WARN] Technologie ambiguë : $($detection.technology)." }

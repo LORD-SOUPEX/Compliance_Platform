@@ -93,6 +93,40 @@ try {
         Invoke-TerraformCheck
         Assert-Condition ($script:Counts.WARN -eq 1 -and $script:Results[0].nom -eq 'Terraform/OpenTofu') 'Un outil Terraform a été lancé malgré l''ambiguïté.'
     }
+    Invoke-TestCase 'Monorepo Terraform et OpenTofu resolus par racine' {
+        Write-Fixture 'terraform/.terraform-version' "1.15.8`n"
+        Write-Fixture 'terraform/modules/app/main.tf' "terraform {}`n"
+        Write-Fixture 'tofu/.opentofu-version' "1.10.0`n"
+        Write-Fixture 'tofu/main.tf' "terraform {}`n"
+        Update-Detection
+        $terraform = $script:Technologies.discoveries | Where-Object technology -eq 'terraform'
+        $opentofu = $script:Technologies.discoveries | Where-Object technology -eq 'opentofu'
+        Assert-Condition ($terraform.status -eq 'detected' -and $terraform.roots -contains 'terraform' -and $terraform.evidence -contains 'terraform/modules/app/main.tf') 'Racine Terraform non resolue.'
+        Assert-Condition ($opentofu.status -eq 'detected' -and $opentofu.roots -contains 'tofu' -and $opentofu.evidence -contains 'tofu/main.tf') 'Les marqueurs OpenTofu contaminent un autre projet.'
+        Write-Fixture 'unselected/main.tf' "terraform {}`n"
+        Update-Detection
+        Assert-Condition ($script:Technologies.terraform_ambiguous -and -not $script:Technologies.terraform) 'Une racine non resolue autorise les controles sur tout le depot.'
+        Assert-Condition (($script:Technologies.discoveries | Where-Object technology -eq 'terraform').status -eq 'ambiguous') 'Ambiguite partielle masquee par une autre racine detectee.'
+    }
+    Invoke-TestCase 'Discovery conserve un rapport de lecture incomplete' {
+        Write-Fixture 'deployment.yaml' "apiVersion: v1`nkind: Pod`n"
+        $reportPath = Join-Path $repoRoot 'reports/discovery.json'
+        $lockedFile = [IO.File]::Open((Join-Path $repoRoot 'deployment.yaml'), [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        try {
+            $output = & powershell -NoProfile -ExecutionPolicy Bypass -File $gatePath -RepositoryPath $repoRoot -DiscoveryOnly -ReportPath $reportPath -NoColor
+            $exitCode = $LASTEXITCODE
+            $result = ($output -join "`n") | ConvertFrom-Json
+            Assert-Condition ($exitCode -eq 2 -and -not $result.scan_complete -and $result.scan_errors.Count -eq 1) 'Erreur de lecture masquee ou dupliquee.'
+            Assert-Condition ($result.scan_errors[0].path -eq 'deployment.yaml' -and $result.scan_errors[0].operation -eq 'read') 'Diagnostic de lecture non localise.'
+            Assert-Condition ((Test-Path $reportPath) -and $result.technologies.Count -gt 0) 'Rapport diagnostique non conserve.'
+        } finally { $lockedFile.Dispose() }
+        Update-Detection
+        Assert-Condition $script:Technologies.scan_complete 'Une erreur ancienne persiste dans un nouveau scan.'
+    }
+    Invoke-TestCase 'Discovery restitue les erreurs de parcours' {
+        $files = @(Get-ProjectFile -Root (Join-Path $repoRoot 'missing-directory'))
+        Assert-Condition ($files.Count -eq 0 -and $script:ScanErrors.Count -eq 1 -and $script:ScanErrors[0].operation -eq 'enumerate') 'Erreur de parcours non restituee.'
+    }
     Invoke-TestCase 'Terragrunt sans Terraform' {
         Write-Fixture 'terragrunt.hcl' "locals {}`n"
         Update-Detection

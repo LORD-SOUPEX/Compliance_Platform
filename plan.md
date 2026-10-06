@@ -71,6 +71,11 @@ resolution et avant execution, y compris les copies `.tools/bin`. L'empreinte
 absente/invalide, l'alteration et le schema d'index invalide sont refuses. La
 suite compte 39 tests reussis; paquets Python et modules hors index restent ouverts.
 
+Le cycle Discovery porte la suite a 42 tests reussis: marqueurs IaC recherches
+par racine, monorepo Terraform/OpenTofu mixte, ambiguite partielle conservative,
+erreurs de parcours et lecture restituees. `DiscoveryOnly` expose `scan_complete`
+et `scan_errors` et conserve le JSON sur scan incomplet avec code 2.
+
 ## Principes proposés
 
 - Séparer la présence d'une technologie, la disponibilité de ses outils et la
@@ -1121,8 +1126,12 @@ explicable, sans annoncer comme supportées des technologies non qualifiées.
 - [ ] Étendre la résolution des racines et qualifier les heuristiques sur monorepos,
   layouts mixtes et projets imbriqués, notamment Terraform/OpenTofu par racine.
 - [ ] Ajouter une stratégie d'override déclaratif et d'exclusion explicable.
-- [ ] Restituer les limites et erreurs d'accès d'un scan incomplet sans perdre
-  l'inventaire et le rapport diagnostique.
+- [x] Restituer les erreurs de parcours et lecture dans `scan_errors`, conserver
+  l'inventaire et le rapport DiscoveryOnly et retourner code 2 sur scan incomplet;
+  regression de fichier verrouille et remise a zero entre scans validees.
+- [x] Resoudre les marqueurs Terraform/OpenTofu au plus proche des fichiers `.tf`,
+  sans contamination entre racines; bloquer conservativement les controles globaux
+  lorsqu'une racine reste ambigue. Corpus reel et autres layouts restent ouverts.
 
 Réutilisation: inventaire et cas de détection actuels.
 

@@ -2,6 +2,8 @@
 
 ## Cycle d'implementation courant
 
+Cycle Discovery: **42 PASS, 0 FAIL**. Trois scenarios supplementaires couvrent le monorepo IaC mixte avec une racine non selectionnee, la lecture d'un YAML verrouille (JSON et rapport partiels, code 2, erreur dedupliquee), et l'erreur d'enumeration. Les scenarios precedents restent verts. Ces fixtures ne remplacent pas un corpus autorise de repositories reels.
+
 Cycle integrite: **39 PASS, 0 FAIL**. La nouvelle regression couvre un artefact intact, une alteration du runtime, une copie historique alteree bloquee avant execution, une empreinte absente et un schema d'index invalide. Les preuves cache ci-dessous decrivent le cycle precedent.
 
 Le 6 octobre 2026, la regression du cache pre-commit deplace porte la suite a **38 PASS, 0 FAIL**. Bootstrap complet: code 0, hooks reconstruits et marqueur runtime `windows-x64: qualified`. Quick: **10 PASS, 0 FAIL, 1 WARN, 6 SKIP, 0 ERROR**, code 0, Markdownlint execute et reussi. Aucune regle ni aucun controle n'a ete retire. Les resultats de l'audit documentaire ci-dessous restent des preuves historiques.
