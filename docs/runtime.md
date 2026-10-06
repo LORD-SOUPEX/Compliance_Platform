@@ -16,7 +16,7 @@ Apres correction du cache deplace et execution complete du bootstrap le 6 octobr
 
 L'index conserve pour chaque outil son nom, commande, version, chemin relatif, empreinte SHA-256, état et indicateur actif. Le resolver refuse un outil runtime quand la plateforme ou l'outil n'est pas `qualified`, vérifie que le chemin reste sous la racine du runtime et que le fichier existe.
 
-Il ne recalcule pas l'empreinte à la résolution et ne réexécute pas la commande de version. Les contrôles historiques utilisent encore `.tools/bin`, même quand le resolver refuse l'entrée indexée. Le statut `experimental` n'empêche donc pas ces contrôles de s'exécuter.
+Il recalcule maintenant SHA-256 a la resolution; une empreinte absente/invalide ou differente produit `integrity_error`. L'executeur verifie aussi les binaires sous `.tools/runtime` et leurs copies `.tools/bin` avant demarrage, et refuse index absent/invalide, plateforme non qualifiee ou outil non actif. Les outils hors de ces emplacements restent hors de cette garantie. La commande de version n'est pas encore reexecutee a chaque resolution.
 
 ## Outils hors index
 

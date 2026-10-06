@@ -66,6 +66,11 @@ pip-audit echoue. Checkov 3.3.25 publie conserve les contraintes asteval 1.0.6
 et ecdsa >=0.19.0,<1.0.0; ecdsa 0.19.2 reste la derniere version publiee
 observee. Une mise a jour simple ne satisfait donc pas Full sans masquer le risque.
 
+Le cycle integrite ajoute la verification SHA-256 des binaires indexes a la
+resolution et avant execution, y compris les copies `.tools/bin`. L'empreinte
+absente/invalide, l'alteration et le schema d'index invalide sont refuses. La
+suite compte 39 tests reussis; paquets Python et modules hors index restent ouverts.
+
 ## Principes proposés
 
 - Séparer la présence d'une technologie, la disponibilité de ses outils et la
@@ -1155,8 +1160,11 @@ les capacités et outils réellement nécessaires à chaque repository analysé.
 - [ ] Qualifier les binaires Windows ARM64, Linux x64/ARM64 et macOS x64/ARM64.
 - [x] Vérifier les sommes des téléchargements binaires, comparer la copie runtime
   à sa source et interrompre le bootstrap sur erreur d'installation.
-- [ ] Compléter la provenance des binaires réutilisés et revérifier leur intégrité
-  à l'usage; qualifier modules/paquets et garanties de gestion d'échec par artefact.
+- [ ] Completer la provenance des binaires reutilises et qualifier l'integrite
+  des modules/paquets et les garanties de gestion d'echec par artefact.
+- [x] Recalculer SHA-256 a la resolution et avant execution des binaires indexes,
+  y compris les copies historiques; refuser empreinte absente, alteration,
+  plateforme non qualifiee et schema invalide, avec regression negative.
 - [ ] Distinguer présence de commande et exécution réellement supportée, résoudre
   les alternatives et les divergences Doctor/bootstrap sur Python et Terragrunt.
 - [ ] Mesurer le coût de résolution et l'absence d'outils inutiles sur des fixtures.

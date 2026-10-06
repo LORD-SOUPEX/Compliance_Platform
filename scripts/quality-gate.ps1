@@ -1,0 +1,964 @@
+﻿[CmdletBinding()]
+param(
+    [ValidateSet('Quick', 'Full', 'Ci', 'Fix')][string]$Mode = 'Quick',
+    [ValidateSet('Generic', 'Documentation', 'Security', 'Python', 'PowerShell', 'Ansible', 'Terraform', 'Terragrunt', 'Container', 'Shell', 'Tests', 'All')][string]$Category = 'All',
+    [string]$ReportPath,
+    [string]$RepositoryPath,
+    [switch]$DiscoveryOnly,
+    [switch]$NoColor,
+    [ValidateRange(1, 3600)][int]$TimeoutSeconds = 300
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$platformRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+if ([string]::IsNullOrWhiteSpace($RepositoryPath)) {
+    $repoRoot = $platformRoot
+} else {
+    $repositoryItem = Get-Item -LiteralPath $RepositoryPath -ErrorAction Stop
+    if (-not $repositoryItem.PSIsContainer) { throw "Le repository doit être un dossier : $RepositoryPath" }
+    $repoRoot = $repositoryItem.FullName
+}
+$python = Join-Path $platformRoot '.venv\Scripts\python.exe'
+$toolRoot = Join-Path $platformRoot '.tools\bin'
+$script:RequestedMode = $Mode
+$script:Category = $Category
+$script:Counts = @{ PASS = 0; FAIL = 0; WARN = 0; SKIP = 0; ERROR = 0 }
+$script:Results = New-Object System.Collections.Generic.List[object]
+$script:RunFull = $Mode -in @('Full', 'Ci')
+$script:StartedAt = Get-Date
+$script:Files = @()
+$script:Technologies = $null
+$script:ProcessTimeoutSeconds = $TimeoutSeconds
+if ($NoColor) { $env:NO_COLOR = '1' }
+
+function Add-Check {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('PASS', 'FAIL', 'WARN', 'SKIP', 'ERROR')][string]$Status,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Message,
+        [long]$DurationMs = 0
+    )
+    $script:Counts[$Status]++
+    $script:Results.Add([pscustomobject]@{ nom = $Name; statut = $Status; message = $Message; duree_ms = $DurationMs })
+    Write-Information -InformationAction Continue "[$Status] $Message"
+}
+
+function Test-Category {
+    param([string]$Name)
+    return ($script:Category -eq 'All' -or $script:Category -eq $Name)
+}
+
+function Get-ProjectFile {
+    param([string]$Root = $repoRoot)
+    $excluded = @('.git', '.venv', '.tools', 'reports', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.cache', '.terraform', '.terragrunt-cache')
+    $pending = New-Object System.Collections.Generic.Stack[string]
+    $pending.Push($Root)
+    while ($pending.Count -gt 0) {
+        foreach ($item in Get-ChildItem -LiteralPath $pending.Pop() -Force) {
+            if ($item.PSIsContainer) {
+                if ($item.Name -notin $excluded -and -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $pending.Push($item.FullName) }
+            } else { $item }
+        }
+    }
+}
+
+function Invoke-External {
+    param(
+        [string]$Name,
+        [string]$Executable,
+        [string[]]$Arguments = @(),
+        [switch]$Required,
+        [switch]$Optional
+    )
+    $resolved = if (Test-Path $Executable -PathType Leaf) { $Executable } else {
+        $command = Get-Command $Executable -ErrorAction SilentlyContinue
+        if ($command) { $command.Source } else { $null }
+    }
+    if (-not $resolved) {
+        $status = if ($Optional) { 'WARN' } elseif ($Required) { 'ERROR' } else { 'SKIP' }
+        Add-Check $status $Name "Outil absent : $Executable"
+        return $false
+    }
+    $integrityError = Get-ExecutionIntegrityError -ArtifactPath $resolved
+    if ($integrityError) {
+        Add-Check ERROR $Name $integrityError
+        return $false
+    }
+    $timer = [System.Diagnostics.Stopwatch]::StartNew()
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo.FileName = $resolved
+    $process.StartInfo.WorkingDirectory = $repoRoot
+    $process.StartInfo.UseShellExecute = $false
+    $process.StartInfo.CreateNoWindow = $true
+    $process.StartInfo.RedirectStandardOutput = $true
+    $process.StartInfo.RedirectStandardError = $true
+    $process.StartInfo.Arguments = ($Arguments | ForEach-Object {
+        '"' + ([regex]::Replace([regex]::Replace($_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1')) + '"'
+    }) -join ' '
+    try {
+        $null = $process.Start()
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($script:ProcessTimeoutSeconds * 1000)) {
+            & taskkill /PID $process.Id /T /F | Out-Null
+            Add-Check ERROR $Name "Délai dépassé : $script:ProcessTimeoutSeconds secondes." $timer.ElapsedMilliseconds
+            return $false
+        }
+        $process.WaitForExit()
+        if ($stdout.Result) { Write-Information -InformationAction Continue $stdout.Result.TrimEnd() }
+        if ($stderr.Result) { Write-Information -InformationAction Continue $stderr.Result.TrimEnd() }
+        $exitCode = $process.ExitCode
+    } finally { $process.Dispose(); $timer.Stop() }
+    if ($exitCode -eq 0) {
+        Add-Check PASS $Name "Contrôle réussi : $Name." $timer.ElapsedMilliseconds
+        return $true
+    }
+    Add-Check FAIL $Name "Échec de $Name (code $exitCode)." $timer.ElapsedMilliseconds
+    return $false
+}
+
+function Invoke-PythonTool {
+    param([string]$Name, [string[]]$Arguments)
+    if (-not (Test-Path $python -PathType Leaf)) {
+        Add-Check ERROR $Name 'Python local absent; exécutez scripts/bootstrap.ps1.'
+        return $false
+    }
+    return Invoke-External -Name $Name -Executable $python -Arguments (@('-m') + $Arguments) -Required
+}
+
+function Get-RepositoryRelativePath {
+    param([string]$Path, [string]$RepositoryRoot)
+    $rootPrefix = $RepositoryRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    if ($Path.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        return $Path.Substring($rootPrefix.Length).Replace('\', '/')
+    }
+    return '.'
+}
+
+function ConvertTo-TechnologyRecord {
+    param([string]$Name)
+    return [pscustomobject]@{
+        technology = $Name
+        status = 'absent'
+        evidence = New-Object System.Collections.Generic.List[string]
+        roots = New-Object System.Collections.Generic.List[string]
+        ambiguities = New-Object System.Collections.Generic.List[string]
+    }
+}
+
+function Add-TechnologyEvidence {
+    param(
+        [pscustomobject]$State,
+        [System.IO.FileInfo]$File,
+        [string]$RepositoryRoot,
+        [string]$ProjectRoot,
+        [ValidateSet('detected', 'ambiguous')][string]$Status = 'detected',
+        [string]$Ambiguity
+    )
+    $relativeFile = Get-RepositoryRelativePath -Path $File.FullName -RepositoryRoot $RepositoryRoot
+    $relativeRoot = if ($ProjectRoot -eq $RepositoryRoot) { '.' } else { Get-RepositoryRelativePath -Path $ProjectRoot -RepositoryRoot $RepositoryRoot }
+    if (-not $State.evidence.Contains($relativeFile)) { $State.evidence.Add($relativeFile) }
+    if (-not $State.roots.Contains($relativeRoot)) { $State.roots.Add($relativeRoot) }
+    if ($Status -eq 'detected') { $State.status = 'detected' }
+    elseif ($State.status -eq 'absent') { $State.status = 'ambiguous' }
+    if ($Ambiguity -and -not $State.ambiguities.Contains($Ambiguity)) { $State.ambiguities.Add($Ambiguity) }
+}
+
+function Get-NearestProjectRoot {
+    param([System.IO.FileInfo]$File, [string]$RepositoryRoot, [string[]]$Markers)
+    $directory = Get-Item -LiteralPath $File.DirectoryName
+    while ($directory -and $directory.FullName.StartsWith($RepositoryRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        foreach ($marker in $Markers) {
+            if (Test-Path -LiteralPath (Join-Path $directory.FullName $marker) -PathType Leaf) { return $directory.FullName }
+        }
+        if ($directory.FullName -eq $RepositoryRoot) { break }
+        $directory = $directory.Parent
+    }
+    return $File.DirectoryName
+}
+
+function Get-Technology {
+    param([string]$RepositoryRoot = $repoRoot)
+    $files = @($script:Files)
+    $pythonFiles = @($files | Where-Object Extension -eq '.py')
+    $sourcePython = @($pythonFiles | Where-Object FullName -NotMatch '[\\/]tests[\\/]')
+    $testPython = @($pythonFiles | Where-Object FullName -Match '[\\/]tests[\\/]')
+    $terraformFiles = @($files | Where-Object Extension -eq '.tf')
+    $opentofuFiles = @($files | Where-Object Extension -eq '.tofu')
+    $hclFiles = @($files | Where-Object { $_.Extension -eq '.hcl' -or $_.Name -match '^terragrunt\.hcl$' })
+    $powerShellFiles = @($files | Where-Object Extension -In @('.ps1', '.psm1', '.psd1'))
+    $shellFiles = @($files | Where-Object Extension -eq '.sh')
+    $containerFiles = @($files | Where-Object Name -Match '^(Dockerfile|Containerfile)(\..+)?$|^(docker-compose|compose)\.(yml|yaml)$')
+    $terragruntFiles = @($files | Where-Object Name -Match '^terragrunt(\.stack)?\.hcl$')
+    $markdownFiles = @($files | Where-Object Extension -eq '.md')
+    $javascriptFiles = @($files | Where-Object Extension -In @('.js', '.jsx', '.mjs', '.cjs'))
+    $typescriptFiles = @($files | Where-Object Extension -In @('.ts', '.tsx', '.mts', '.cts'))
+    $yamlFiles = @($files | Where-Object Extension -In @('.yml', '.yaml'))
+    $states = @{}
+    foreach ($name in @('terraform', 'opentofu', 'terragrunt', 'ansible', 'python', 'powershell', 'docker', 'kubernetes', 'helm', 'shell', 'javascript', 'typescript', 'markdown')) {
+        $states[$name] = ConvertTo-TechnologyRecord -Name $name
+    }
+
+    foreach ($file in $pythonFiles) {
+        $projectRoot = Get-NearestProjectRoot -File $file -RepositoryRoot $RepositoryRoot -Markers @('pyproject.toml', 'setup.py', 'setup.cfg', 'requirements.txt')
+        Add-TechnologyEvidence -State $states.python -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $projectRoot
+    }
+    foreach ($file in $powerShellFiles) { Add-TechnologyEvidence -State $states.powershell -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $file.DirectoryName }
+    foreach ($file in $shellFiles) { Add-TechnologyEvidence -State $states.shell -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $file.DirectoryName }
+    foreach ($file in $markdownFiles) { Add-TechnologyEvidence -State $states.markdown -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $RepositoryRoot }
+    foreach ($file in $javascriptFiles) {
+        $projectRoot = Get-NearestProjectRoot -File $file -RepositoryRoot $RepositoryRoot -Markers @('package.json')
+        Add-TechnologyEvidence -State $states.javascript -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $projectRoot
+    }
+    foreach ($file in $typescriptFiles) {
+        $projectRoot = Get-NearestProjectRoot -File $file -RepositoryRoot $RepositoryRoot -Markers @('tsconfig.json', 'package.json')
+        Add-TechnologyEvidence -State $states.typescript -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $projectRoot
+    }
+
+    $terraformVersion = @($files | Where-Object Name -eq '.terraform-version')
+    $opentofuMarkers = @($files | Where-Object Name -In @('.opentofu-version', '.tofurc'))
+    foreach ($file in $opentofuFiles + $opentofuMarkers) { Add-TechnologyEvidence -State $states.opentofu -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $file.DirectoryName }
+    if ($terraformFiles.Count -gt 0 -and $opentofuFiles.Count -eq 0 -and $opentofuMarkers.Count -eq 0 -and $terraformVersion.Count -eq 0) {
+        foreach ($file in $terraformFiles) {
+            $ambiguity = 'Les fichiers .tf sont compatibles avec Terraform et OpenTofu; aucun marqueur de sélection explicite.'
+            Add-TechnologyEvidence -State $states.terraform -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $file.DirectoryName -Status ambiguous -Ambiguity $ambiguity
+            Add-TechnologyEvidence -State $states.opentofu -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $file.DirectoryName -Status ambiguous -Ambiguity $ambiguity
+        }
+    } elseif ($terraformFiles.Count -gt 0 -and $opentofuFiles.Count -eq 0 -and $opentofuMarkers.Count -eq 0) {
+        foreach ($file in $terraformFiles + $terraformVersion) { Add-TechnologyEvidence -State $states.terraform -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $file.DirectoryName }
+    } elseif ($terraformFiles.Count -gt 0 -and ($opentofuFiles.Count -gt 0 -or $opentofuMarkers.Count -gt 0)) {
+        foreach ($file in $terraformFiles) {
+            $ambiguity = 'Le dépôt contient des marqueurs OpenTofu et des fichiers .tf; la portée des fichiers partagés reste à confirmer.'
+            Add-TechnologyEvidence -State $states.terraform -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $file.DirectoryName -Status ambiguous -Ambiguity $ambiguity
+        }
+    }
+
+    foreach ($file in $terragruntFiles) { Add-TechnologyEvidence -State $states.terragrunt -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $file.DirectoryName }
+    foreach ($file in $containerFiles) { Add-TechnologyEvidence -State $states.docker -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $file.DirectoryName }
+
+    $helmCharts = @($files | Where-Object Name -eq 'Chart.yaml')
+    foreach ($file in $helmCharts) { Add-TechnologyEvidence -State $states.helm -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $file.DirectoryName }
+
+    $ansibleEvidence = @($files | Where-Object {
+        $relative = Get-RepositoryRelativePath -Path $_.FullName -RepositoryRoot $RepositoryRoot
+        $relative -match '(^|/)(ansible\.cfg|galaxy\.yml)$|(^|/)meta/runtime\.yml$|(^|/)(roles|playbooks)/|(^|/)requirements\.yml$'
+    })
+    foreach ($file in $ansibleEvidence) {
+        $relativeFile = Get-RepositoryRelativePath -Path $file.FullName -RepositoryRoot $RepositoryRoot
+        $ansibleRoot = $file.DirectoryName
+        if ($relativeFile -match '(^|/)(ansible\.cfg|galaxy\.yml)$') { $ansibleRoot = $file.DirectoryName }
+        elseif ($relativeFile -match '^(?<root>.*?)(?:/)?(?:roles|playbooks)/') {
+            $rootRelative = $Matches.root.TrimEnd('/')
+            if ($rootRelative) { $ansibleRoot = Join-Path $RepositoryRoot $rootRelative.Replace('/', [IO.Path]::DirectorySeparatorChar) }
+            elseif ($relativeFile -match '^roles/([^/]+)/') { $ansibleRoot = Join-Path (Join-Path $RepositoryRoot 'roles') $Matches[1] }
+            else { $ansibleRoot = $RepositoryRoot }
+        } elseif ($relativeFile -match '^(?<root>.*?)(?:/)?meta/runtime\.yml$') {
+            $rootRelative = $Matches.root.TrimEnd('/')
+            $ansibleRoot = if ($rootRelative) { Join-Path $RepositoryRoot $rootRelative.Replace('/', [IO.Path]::DirectorySeparatorChar) } else { $RepositoryRoot }
+        }
+        Add-TechnologyEvidence -State $states.ansible -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $ansibleRoot
+    }
+    if ($states.ansible.status -eq 'absent') {
+        foreach ($file in $yamlFiles) {
+            $content = [System.IO.File]::ReadAllText($file.FullName, [System.Text.Encoding]::UTF8)
+            if ($content -match '(?m)^\s*(?:-\s*)?hosts\s*:') {
+                $ambiguity = 'La clé hosts: dans un YAML est un signal faible; le fichier peut être un playbook Ansible ou un YAML générique.'
+                Add-TechnologyEvidence -State $states.ansible -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $file.DirectoryName -Status ambiguous -Ambiguity $ambiguity
+            }
+        }
+    }
+
+    $kubernetesKinds = 'Pod|Deployment|StatefulSet|DaemonSet|ReplicaSet|Job|CronJob|Service|ConfigMap|Secret|Ingress|PersistentVolume|PersistentVolumeClaim|Namespace|ServiceAccount|Role|RoleBinding|ClusterRole|ClusterRoleBinding|CustomResourceDefinition'
+    foreach ($file in $yamlFiles) {
+        $content = [System.IO.File]::ReadAllText($file.FullName, [System.Text.Encoding]::UTF8)
+        if ($content -match '(?m)^\s*apiVersion\s*:\s*\S+' -and $content -match "(?m)^\s*kind\s*:\s*($kubernetesKinds)\s*(?:#.*)?$") {
+            $status = if ($content -match '\{\{') { 'ambiguous' } else { 'detected' }
+            $ambiguity = if ($status -eq 'ambiguous') { "Le YAML contient des marqueurs de template Helm; la ressource rendue n'est pas confirmée." } else { $null }
+            Add-TechnologyEvidence -State $states.kubernetes -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $file.DirectoryName -Status $status -Ambiguity $ambiguity
+        }
+    }
+
+    $packageFiles = @($files | Where-Object Name -eq 'package.json')
+    foreach ($file in $packageFiles) { Add-TechnologyEvidence -State $states.javascript -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $file.DirectoryName }
+    $tsconfigFiles = @($files | Where-Object Name -Match '^tsconfig(\..+)?\.json$')
+    foreach ($file in $tsconfigFiles) { Add-TechnologyEvidence -State $states.typescript -File $file -RepositoryRoot $RepositoryRoot -ProjectRoot $file.DirectoryName }
+
+    $technologyResults = @($states.Values | ForEach-Object {
+        [pscustomobject]@{
+            technology = $_.technology
+            status = $_.status
+            evidence = @($_.evidence.ToArray())
+            roots = @($_.roots.ToArray())
+            ambiguities = @($_.ambiguities.ToArray())
+        }
+    } | Sort-Object technology)
+    $projectRoots = @($technologyResults | ForEach-Object {
+        $technology = $_.technology
+        foreach ($root in $_.roots) { [pscustomobject]@{ technology = $technology; path = $root } }
+    })
+    $ambiguities = @($technologyResults | Where-Object { $_.ambiguities.Count -gt 0 } | ForEach-Object {
+        [pscustomobject]@{ technology = $_.technology; evidence = $_.evidence; roots = $_.roots; reasons = $_.ambiguities }
+    })
+    $capabilityMatrix = Get-CapabilityMatrix -Discoveries $technologyResults
+    $toolResolution = Resolve-CapabilityTool -CapabilityMatrix $capabilityMatrix
+
+    [pscustomobject]@{
+        repository_root = $RepositoryRoot
+        python = ($pythonFiles.Count -gt 0)
+        python_files = $pythonFiles
+        python_source = $sourcePython
+        python_tests = $testPython
+        powershell = ($powerShellFiles.Count -gt 0)
+        powershell_files = $powerShellFiles
+        shell = ($shellFiles.Count -gt 0)
+        shell_files = $shellFiles
+        terraform = ($terraformFiles.Count -gt 0 -and $states.terraform.status -eq 'detected')
+        terraform_ambiguous = ($states.terraform.status -eq 'ambiguous')
+        terraform_files = $terraformFiles
+        terragrunt = ($terragruntFiles.Count -gt 0)
+        hcl_files = $hclFiles
+        ansible = ($states.ansible.status -in @('detected', 'ambiguous'))
+        ansible_ambiguous = ($states.ansible.status -eq 'ambiguous')
+        containers = ($containerFiles.Count -gt 0)
+        container_files = $containerFiles
+        markdown = ($markdownFiles.Count -gt 0)
+        discoveries = $technologyResults
+        project_roots = $projectRoots
+        ambiguities = $ambiguities
+        capability_matrix = $capabilityMatrix
+        tool_resolution = $toolResolution
+    }
+}
+
+function Get-ExecutionPlatform {
+    $operatingSystem = 'unknown'
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { $operatingSystem = 'windows' }
+    elseif (Test-Path Env:OSTYPE) {
+        if ($env:OSTYPE -like 'darwin*') { $operatingSystem = 'macos' }
+        elseif ($env:OSTYPE -like 'linux*') { $operatingSystem = 'linux' }
+    }
+    $architectureValue = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+    $architecture = switch -Regex ($architectureValue) {
+        '^(AMD64|x86_64)$' { 'x64'; break }
+        '^(ARM64|aarch64)$' { 'arm64'; break }
+        '^(x86|i386)$' { 'x86'; break }
+        default { 'unknown' }
+    }
+    [pscustomobject]@{
+        os = $operatingSystem
+        architecture = $architecture
+        id = "$operatingSystem-$architecture"
+    }
+}
+
+function Get-ToolRuntimeIndex {
+    $runtimeRoot = Join-Path (Split-Path -Parent $toolRoot) 'runtime'
+    $indexPath = Join-Path $runtimeRoot 'index.json'
+    if (-not (Test-Path -LiteralPath $indexPath -PathType Leaf)) { return $null }
+    try {
+        $index = Get-Content -LiteralPath $indexPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+        if ($index.schema_version -ne 1 -or -not $index.platforms) { throw 'Schema index Tool Runtime non supporte.' }
+        return [pscustomobject]@{ root = $runtimeRoot; data = $index }
+    } catch {
+        return [pscustomobject]@{ root = $runtimeRoot; error = $_.Exception.Message; data = $null }
+    }
+}
+
+function Get-ArtifactIntegrityError {
+    param([string]$ArtifactPath, [pscustomobject]$Record)
+    $hashProperty = $Record.PSObject.Properties['sha256']
+    if (-not $hashProperty -or $hashProperty.Value -notmatch '^[a-fA-F0-9]{64}$') {
+        return 'Empreinte SHA-256 absente ou invalide dans l index Tool Runtime.'
+    }
+    try {
+        $actualHash = (Get-FileHash -LiteralPath $ArtifactPath -Algorithm SHA256 -ErrorAction Stop).Hash
+        if ($actualHash -ne $hashProperty.Value) { return 'Integrite Tool Runtime invalide: SHA-256 different de l index.' }
+    } catch { return "Verification d integrite impossible: $($_.Exception.Message)" }
+}
+
+function Get-ExecutionIntegrityError {
+    param([string]$ArtifactPath)
+    $artifactFullPath = [IO.Path]::GetFullPath($ArtifactPath)
+    $runtimeRoot = Join-Path (Split-Path -Parent $toolRoot) 'runtime'
+    $managed = $false
+    foreach ($directory in @($toolRoot, $runtimeRoot)) {
+        $prefix = [IO.Path]::GetFullPath($directory).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+        if ($artifactFullPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { $managed = $true }
+    }
+    if (-not $managed) { return }
+    $runtimeIndex = Get-ToolRuntimeIndex
+    if (-not $runtimeIndex) { return 'Index Tool Runtime absent pour cet outil gere.' }
+    if ($runtimeIndex.PSObject.Properties.Name -contains 'error') { return "Index Tool Runtime invalide: $($runtimeIndex.error)" }
+    $platform = Get-ExecutionPlatform
+    $platformRecord = $runtimeIndex.data.platforms.PSObject.Properties[$platform.id]
+    if (-not $platformRecord -or $platformRecord.Value.status -ne 'qualified') { return 'Plateforme Tool Runtime non qualifiee.' }
+    $runtimePrefix = [IO.Path]::GetFullPath($runtimeRoot).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    foreach ($record in @($platformRecord.Value.tools | Where-Object active)) {
+        if ([IO.Path]::IsPathRooted($record.path)) { return 'Chemin Tool Runtime non relatif.' }
+        $indexedPath = [IO.Path]::GetFullPath((Join-Path $runtimeRoot $record.path))
+        if (-not $indexedPath.StartsWith($runtimePrefix, [StringComparison]::OrdinalIgnoreCase)) { return 'Chemin sortant du Tool Runtime.' }
+        $legacyPath = [IO.Path]::GetFullPath((Join-Path $toolRoot (Split-Path $record.path -Leaf)))
+        if ($artifactFullPath -eq $indexedPath -or $artifactFullPath -eq $legacyPath) {
+            if ($record.status -ne 'qualified') { return 'Outil Tool Runtime non qualifie.' }
+            return Get-ArtifactIntegrityError -ArtifactPath $artifactFullPath -Record $record
+        }
+    }
+    return 'Outil gere absent des versions actives de l index Tool Runtime.'
+}
+
+function Resolve-CandidateTool {
+    param([string]$Name, [string]$Command)
+    $runtimeRoot = Split-Path -Parent (Split-Path -Parent $toolRoot)
+    $platform = Get-ExecutionPlatform
+    $runtimeIndex = Get-ToolRuntimeIndex
+    if ($runtimeIndex -and $runtimeIndex.PSObject.Properties.Name -contains 'error') {
+        return [pscustomobject]@{ name = $Name; command = $Command; status = 'runtime_error'; source = $null; version = $null; runtime_managed = $true; platform = $platform.id; reason = "Index Tool Runtime invalide: $($runtimeIndex.error)" }
+    }
+    if ($runtimeIndex) {
+        $platformRecord = $runtimeIndex.data.platforms.PSObject.Properties[$platform.id]
+        if ($platformRecord) {
+            $platformData = $platformRecord.Value
+            $toolRecord = @($platformData.tools | Where-Object { $_.name -eq $Name -or $_.command -eq $Command } | Where-Object active | Select-Object -First 1)
+            if ($toolRecord.Count -gt 0) {
+                $toolRecord = $toolRecord[0]
+                if ($platformData.status -ne 'qualified' -or $toolRecord.status -ne 'qualified') {
+                    return [pscustomobject]@{ name = $Name; command = $Command; status = 'incompatible'; source = $null; version = $toolRecord.version; runtime_managed = $true; platform = $platform.id; reason = "La plateforme ou l'outil n'est pas qualifie: $($platformData.status)/$($toolRecord.status)." }
+                }
+                if ([string]::IsNullOrWhiteSpace($toolRecord.path) -or [IO.Path]::IsPathRooted($toolRecord.path)) {
+                    return [pscustomobject]@{ name = $Name; command = $Command; status = 'runtime_error'; source = $null; version = $toolRecord.version; runtime_managed = $true; platform = $platform.id; reason = "Le chemin de l'artefact runtime doit être relatif." }
+                }
+                $toolPath = [IO.Path]::GetFullPath((Join-Path $runtimeIndex.root $toolRecord.path))
+                $runtimePrefix = $runtimeIndex.root.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+                if (-not $toolPath.StartsWith($runtimePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+                    return [pscustomobject]@{ name = $Name; command = $Command; status = 'runtime_error'; source = $null; version = $toolRecord.version; runtime_managed = $true; platform = $platform.id; reason = "Le chemin de l'artefact sort du Tool Runtime." }
+                }
+                if (-not (Test-Path -LiteralPath $toolPath -PathType Leaf)) {
+                    return [pscustomobject]@{ name = $Name; command = $Command; status = 'not_installed'; source = $toolPath; version = $toolRecord.version; runtime_managed = $true; platform = $platform.id; reason = "L'index annonce cet outil, mais son artefact est absent du cache." }
+                }
+                $integrityError = Get-ArtifactIntegrityError -ArtifactPath $toolPath -Record $toolRecord
+                if ($integrityError) {
+                    return [pscustomobject]@{ name = $Name; command = $Command; status = 'integrity_error'; source = $toolPath; version = $toolRecord.version; runtime_managed = $true; platform = $platform.id; reason = $integrityError }
+                }
+                return [pscustomobject]@{ name = $Name; command = $Command; status = 'available'; source = $toolPath; version = $toolRecord.version; runtime_managed = $true; platform = $platform.id; reason = 'Outil qualifié trouvé dans le Tool Runtime pour cette plateforme.' }
+            }
+        }
+        $otherPlatformTool = $false
+        foreach ($platformEntry in $runtimeIndex.data.platforms.PSObject.Properties) {
+            if (@($platformEntry.Value.tools | Where-Object { $_.name -eq $Name -or $_.command -eq $Command }).Count -gt 0) { $otherPlatformTool = $true; break }
+        }
+        if ($otherPlatformTool -and -not $platformRecord) {
+            return [pscustomobject]@{ name = $Name; command = $Command; status = 'incompatible'; source = $null; version = $null; runtime_managed = $true; platform = $platform.id; reason = "L'outil est reference dans le runtime pour d'autres plateformes seulement." }
+        }
+    }
+    $venvCandidates = @(
+        (Join-Path $runtimeRoot ".venv\Scripts\$Command.exe"),
+        (Join-Path $runtimeRoot ".venv\Scripts\$Command.cmd"),
+        (Join-Path $runtimeRoot ".venv\Scripts\$Command")
+    )
+    foreach ($candidatePath in $venvCandidates) {
+        if (Test-Path -LiteralPath $candidatePath -PathType Leaf) {
+            return [pscustomobject]@{ name = $Name; command = $Command; status = 'available'; source = $candidatePath; version = $null; runtime_managed = $true; platform = $platform.id; reason = "Outil trouve dans l'environnement Python gere par Compliance_Platform." }
+        }
+    }
+    if ($Command -eq 'Invoke-ScriptAnalyzer') {
+        $moduleRoot = Join-Path $runtimeRoot '.tools\powershell-modules\PSScriptAnalyzer'
+        $moduleManifest = Get-ChildItem -LiteralPath $moduleRoot -Filter 'PSScriptAnalyzer.psd1' -File -Recurse -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1
+        if ($moduleManifest) {
+            return [pscustomobject]@{ name = $Name; command = $Command; status = 'available'; source = $moduleManifest.FullName; version = $moduleManifest.Directory.Name; runtime_managed = $true; platform = $platform.id; reason = 'Module trouvé dans les modules PowerShell gérés par Compliance_Platform.' }
+        }
+    }
+    $commandInfo = Get-Command -Name $Command -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($commandInfo) {
+        $source = if ($commandInfo.Source) { $commandInfo.Source } else { $commandInfo.Name }
+        return [pscustomobject]@{ name = $Name; command = $Command; status = 'available'; source = $source; version = $null; runtime_managed = $false; platform = $platform.id; reason = "Commande resolue dans le PATH ou l'environnement PowerShell courant." }
+    }
+    $relativeCandidates = @(
+        ".tools\bin\$Command.exe",
+        ".tools\bin\$Command",
+        ".venv\Scripts\$Command.exe",
+        ".venv\Scripts\$Command.cmd",
+        ".venv\Scripts\$Command"
+    )
+    foreach ($relativePath in $relativeCandidates) {
+        $candidatePath = Join-Path $runtimeRoot $relativePath
+        if (Test-Path -LiteralPath $candidatePath -PathType Leaf) {
+            return [pscustomobject]@{ name = $Name; command = $Command; status = 'available'; source = $candidatePath; version = $null; runtime_managed = $false; platform = $platform.id; reason = 'Binaire présent dans les outils locaux de Compliance_Platform hors index runtime.' }
+        }
+    }
+    [pscustomobject]@{ name = $Name; command = $Command; status = 'not_installed'; source = $null; version = $null; runtime_managed = $false; platform = $platform.id; reason = "Aucune commande ou aucun binaire local trouvé pour '$Command'." }
+}
+
+function Get-CapabilityProfile {
+    param([string]$Technology)
+    switch ($Technology) {
+        'terraform' { return @(
+            [pscustomobject]@{ name = 'formatting'; tools = @(@{ name = 'terraform fmt'; command = 'terraform' }) },
+            [pscustomobject]@{ name = 'linting'; tools = @(@{ name = 'tflint'; command = 'tflint' }) },
+            [pscustomobject]@{ name = 'security'; tools = @(@{ name = 'checkov'; command = 'checkov' }) }
+        ) }
+        'opentofu' { return @(
+            [pscustomobject]@{ name = 'formatting'; tools = @(@{ name = 'tofu fmt'; command = 'tofu' }) },
+            [pscustomobject]@{ name = 'linting'; tools = @(@{ name = 'tflint'; command = 'tflint' }) },
+            [pscustomobject]@{ name = 'security'; tools = @(@{ name = 'checkov'; command = 'checkov' }) }
+        ) }
+        'terragrunt' { return @([pscustomobject]@{ name = 'formatting'; tools = @(@{ name = 'terragrunt'; command = 'terragrunt' }) }) }
+        'ansible' { return @([pscustomobject]@{ name = 'linting'; tools = @(@{ name = 'ansible-lint'; command = 'ansible-lint' }, @{ name = 'yamllint'; command = 'yamllint' }) }) }
+        'python' { return @(
+            [pscustomobject]@{ name = 'formatting'; tools = @(@{ name = 'ruff'; command = 'ruff' }) },
+            [pscustomobject]@{ name = 'linting'; tools = @(@{ name = 'ruff'; command = 'ruff' }, @{ name = 'pylint'; command = 'pylint' }) },
+            [pscustomobject]@{ name = 'testing'; tools = @(@{ name = 'pytest'; command = 'pytest' }) },
+            [pscustomobject]@{ name = 'security'; tools = @(@{ name = 'bandit'; command = 'bandit' }) },
+            [pscustomobject]@{ name = 'dependency audit'; tools = @(@{ name = 'pip-audit'; command = 'pip-audit' }) }
+        ) }
+        'powershell' { return @([pscustomobject]@{ name = 'linting'; tools = @(@{ name = 'PSScriptAnalyzer'; command = 'Invoke-ScriptAnalyzer' }) }) }
+        'docker' { return @(
+            [pscustomobject]@{ name = 'linting'; tools = @(@{ name = 'Hadolint'; command = 'hadolint' }) },
+            [pscustomobject]@{ name = 'security'; tools = @(@{ name = 'Trivy'; command = 'trivy' }) }
+        ) }
+        'kubernetes' { return @(
+            [pscustomobject]@{ name = 'security'; tools = @(@{ name = 'Checkov'; command = 'checkov' }, @{ name = 'Trivy'; command = 'trivy' }) },
+            [pscustomobject]@{ name = 'policy validation'; tools = @(@{ name = 'Checkov'; command = 'checkov' }) }
+        ) }
+        'helm' { return @(
+            [pscustomobject]@{ name = 'security'; tools = @(@{ name = 'Checkov'; command = 'checkov' }, @{ name = 'Trivy'; command = 'trivy' }) },
+            [pscustomobject]@{ name = 'policy validation'; tools = @(@{ name = 'Checkov'; command = 'checkov' }) }
+        ) }
+        'shell' { return @([pscustomobject]@{ name = 'linting'; tools = @(@{ name = 'ShellCheck'; command = 'shellcheck' }) }) }
+        'javascript' { return @([pscustomobject]@{ name = 'linting'; tools = @() }) }
+        'typescript' { return @([pscustomobject]@{ name = 'linting'; tools = @() }) }
+        'markdown' { return @([pscustomobject]@{ name = 'documentation'; tools = @(@{ name = 'markdownlint'; command = 'pre-commit' }) }) }
+        default { return @() }
+    }
+}
+
+function Get-CapabilityMatrix {
+    param([object[]]$Discoveries)
+    $platform = Get-ExecutionPlatform
+    $entries = foreach ($discovery in $Discoveries) {
+            $capabilityProfile = @(Get-CapabilityProfile -Technology $discovery.technology)
+            $capabilities = foreach ($capability in $capabilityProfile) {
+                $toolStates = @($capability.tools | ForEach-Object {
+                    Resolve-CandidateTool -Name $_.name -Command $_.command
+                })
+            $availableTools = @($toolStates | Where-Object status -eq 'available')
+            $availability = if ($discovery.status -eq 'ambiguous') { 'ambiguous' }
+                elseif ($discovery.status -eq 'absent') { 'not_applicable' }
+                elseif ($toolStates.Count -eq 0) { 'unconfigured' }
+                elseif ($availableTools.Count -eq $toolStates.Count) { 'available' }
+                elseif ($availableTools.Count -gt 0) { 'partially_available' }
+                else { 'unavailable' }
+            $reasons = New-Object System.Collections.Generic.List[string]
+            if ($discovery.status -eq 'ambiguous') { $reasons.Add("La technologie est ambiguë; aucune capacité n’est considérée comme résolue.") }
+            elseif ($discovery.status -eq 'absent') { $reasons.Add("La technologie est absente; la capacité n’est pas applicable.") }
+            elseif ($toolStates.Count -eq 0) { $reasons.Add("Aucun outil candidat n'est configure pour cette capacite.") }
+            elseif ($availableTools.Count -eq 0) { $reasons.Add("Aucun outil candidat n'est disponible sur cette plateforme.") }
+            elseif ($availableTools.Count -lt $toolStates.Count) { $reasons.Add("Certains outils candidats sont disponibles; d'autres restent indisponibles sur cette plateforme.") }
+            else { $reasons.Add('Au moins un outil candidat est disponible; la sélection finale appartient au Tool Resolver.') }
+            [pscustomobject]@{
+                name = $capability.name
+                    required = ($discovery.status -eq 'detected')
+                availability = $availability
+                candidate_tools = @($toolStates)
+                available_tools = @($availableTools | ForEach-Object name)
+                reasons = @($reasons.ToArray())
+            }
+        }
+        $allTools = @($capabilities | ForEach-Object { $_.candidate_tools })
+        [pscustomobject]@{
+            technology = $discovery.technology
+            technology_status = $discovery.status
+            required_capabilities = @($capabilities | Where-Object required | ForEach-Object name)
+            capabilities = @($capabilities)
+            candidate_tools = @($allTools | Sort-Object name, command -Unique)
+            platform = $platform
+            reasons = @($discovery.ambiguities)
+        }
+    }
+    @($entries)
+}
+
+function Resolve-CapabilityTool {
+    param([object[]]$CapabilityMatrix)
+    foreach ($technology in $CapabilityMatrix) {
+        $selectedByCommand = @{}
+        $unresolved = New-Object System.Collections.Generic.List[object]
+        if ($technology.technology_status -eq 'detected') {
+            foreach ($capability in $technology.capabilities) {
+                if (-not $capability.required) { continue }
+                $availableCandidates = @($capability.candidate_tools | Where-Object status -eq 'available')
+                if ($availableCandidates.Count -eq 0) {
+                    $unresolved.Add([pscustomobject]@{
+                        capability = $capability.name
+                        status = $capability.availability
+                        reasons = @($capability.reasons)
+                    })
+                    continue
+                }
+                foreach ($candidate in $availableCandidates) {
+                    if (-not $selectedByCommand.ContainsKey($candidate.command)) {
+                        $selectedByCommand[$candidate.command] = [pscustomobject]@{
+                            name = $candidate.name
+                            command = $candidate.command
+                            source = $candidate.source
+                            capabilities = New-Object System.Collections.Generic.List[string]
+                        }
+                    }
+                    $selected = $selectedByCommand[$candidate.command]
+                    if (-not $selected.capabilities.Contains($capability.name)) { $selected.capabilities.Add($capability.name) }
+                }
+                if ($capability.availability -eq 'partially_available') {
+                    $unresolved.Add([pscustomobject]@{
+                        capability = $capability.name
+                        status = 'partially_available'
+                        reasons = @($capability.reasons)
+                    })
+                }
+            }
+        }
+        $selectedTools = @($selectedByCommand.Values | Sort-Object command | ForEach-Object {
+            [pscustomobject]@{
+                name = $_.name
+                command = $_.command
+                source = $_.source
+                capabilities = @($_.capabilities.ToArray())
+            }
+        })
+        $resolutionStatus = if ($technology.technology_status -ne 'detected') { $technology.technology_status }
+            elseif ($unresolved.Count -gt 0 -and $selectedTools.Count -gt 0) { 'partial' }
+            elseif ($unresolved.Count -gt 0) { 'unavailable' }
+            else { 'ready' }
+        [pscustomobject]@{
+            technology = $technology.technology
+            technology_status = $technology.technology_status
+            platform = $technology.platform
+            status = $resolutionStatus
+            selected_tools = $selectedTools
+            unresolved_capabilities = @($unresolved.ToArray())
+            reasons = if ($technology.technology_status -eq 'ambiguous') { @($technology.reasons) }
+                elseif ($technology.technology_status -eq 'absent') { @('Technologie absente; aucun outil sélectionné.') }
+                else { @() }
+        }
+    }
+}
+
+function Invoke-EmojiCheck {
+    if (-not (Test-Category 'Security') -and -not (Test-Category 'Generic') -and -not (Test-Category 'All')) { return }
+    $emojiScript = Join-Path $PSScriptRoot 'check-emoji.ps1'
+    Invoke-External -Name 'Contrôle pictogrammes' -Executable 'powershell' -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $emojiScript, '-Path', '.') -Required | Out-Null
+}
+
+function Invoke-GenericCheck {
+    if (-not (Test-Category 'Generic') -and -not (Test-Category 'All')) { return }
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $git) { Add-Check ERROR 'Dépôt Git' 'Git est obligatoire mais introuvable.' }
+    else {
+        $unmerged = & $git.Source -C $repoRoot diff --name-only --diff-filter=U
+        $code = $LASTEXITCODE
+        if ($code -ne 0) { Add-Check ERROR 'Conflits Git' "Impossible de lire l'état des conflits Git." }
+        elseif (@($unmerged).Count -eq 0) { Add-Check PASS 'Conflits Git' 'Aucun conflit Git non résolu.' }
+        else { Add-Check FAIL 'Conflits Git' "Conflits non résolus : $($unmerged -join ', ')" }
+    }
+
+    $issues = New-Object System.Collections.Generic.List[string]
+    foreach ($file in $script:Files) {
+        if ($file.Length -gt 5MB) { $issues.Add("Fichier supérieur à 5 Mio : $($file.Name)") }
+        if ($file.Extension -in @('.pem', '.key', '.p12', '.pfx')) { $issues.Add("Fichier de clé privée potentiel : $($file.Name)") }
+        try {
+            $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
+            if ($bytes -contains 0) { continue }
+            $text = [System.Text.UTF8Encoding]::new($false, $true).GetString($bytes)
+        } catch [System.Text.DecoderFallbackException] { continue }
+        if ($text -match '(?m)[ \t]+$') { $issues.Add("Espaces en fin de ligne : $($file.Name)") }
+        if ($text.Length -gt 0 -and -not $text.EndsWith("`n")) { $issues.Add("Fin de fichier manquante : $($file.Name)") }
+    }
+    if ($issues.Count -eq 0) { Add-Check PASS 'Hygiène des fichiers' 'Tailles, espaces, fins de fichier et extensions sensibles vérifiés.' }
+    else { Add-Check FAIL 'Hygiène des fichiers' ($issues -join '; ') }
+
+    $yaml = @($script:Files | Where-Object Extension -In @('.yml', '.yaml'))
+    if ($yaml.Count -eq 0) { Add-Check SKIP 'YAML' 'Aucun fichier YAML détecté.' }
+    else {
+        $yamllint = Join-Path $repoRoot '.venv\Scripts\yamllint.exe'
+        $yamlArguments = @('-c', (Join-Path $repoRoot '.yamllint.yml')) + @($yaml.FullName)
+        Invoke-External -Name 'Validation YAML' -Executable $yamllint -Arguments $yamlArguments -Required | Out-Null
+    }
+
+    $jsonFiles = @($script:Files | Where-Object Extension -eq '.json')
+    $jsonErrors = New-Object System.Collections.Generic.List[string]
+    foreach ($file in $jsonFiles) {
+        try { Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop | Out-Null }
+        catch { $jsonErrors.Add("$($file.Name) : $($_.Exception.Message)") }
+    }
+    if ($jsonFiles.Count -eq 0) { Add-Check SKIP 'Validation JSON' 'Aucun fichier JSON détecté.' }
+    elseif ($jsonErrors.Count -eq 0) { Add-Check PASS 'Validation JSON' 'Tous les fichiers JSON sont valides.' }
+    else { Add-Check FAIL 'Validation JSON' ($jsonErrors -join '; ') }
+
+    $tomlFiles = @($script:Files | Where-Object Extension -eq '.toml')
+    if ($tomlFiles.Count -eq 0) { Add-Check SKIP 'Validation TOML' 'Aucun fichier TOML détecté.' }
+    elseif (-not (Test-Path $python -PathType Leaf)) { Add-Check ERROR 'Validation TOML' 'Le Python local est requis pour lire TOML.' }
+    else {
+        $tomlValid = $true
+        foreach ($file in $tomlFiles) {
+            'import sys,tomllib; tomllib.load(open(sys.argv[1], "rb"))' | & $python - $file.FullName
+            if ($LASTEXITCODE -ne 0) { $tomlValid = $false }
+        }
+        if ($tomlValid) { Add-Check PASS 'Validation TOML' 'Tous les fichiers TOML sont valides.' }
+        else { Add-Check FAIL 'Validation TOML' 'Au moins un fichier TOML est invalide.' }
+    }
+
+    $xmlFiles = @($script:Files | Where-Object Extension -eq '.xml')
+    $xmlErrors = New-Object System.Collections.Generic.List[string]
+    foreach ($file in $xmlFiles) {
+        try { [xml](Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8) | Out-Null }
+        catch { $xmlErrors.Add("$($file.Name) : $($_.Exception.Message)") }
+    }
+    if ($xmlFiles.Count -eq 0) { Add-Check SKIP 'Validation XML' 'Aucun fichier XML détecté.' }
+    elseif ($xmlErrors.Count -eq 0) { Add-Check PASS 'Validation XML' 'Tous les fichiers XML sont valides.' }
+    else { Add-Check FAIL 'Validation XML' ($xmlErrors -join '; ') }
+}
+
+function Invoke-SecretCheck {
+    if (-not (Test-Category 'Security') -and -not (Test-Category 'Generic') -and -not (Test-Category 'All')) { return }
+    $gitleaks = Join-Path $toolRoot 'gitleaks.exe'
+    if (-not (Test-Path $gitleaks -PathType Leaf)) { Add-Check ERROR 'Gitleaks' 'Gitleaks requis absent de .tools/bin.'; return }
+    Invoke-External -Name 'Analyse des secrets Gitleaks' -Executable $gitleaks -Arguments @('dir', '--redact', '--no-banner', '--config', (Join-Path $repoRoot '.gitleaks.toml'), $repoRoot) -Required | Out-Null
+}
+
+function Invoke-MarkdownCheck {
+    if (-not (Test-Category 'Documentation') -and -not (Test-Category 'All')) { return }
+    if (-not $script:Technologies.markdown) { Add-Check SKIP 'Markdownlint' 'Aucun fichier Markdown détecté.'; return }
+    $preCommit = Join-Path $repoRoot '.venv\Scripts\pre-commit.exe'
+    $env:PRE_COMMIT_HOME = Join-Path $repoRoot '.tools\pre-commit'
+    $env:PIP_CERT = Join-Path $repoRoot '.tools\cache\windows-root-ca.pem'
+    if (-not (Test-Path $preCommit -PathType Leaf)) { Add-Check ERROR 'Markdownlint' 'pre-commit local absent après bootstrap.'; return }
+    $markdownFiles = @($script:Files | Where-Object Extension -eq '.md')
+    Invoke-External -Name 'Markdownlint' -Executable $preCommit -Arguments (@('run', 'markdownlint', '--files') + @($markdownFiles.FullName)) -Required | Out-Null
+}
+
+function Invoke-PythonCheck {
+    if (-not (Test-Category 'Python') -and -not (Test-Category 'All')) { return }
+    if (-not $script:Technologies.python) {
+        Add-Check SKIP 'Python' 'Aucun code Python détecté.'
+        if ($script:RunFull) { Invoke-PythonTool -Name 'Audit des dépendances Python' -Arguments @('pip_audit', '--local', '--strict') | Out-Null }
+        return
+    }
+    Invoke-PythonTool -Name 'Ruff format' -Arguments (@('ruff', 'format', '--check') + @($script:Technologies.python_files.FullName)) | Out-Null
+    Invoke-PythonTool -Name 'Ruff lint' -Arguments (@('ruff', 'check') + @($script:Technologies.python_files.FullName)) | Out-Null
+    if (-not $script:RunFull) { return }
+    if ($script:Technologies.python_source.Count -gt 0) {
+        Invoke-PythonTool -Name 'Pylint' -Arguments (@('pylint') + @($script:Technologies.python_source.FullName)) | Out-Null
+        Invoke-PythonTool -Name 'mypy' -Arguments (@('mypy', '--config-file', (Join-Path $repoRoot 'pyproject.toml')) + @($script:Technologies.python_source.FullName)) | Out-Null
+        Invoke-PythonTool -Name 'Bandit' -Arguments (@('bandit') + @($script:Technologies.python_source.FullName)) | Out-Null
+    } else {
+        Add-Check SKIP 'Pylint' 'Aucun code Python applicatif détecté.'
+        Add-Check SKIP 'mypy' 'Aucun code Python applicatif détecté.'
+        Add-Check SKIP 'Bandit' 'Aucun code Python applicatif détecté.'
+    }
+    Invoke-PythonTool -Name 'Audit des dépendances Python' -Arguments @('pip_audit', '--local', '--strict') | Out-Null
+}
+
+function Invoke-PowerShellCheck {
+    if (-not (Test-Category 'PowerShell') -and -not (Test-Category 'All')) { return }
+    if (-not $script:Technologies.powershell) { Add-Check SKIP 'PowerShell' 'Aucun fichier PowerShell détecté.'; return }
+    $parseErrors = New-Object System.Collections.Generic.List[string]
+    foreach ($file in $script:Technologies.powershell_files) {
+        $tokens = $null
+        $errors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+        foreach ($parseError in $errors) { $parseErrors.Add("$($file.Name) : $($parseError.Message)") }
+    }
+    if ($parseErrors.Count -eq 0) { Add-Check PASS 'Syntaxe PowerShell' 'Tous les scripts PowerShell sont syntaxiquement valides.' }
+    else { Add-Check FAIL 'Syntaxe PowerShell' ($parseErrors -join '; ') }
+
+    $moduleRoot = Join-Path $repoRoot '.tools\powershell-modules'
+    $env:PSModulePath = "$moduleRoot;$env:PSModulePath"
+    $settings = Join-Path $repoRoot '.config\PSScriptAnalyzerSettings.psd1'
+    $analyzer = Get-Command Invoke-ScriptAnalyzer -ErrorAction SilentlyContinue
+    if (-not $analyzer) { Add-Check ERROR 'PSScriptAnalyzer' 'PSScriptAnalyzer local requis absent; relancez bootstrap.'; return }
+    $results = @(Invoke-ScriptAnalyzer -Path (Join-Path $repoRoot 'scripts') -Recurse -Settings $settings)
+    $errors = @($results | Where-Object Severity -eq 'Error')
+    $warnings = @($results | Where-Object Severity -eq 'Warning')
+    if ($errors.Count -gt 0) { Add-Check FAIL 'PSScriptAnalyzer' (($errors | ForEach-Object { "$($_.ScriptName):$($_.Line) $($_.Message)" }) -join '; ') }
+    elseif ($warnings.Count -gt 0) { Add-Check FAIL 'PSScriptAnalyzer' (($warnings | ForEach-Object { "$($_.ScriptName):$($_.Line) $($_.Message)" }) -join '; ') }
+    else { Add-Check PASS 'PSScriptAnalyzer' 'Aucune erreur ni aucun avertissement PowerShell.' }
+}
+
+function Invoke-AnsibleCheck {
+    if (-not (Test-Category 'Ansible') -and -not (Test-Category 'All')) { return }
+    if (-not $script:Technologies.ansible) { Add-Check SKIP 'Ansible' 'Ansible non détecté.'; return }
+    if ($script:Technologies.ansible_ambiguous) { Add-Check WARN 'Ansible' 'Signal Ansible ambigu; aucun contrôle Ansible n''est lancé.'; return }
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { Add-Check WARN 'Ansible' "Contenu Ansible détecté; ansible-core n'est pas pris en charge comme contrôleur natif Windows."; return }
+    $ansibleLint = Join-Path $repoRoot '.venv\Scripts\ansible-lint.exe'
+    Invoke-External -Name 'ansible-lint profil production' -Executable $ansibleLint -Arguments @('--profile', 'production', '--strict') -Required | Out-Null
+    if ($script:RunFull) {
+        $scenarios = @($script:Files | Where-Object FullName -Match '[\\/]molecule[\\/][^\\/]+[\\/]molecule\.yml$')
+        foreach ($scenario in $scenarios) {
+            Invoke-External -Name "Molecule $($scenario.Directory.Name)" -Executable (Join-Path $repoRoot '.venv\Scripts\molecule.exe') -Arguments @('test', '-s', $scenario.Directory.Name) -Required | Out-Null
+        }
+        if ($scenarios.Count -eq 0) { Add-Check SKIP 'Molecule' 'Aucun scénario Molecule détecté.' }
+    }
+}
+
+function Invoke-TerraformCheck {
+    if (-not (Test-Category 'Terraform') -and -not (Test-Category 'All')) { return }
+    if ($script:Technologies.terraform_ambiguous) { Add-Check WARN 'Terraform/OpenTofu' 'Les fichiers HCL ne permettent pas de résoudre Terraform ou OpenTofu; aucun outil IaC n''est lancé.'; return }
+    if (-not $script:Technologies.terraform) { Add-Check SKIP 'Terraform' 'Terraform non détecté.'; return }
+    $terraformCommand = Get-Command terraform -ErrorAction SilentlyContinue
+    if (-not $terraformCommand) { Add-Check ERROR 'Terraform' "Terraform est applicable mais absent du PATH; aucun téléchargement automatique n'est configuré."; return }
+    $env:TF_DATA_DIR = Join-Path $repoRoot '.tools\terraform-data'
+    $env:TF_PLUGIN_CACHE_DIR = Join-Path $repoRoot '.tools\cache\terraform-plugins'
+    New-Item -ItemType Directory -Path $env:TF_DATA_DIR,$env:TF_PLUGIN_CACHE_DIR -Force | Out-Null
+    Invoke-External -Name 'terraform fmt' -Executable $terraformCommand.Source -Arguments @('fmt', '-check', '-diff', '-recursive') -Required | Out-Null
+    Invoke-External -Name 'terraform init sans backend' -Executable $terraformCommand.Source -Arguments @('init', '-backend=false', '-input=false', '-no-color') -Required | Out-Null
+    Invoke-External -Name 'terraform validate' -Executable $terraformCommand.Source -Arguments @('validate', '-no-color') -Required | Out-Null
+    Invoke-External -Name 'TFLint' -Executable (Join-Path $toolRoot 'tflint.exe') -Arguments @('--recursive', '--no-color') -Required | Out-Null
+    if ($script:RunFull) {
+        Invoke-External -Name 'Checkov' -Executable $python -Arguments @('-x', (Join-Path $repoRoot '.venv\Scripts\checkov.cmd'), '-d', $repoRoot, '--framework', 'terraform', '--quiet') -Required | Out-Null
+    }
+}
+
+function Invoke-TerragruntCheck {
+    if (-not (Test-Category 'Terragrunt') -and -not (Test-Category 'All')) { return }
+    if (-not $script:Technologies.terragrunt) { Add-Check SKIP 'Terragrunt' 'Terragrunt non détecté.'; return }
+    Invoke-External -Name 'Format Terragrunt HCL' -Executable (Join-Path $toolRoot 'terragrunt.exe') -Arguments @('hcl', 'fmt', '--check') -Required | Out-Null
+    Add-Check WARN 'Validation Terragrunt' "Aucune initialisation ni commande de backend réel n'est exécutée automatiquement."
+}
+
+function Invoke-ContainerCheck {
+    if (-not (Test-Category 'Container') -and -not (Test-Category 'All')) { return }
+    if (-not $script:Technologies.containers) { Add-Check SKIP 'Conteneurs' 'Aucun Dockerfile ou Containerfile détecté.'; return }
+    $dockerIgnore = Join-Path $repoRoot '.dockerignore'
+    if (Test-Path $dockerIgnore -PathType Leaf) { Add-Check PASS '.dockerignore' 'Le fichier .dockerignore est présent.' }
+    else { Add-Check FAIL '.dockerignore' 'Un Dockerfile/Containerfile est présent sans .dockerignore.' }
+    $containerIssues = New-Object System.Collections.Generic.List[string]
+    foreach ($file in $script:Technologies.container_files) {
+        $content = [System.IO.File]::ReadAllText($file.FullName, [System.Text.Encoding]::UTF8)
+        if ($content -match '(?im)^\s*FROM\s+[^\s:]+(?::latest)?\s*$') { $containerIssues.Add("Image de base non verrouillée : $($file.Name)") }
+        if ($content -match '(?im)^\s*(?:ARG|ENV)\s+[^\r\n]*(?:password|secret|token|api[_-]?key)\s*=\s*\S+') { $containerIssues.Add("Valeur sensible dans ARG/ENV : $($file.Name)") }
+        if ($content -notmatch '(?im)^\s*USER\s+(?!root\b|0\b)\S+') { $containerIssues.Add("Aucun utilisateur non privilégié explicite : $($file.Name)") }
+    }
+    if ($containerIssues.Count -eq 0) { Add-Check PASS 'Règles conteneurs' 'Images verrouillées, utilisateur et variables vérifiés.' }
+    else { Add-Check FAIL 'Règles conteneurs' ($containerIssues -join '; ') }
+    Invoke-External -Name 'Hadolint' -Executable (Join-Path $toolRoot 'hadolint.exe') -Arguments @($script:Technologies.container_files.FullName) -Required | Out-Null
+    if ($script:RunFull) { Invoke-External -Name 'Trivy filesystem' -Executable (Join-Path $toolRoot 'trivy.exe') -Arguments (@('fs', '--scanners', 'vuln,misconfig,secret', '--exit-code', '1', '--no-progress', '--skip-dirs', '.git', '--skip-dirs', '.venv', '--skip-dirs', '.tools', '--skip-dirs', 'reports') + @($repoRoot)) -Required | Out-Null }
+}
+
+function Invoke-ShellCheck {
+    if (-not (Test-Category 'Shell') -and -not (Test-Category 'All')) { return }
+    if (-not $script:Technologies.shell) { Add-Check SKIP 'ShellCheck' 'Aucun script Bash détecté.'; return }
+    $shellcheck = Join-Path $toolRoot 'shellcheck.exe'
+    if (-not (Test-Path $shellcheck -PathType Leaf)) { Add-Check WARN 'ShellCheck' "Des scripts Bash existent; ShellCheck n'est pas fourni pour Windows."; return }
+    Invoke-External -Name 'ShellCheck' -Executable $shellcheck -Arguments @($script:Technologies.shell_files.FullName) -Required | Out-Null
+}
+
+function Invoke-FixMode {
+    if ($script:Technologies.python) {
+        Invoke-PythonTool -Name 'Ruff format' -Arguments (@('ruff', 'format') + @($script:Technologies.python_files.FullName)) | Out-Null
+        Invoke-PythonTool -Name 'Ruff corrections sûres' -Arguments (@('ruff', 'check', '--fix') + @($script:Technologies.python_files.FullName)) | Out-Null
+    }
+    if ($script:Technologies.terraform) {
+        $terraformCommand = Get-Command terraform -ErrorAction SilentlyContinue
+        if ($terraformCommand) { Invoke-External -Name 'terraform fmt' -Executable $terraformCommand.Source -Arguments @('fmt', '-recursive') -Required | Out-Null }
+        else { Add-Check ERROR 'terraform fmt' 'Terraform applicable mais absent du PATH.' }
+    }
+    $extensions = @('.ps1', '.psm1', '.psd1', '.py', '.md', '.yml', '.yaml', '.json', '.toml', '.xml', '.txt')
+    foreach ($file in $script:Files) {
+        if ($file.Extension -notin $extensions -and $file.Name -notin @('.gitignore', '.gitattributes', '.editorconfig')) { continue }
+        try { $content = [System.IO.File]::ReadAllText($file.FullName, [System.Text.Encoding]::UTF8) }
+        catch { continue }
+        $newline = if ($file.Extension -in @('.ps1', '.psm1', '.psd1')) { "`r`n" } else { "`n" }
+        $lines = [regex]::Split($content, "\r?\n")
+        $normalized = (($lines | ForEach-Object { $_ -replace '[ \t]+$', '' }) -join $newline).TrimEnd("`r", "`n") + $newline
+        if ($normalized -cne $content) {
+            [System.IO.File]::WriteAllText($file.FullName, $normalized, (New-Object System.Text.UTF8Encoding($file.Extension -in @('.ps1', '.psm1', '.psd1'))))
+        }
+    }
+    Add-Check PASS 'Corrections sûres' 'Normalisation des espaces et fins de fichiers terminée.'
+}
+
+try {
+    Push-Location $repoRoot
+    $script:Files = Get-ProjectFile -Root $repoRoot
+    $script:Technologies = Get-Technology -RepositoryRoot $repoRoot
+    if ($DiscoveryOnly) {
+        $discoveryResult = [pscustomobject]@{
+            schema_version = 1
+            repository = $repoRoot
+            technologies = $script:Technologies.discoveries
+            project_roots = $script:Technologies.project_roots
+            ambiguities = $script:Technologies.ambiguities
+            capability_matrix = $script:Technologies.capability_matrix
+            tool_resolution = $script:Technologies.tool_resolution
+        }
+        $discoveryJson = $discoveryResult | ConvertTo-Json -Depth 12
+        if ($ReportPath) {
+            $discoveryReportPath = if ([System.IO.Path]::IsPathRooted($ReportPath)) { $ReportPath } else { Join-Path (Join-Path $platformRoot 'reports') $ReportPath }
+            $discoveryReportDirectory = Split-Path -Parent $discoveryReportPath
+            if (-not (Test-Path $discoveryReportDirectory -PathType Container)) { New-Item -ItemType Directory -Path $discoveryReportDirectory -Force | Out-Null }
+            Set-Content -LiteralPath $discoveryReportPath -Value $discoveryJson -Encoding UTF8
+        }
+        Write-Output $discoveryJson
+        exit 0
+    }
+    Write-Information -InformationAction Continue '[INFO] Détection des technologies du dépôt.'
+    foreach ($detection in $script:Technologies.discoveries) {
+        if ($detection.status -eq 'detected') { Write-Information -InformationAction Continue "[INFO] Technologie détectée : $($detection.technology)." }
+        elseif ($detection.status -eq 'ambiguous') { Write-Information -InformationAction Continue "[WARN] Technologie ambiguë : $($detection.technology)." }
+        else { Write-Information -InformationAction Continue "[INFO] Technologie absente : $($detection.technology)." }
+    }
+    if ($Mode -eq 'Fix') {
+        Invoke-FixMode
+        $script:RunFull = $false
+        $script:RequestedMode = 'Quick après Fix'
+    }
+    Invoke-GenericCheck
+    Invoke-EmojiCheck
+    Invoke-SecretCheck
+    Invoke-MarkdownCheck
+    Invoke-PythonCheck
+    Invoke-PowerShellCheck
+    Invoke-AnsibleCheck
+    Invoke-TerraformCheck
+    Invoke-TerragruntCheck
+    Invoke-ContainerCheck
+    Invoke-ShellCheck
+    if ((Test-Category 'Tests') -and ($script:RunFull -or $Category -eq 'Tests')) {
+        Invoke-External -Name 'Tests du socle et Python' -Executable 'powershell' -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'test.ps1'), '-NoColor') -Required | Out-Null
+    }
+
+    $summary = [pscustomobject]@{ PASS = $script:Counts.PASS; FAIL = $script:Counts.FAIL; WARN = $script:Counts.WARN; SKIP = $script:Counts.SKIP; ERROR = $script:Counts.ERROR }
+    $exitCode = if ($script:Counts.FAIL -gt 0 -or $script:Counts.ERROR -gt 0) { 1 } else { 0 }
+    if ($ReportPath -or $Mode -eq 'Ci') {
+        $relativeReport = if ($ReportPath) { $ReportPath } else { 'quality-report.json' }
+        $reportPathResolved = if ([System.IO.Path]::IsPathRooted($relativeReport)) { $relativeReport } else { Join-Path (Join-Path $repoRoot 'reports') $relativeReport }
+        $reportDirectory = Split-Path -Parent $reportPathResolved
+        if (-not (Test-Path $reportDirectory -PathType Container)) { New-Item -ItemType Directory -Path $reportDirectory -Force | Out-Null }
+        $technologyReport = [ordered]@{}
+        foreach ($property in $script:Technologies.PSObject.Properties) {
+            if ($property.Name -in @('python_files', 'python_source', 'python_tests', 'powershell_files', 'shell_files', 'terraform_files', 'hcl_files', 'container_files')) {
+                $technologyReport[$property.Name] = @($property.Value | ForEach-Object { $_.FullName.Substring($repoRoot.Length + 1).Replace('\', '/') })
+            } else { $technologyReport[$property.Name] = $property.Value }
+        }
+        $report = [pscustomobject]@{
+            date_execution = (Get-Date).ToString('o')
+            mode = $script:RequestedMode
+            categorie = $script:Category
+            technologies = $technologyReport
+            controles = $script:Results.ToArray()
+            resume = $summary
+            code_sortie = $exitCode
+        }
+        $report | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $reportPathResolved -Encoding UTF8
+        Write-Information -InformationAction Continue "[PASS] Rapport JSON créé : $reportPathResolved"
+    }
+    Write-Information -InformationAction Continue ("[SUMMARY] PASS={0} FAIL={1} WARN={2} SKIP={3} ERROR={4}" -f $summary.PASS,$summary.FAIL,$summary.WARN,$summary.SKIP,$summary.ERROR)
+    if ($exitCode -ne 0) { Write-Information -InformationAction Continue '[BLOCKED] Quality Gate bloqué.'; exit $exitCode }
+    Write-Information -InformationAction Continue '[PASS] Quality Gate terminé avec succès.'
+    exit 0
+} catch {
+    Add-Check ERROR 'Exécution Quality Gate' $_.Exception.Message
+    Write-Information -InformationAction Continue ("[SUMMARY] PASS={0} FAIL={1} WARN={2} SKIP={3} ERROR={4}" -f $script:Counts.PASS,$script:Counts.FAIL,$script:Counts.WARN,$script:Counts.SKIP,$script:Counts.ERROR)
+    exit 2
+} finally {
+    if ((Get-Location).Path -eq $repoRoot) { Pop-Location }
+}

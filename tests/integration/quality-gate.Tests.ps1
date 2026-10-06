@@ -196,7 +196,7 @@ try {
                     status = 'qualified'
                     tools = @(
                         [pscustomobject]@{ name = 'ruff'; command = 'ruff'; version = '1.1.0'; path = ".tools/runtime/$($platform.id)/ruff/1.1.0/ruff.exe"; status = 'qualified'; active = $false },
-                        [pscustomobject]@{ name = 'ruff'; command = 'ruff'; version = '1.2.3'; path = $artifactRelativePath; status = 'qualified'; active = $true }
+                        [pscustomobject]@{ name = 'ruff'; command = 'ruff'; version = '1.2.3'; path = $artifactRelativePath; sha256 = (Get-FileHash (Join-Path $repoRoot $artifactFixturePath) -Algorithm SHA256).Hash; status = 'qualified'; active = $true }
                     )
                 }
             }
@@ -205,6 +205,27 @@ try {
         $tool = Resolve-CandidateTool -Name 'ruff' -Command 'ruff'
         Assert-Condition ($tool.status -eq 'available' -and $tool.runtime_managed -and $tool.version -eq '1.2.3' -and $tool.platform -eq $platform.id) ("Version active du runtime non résolue: $($tool | ConvertTo-Json -Compress -Depth 5)")
         Assert-Condition ($tool.source -eq (Join-Path $repoRoot $artifactFixturePath)) 'Chemin artefact runtime incorrect.'
+    }
+    Invoke-TestCase 'Integrite runtime et copie historique verifiee avant usage' {
+        $platform = Get-ExecutionPlatform
+        $artifactRelativePath = "$($platform.id)/ruff/1.2.3/ruff.exe"
+        Write-Fixture ".tools/runtime/$artifactRelativePath" 'runtime-original'
+        $record = [pscustomobject]@{ name = 'ruff'; command = 'ruff'; version = '1.2.3'; path = $artifactRelativePath; sha256 = (Get-FileHash (Join-Path $repoRoot ".tools/runtime/$artifactRelativePath") -Algorithm SHA256).Hash; status = 'qualified'; active = $true }
+        $manifest = [pscustomobject]@{ schema_version = 1; platforms = [pscustomobject]@{ $platform.id = [pscustomobject]@{ status = 'qualified'; tools = @($record) } } }
+        Write-Fixture '.tools/runtime/index.json' ($manifest | ConvertTo-Json -Depth 8)
+        Assert-Condition ((Resolve-CandidateTool -Name 'ruff' -Command 'ruff').status -eq 'available') 'Artefact intact refuse.'
+        Write-Fixture ".tools/runtime/$artifactRelativePath" 'runtime-altere'
+        Assert-Condition ((Resolve-CandidateTool -Name 'ruff' -Command 'ruff').status -eq 'integrity_error') 'Artefact altere accepte.'
+        Write-Fixture '.tools/bin/ruff.exe' 'copie-alteree'
+        $executed = Invoke-External -Name 'Copie alteree' -Executable (Join-Path $toolRoot 'ruff.exe') -Required
+        Assert-Condition (-not $executed -and $script:Counts.ERROR -eq 1 -and $script:Results[0].message -match 'SHA-256') 'Copie historique non bloquee avant execution.'
+        Write-Fixture ".tools/runtime/$artifactRelativePath" 'runtime-original'
+        $record.PSObject.Properties.Remove('sha256')
+        Write-Fixture '.tools/runtime/index.json' ($manifest | ConvertTo-Json -Depth 8)
+        Assert-Condition ((Resolve-CandidateTool -Name 'ruff' -Command 'ruff').status -eq 'integrity_error') 'Empreinte absente acceptee.'
+        $manifest.schema_version = 99
+        Write-Fixture '.tools/runtime/index.json' ($manifest | ConvertTo-Json -Depth 8)
+        Assert-Condition ((Resolve-CandidateTool -Name 'ruff' -Command 'ruff').status -eq 'runtime_error') 'Schema invalide contourne via un outil historique.'
     }
     Invoke-TestCase 'Tool Bootstrap versionne et indexe le runtime' {
         $bootstrapPath = Join-Path $originalRoot 'scripts/bootstrap.ps1'

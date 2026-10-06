@@ -2,6 +2,8 @@
 
 ## Cycle d'implementation courant
 
+Cycle integrite: **39 PASS, 0 FAIL**. La nouvelle regression couvre un artefact intact, une alteration du runtime, une copie historique alteree bloquee avant execution, une empreinte absente et un schema d'index invalide. Les preuves cache ci-dessous decrivent le cycle precedent.
+
 Le 6 octobre 2026, la regression du cache pre-commit deplace porte la suite a **38 PASS, 0 FAIL**. Bootstrap complet: code 0, hooks reconstruits et marqueur runtime `windows-x64: qualified`. Quick: **10 PASS, 0 FAIL, 1 WARN, 6 SKIP, 0 ERROR**, code 0, Markdownlint execute et reussi. Aucune regle ni aucun controle n'a ete retire. Les resultats de l'audit documentaire ci-dessous restent des preuves historiques.
 
 Full du cycle: **11 PASS, 1 FAIL, 1 WARN, 6 SKIP, 0 ERROR**, code 1. Seul pip-audit echoue. L'index PyPI affiche Checkov 3.3.25, dont les metadonnees imposent toujours `asteval==1.0.6` et `ecdsa>=0.19.0,<1.0.0`. Ecdsa 0.19.2 est la version publiee la plus recente observee. Aucun pin n'a ete force, aucun controle retire et aucun avis ignore.
