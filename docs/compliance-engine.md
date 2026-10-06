@@ -1,6 +1,19 @@
 # Compliance Engine
 
-Etat: **PHASE EN COURS**. Le module [src/Compliance.Engine.psm1](../src/Compliance.Engine.psm1) fournit le premier planificateur autonome. Les modes historiques du Quality Gate restent inchanges pendant son integration.
+Etat: **PHASE EN COURS**, v1 exploitable sous Windows x64/PowerShell 5.1. Le module [src/Compliance.Engine.psm1](../src/Compliance.Engine.psm1) separe planification, execution, aggregation et verdict. Les modes historiques du Quality Gate restent disponibles.
+
+## Lancement
+
+Depuis la racine de Compliance_Platform, remplacer `<chemin-du-depot>` par un chemin local entre guillemets:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Compliance -RepositoryPath <chemin-du-depot> -PlanOnly
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Compliance -RepositoryPath <chemin-du-depot>
+```
+
+Le rapport par defaut est `compliance-report.json` sous `reports/` de la plateforme. `-ReportPath` permet un chemin relatif sous ce dossier ou un chemin absolu explicite. Le plan seul expose `execution_plan`, n'execute aucun controle et garde `verdict: null`. Le mode Compliance ne se combine pas avec DiscoveryOnly, Fix ou Category.
+
+Le parcours est Discovery, Matrix, Resolver, `New-CompliancePlan`, `Invoke-CompliancePlan`, `Get-ComplianceVerdict`, puis `New-ComplianceReport`. Le plan et les fonctions du module sont aussi utilisables independamment de la CLI.
 
 ## Execution Plan v1
 
@@ -10,7 +23,36 @@ Chaque controle expose `id`, `name`, `technology`, `capability`, `tool`, `root`,
 
 Les six etats prealables sont `applicable`, `not_applicable`, `capability_unavailable`, `tool_unavailable`, `technology_absent` et `ambiguous`. La selection suit celle du resolver; un candidat disponible mais non retenu n'est pas execute. Une indisponibilite requise reste explicite, pas une technologie absente.
 
-Huit tests unitaires couvrent ces etats, les deux racines d'un meme projet, la serialisation, l'ordre et le rejet d'une racine externe. Execution, aggregation et verdict sont les prochaines etapes de ce meme module.
+Les candidats alternatifs ecartes ne sont pas rendus obligatoires lorsque le resolver couvre la capacite. Les outils complementaires gardent leurs obligations distinctes. Les effets non autorises donnent `not_applicable` avec une raison; ces controles requis omis rendent la couverture explicitement partielle.
+
+## Execution et permissions
+
+L'executeur `Invoke-BoundedProcess` du gate est reutilise pour lancer les processus dans la racine du controle, avec capture separee stdout/stderr/code, budget de temps et terminaison de l'arbre Windows au timeout. Les erreurs de lancement et d'integrite sont restituees comme erreurs techniques. Une sonde de version est effectuee lorsque le resolver ne fournit pas la version; elle consomme le budget du controle. La granularite native du timeout reste la seconde.
+
+`-AllowNetwork` autorise les controles reseau. `-AllowCodeExecution` autorise tests, plugins et configurations pouvant charger du code (pytest, Pylint, ansible-lint, pre-commit, TFLint). Checkov exige les deux permissions. Ces flags sont des gardes de selection, pas un sandbox: le code autorise peut ecrire ou acceder au reseau. Aucun apply, destroy, build d'image ou deploiement n'est configure.
+
+Les adaptateurs v1 couvrent les commandes declarees dans les profils du socle: Ruff, Pylint, Bandit, pytest, pip-audit, format Terraform/OpenTofu/Terragrunt, TFLint, ShellCheck, Hadolint, YAML/Ansible, Markdown, PSScriptAnalyzer, Checkov et Trivy. Leur presence dans le code n'est pas une qualification de toutes les plateformes ou technologies. Un adaptateur inconnu produit une erreur explicite.
+
+PowerShell passe d'abord par le parseur natif, puis PSScriptAnalyzer sur les fichiers decouverts. Ruff et Bandit recoivent les sources decouvertes et ignorent les caches exclus. Markdown utilise la configuration et le cache pre-commit de la plateforme, sans installer de hook dans le consommateur. L'audit Python consommateur exige `requirements.txt` et utilise `--no-deps --disable-pip`; il n'audite pas le runtime de la plateforme a sa place. Hadolint ne qualifie pas Compose.
+
+## Resultats et decision
+
+Chaque resultat expose `control_id`, `technology`, `capability`, `root`, `status`, `execution_start`, `execution_end`, `duration_ms`, `tool_version`, `stdout`, `stderr`, `exit_code`, `critical` et `diagnostics`.
+
+- `success`: controle execute, code 0.
+- `fail`: controle execute, code non nul.
+- `error`: lancement, integrite, timeout, preparation, ambiguite ou capacite/outil requis indisponible.
+- `skipped`: technologie absente, candidat non retenu ou execution non autorisee, avec justification.
+
+FAIL signifie au moins un `fail` ou une erreur critique. PASS signifie aucun de ces deux cas; une erreur non critique reste visible sans rendre la decision bloquante. Un scan incomplet empeche toute execution et donne FAIL. Un resultat manquant ou duplique devient une erreur critique de contrat. `coverage` indique les controles requis omis: PASS n'est pas une attestation de couverture complete.
+
+La CLI retourne 0 sur PASS ou plan seul valide, 1 sur verdict FAIL et 2 sur scan/preparation incomplets. Elle n'effectue aucune operation Git de commit, push ou merge. Les adaptateurs CI et hooks historiques gardent leurs propres comportements.
+
+## Preuves et limites
+
+21 tests unitaires et 11 integrations Compliance passent, en plus des 44 scenarios historiques. Les integrations executent de vrais audits externes PowerShell, Python et Markdown, avec cas negatifs, stdout/stderr, timeout et rapports sur disque.
+
+Le catalogue d'adaptateurs est encore code, sans DAG ni Policy Engine avance. Les budgets globaux, le masquage general des sorties, leurs limites de taille et la qualification de tous les effets/technologies restent ouverts. Les donnees et sorties d'outils sont conservees dans le rapport local; il faut maitriser son partage. Voir [reporting.md](reporting.md) et [testing.md](testing.md).
 
 ## Gate historique
 

@@ -2,6 +2,10 @@
 
 ## Cycle d'implementation courant
 
+Phase 4: **21 tests unitaires et 11 integrations Compliance reussis**, en plus des **44 scenarios historiques**. Les nouvelles suites testent plan et applicabilite, execution reelle, stdout/stderr/code, timeout, version, permissions, alternatives, couverture, aggregation et rapports PASS/FAIL sur disque. Les modes historiques restent verifies par leurs 44 regressions.
+
+Le lancement Compliance sur le depot local a produit [compliance-report.json](../reports/compliance-report.json): 32 controles planifies, 4 success, 1 fail, 1 error et 26 skipped, verdict **FAIL**, couverture partielle. Le fail concerne `Update-Detection` du harnais historique (`PSUseShouldProcessForStateChangingFunctions`); l'erreur critique est ShellCheck indisponible sous Windows. Les nouveaux fichiers du module, de l'adaptateur et des tests passent l'analyse PowerShell. Aucun controle n'a ete ignore pour rendre ce rapport vert.
+
 Cycle Resolver: **44 PASS, 0 FAIL**. Les nouvelles regressions couvrent alternative de secours, priorite du profil quand plusieurs candidats sont disponibles, disponibilite alternative dans la matrice et incompatibilite native Ansible Windows malgre un lanceur present. Les compteurs de selection et reutilisation sont verifies dans le scenario Python complementaire.
 
 Cycle Discovery: **42 PASS, 0 FAIL**. Trois scenarios supplementaires couvrent le monorepo IaC mixte avec une racine non selectionnee, la lecture d'un YAML verrouille (JSON et rapport partiels, code 2, erreur dedupliquee), et l'erreur d'enumeration. Les scenarios precedents restent verts. Ces fixtures ne remplacent pas un corpus autorise de repositories reels.

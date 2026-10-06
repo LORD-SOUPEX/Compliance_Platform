@@ -5,6 +5,10 @@ param(
     [string]$ReportPath,
     [string]$RepositoryPath,
     [switch]$DiscoveryOnly,
+    [switch]$Compliance,
+    [switch]$PlanOnly,
+    [switch]$AllowNetwork,
+    [switch]$AllowCodeExecution,
     [switch]$NoColor,
     [ValidateRange(1, 3600)][int]$TimeoutSeconds = 300
 )
@@ -90,6 +94,58 @@ function Get-ProjectFile {
     }
 }
 
+function Invoke-BoundedProcess {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Executable,
+        [string[]]$Arguments = @(),
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+        [ValidateRange(1, 3600)][int]$Timeout = 300
+    )
+    $started = [DateTimeOffset]::UtcNow
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $result = [pscustomobject]@{ execution_start = $started.ToString('o'); execution_end = $null; duration_ms = 0; stdout = ''; stderr = ''; exit_code = $null; error = $null; timed_out = $false }
+    $process = New-Object Diagnostics.Process
+    try {
+        $resolved = if (Test-Path -LiteralPath $Executable -PathType Leaf) { [IO.Path]::GetFullPath($Executable) } else {
+            $command = Get-Command $Executable -ErrorAction SilentlyContinue
+            if ($command) { $command.Source } else { $null }
+        }
+        if (-not $resolved) { throw "Outil absent : $Executable" }
+        $integrityError = Get-ExecutionIntegrityError -ArtifactPath $resolved
+        if ($integrityError) { throw $integrityError }
+        $process.StartInfo.FileName = $resolved
+        $process.StartInfo.WorkingDirectory = $WorkingDirectory
+        $process.StartInfo.UseShellExecute = $false
+        $process.StartInfo.CreateNoWindow = $true
+        $process.StartInfo.RedirectStandardOutput = $true
+        $process.StartInfo.RedirectStandardError = $true
+        $process.StartInfo.Arguments = ($Arguments | ForEach-Object {
+            '"' + ([regex]::Replace([regex]::Replace($_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1')) + '"'
+        }) -join ' '
+        $null = $process.Start()
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($Timeout * 1000)) {
+            $result.timed_out = $true
+            $result.error = "Delai depasse : $Timeout secondes."
+            if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { & taskkill /PID $process.Id /T /F | Out-Null }
+            else { $process.Kill() }
+        }
+        $process.WaitForExit()
+        $result.stdout = $stdout.Result
+        $result.stderr = $stderr.Result
+        $result.exit_code = $process.ExitCode
+    } catch { $result.error = $_.Exception.Message }
+    finally {
+        $process.Dispose()
+        $timer.Stop()
+        $result.execution_end = [DateTimeOffset]::UtcNow.ToString('o')
+        $result.duration_ms = $timer.ElapsedMilliseconds
+    }
+    return $result
+}
+
 function Invoke-External {
     param(
         [string]$Name,
@@ -107,41 +163,18 @@ function Invoke-External {
         Add-Check $status $Name "Outil absent : $Executable"
         return $false
     }
-    $integrityError = Get-ExecutionIntegrityError -ArtifactPath $resolved
-    if ($integrityError) {
-        Add-Check ERROR $Name $integrityError
+    $execution = Invoke-BoundedProcess -Executable $resolved -Arguments $Arguments -WorkingDirectory $repoRoot -Timeout $script:ProcessTimeoutSeconds
+    if ($execution.stdout) { Write-Information -InformationAction Continue $execution.stdout.TrimEnd() }
+    if ($execution.stderr) { Write-Information -InformationAction Continue $execution.stderr.TrimEnd() }
+    if ($execution.error) {
+        Add-Check ERROR $Name $execution.error $execution.duration_ms
         return $false
     }
-    $timer = [System.Diagnostics.Stopwatch]::StartNew()
-    $process = New-Object System.Diagnostics.Process
-    $process.StartInfo.FileName = $resolved
-    $process.StartInfo.WorkingDirectory = $repoRoot
-    $process.StartInfo.UseShellExecute = $false
-    $process.StartInfo.CreateNoWindow = $true
-    $process.StartInfo.RedirectStandardOutput = $true
-    $process.StartInfo.RedirectStandardError = $true
-    $process.StartInfo.Arguments = ($Arguments | ForEach-Object {
-        '"' + ([regex]::Replace([regex]::Replace($_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1')) + '"'
-    }) -join ' '
-    try {
-        $null = $process.Start()
-        $stdout = $process.StandardOutput.ReadToEndAsync()
-        $stderr = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit($script:ProcessTimeoutSeconds * 1000)) {
-            & taskkill /PID $process.Id /T /F | Out-Null
-            Add-Check ERROR $Name "Délai dépassé : $script:ProcessTimeoutSeconds secondes." $timer.ElapsedMilliseconds
-            return $false
-        }
-        $process.WaitForExit()
-        if ($stdout.Result) { Write-Information -InformationAction Continue $stdout.Result.TrimEnd() }
-        if ($stderr.Result) { Write-Information -InformationAction Continue $stderr.Result.TrimEnd() }
-        $exitCode = $process.ExitCode
-    } finally { $process.Dispose(); $timer.Stop() }
-    if ($exitCode -eq 0) {
-        Add-Check PASS $Name "Contrôle réussi : $Name." $timer.ElapsedMilliseconds
+    if ($execution.exit_code -eq 0) {
+        Add-Check PASS $Name "Contrôle réussi : $Name." $execution.duration_ms
         return $true
     }
-    Add-Check FAIL $Name "Échec de $Name (code $exitCode)." $timer.ElapsedMilliseconds
+    Add-Check FAIL $Name "Échec de $Name (code $($execution.exit_code))." $execution.duration_ms
     return $false
 }
 
@@ -930,10 +963,12 @@ function Invoke-FixMode {
 }
 
 try {
+    if ($PlanOnly -and -not $Compliance) { throw 'PlanOnly exige le mode Compliance.' }
+    if ($Compliance -and ($DiscoveryOnly -or $Mode -eq 'Fix' -or $Category -ne 'All')) { throw 'Compliance ne se combine pas avec DiscoveryOnly, Fix ou Category.' }
     Push-Location $repoRoot
     $script:Files = @(Get-ProjectFile -Root $repoRoot)
     $script:Technologies = Get-Technology -RepositoryRoot $repoRoot
-    if ($DiscoveryOnly) {
+    if ($DiscoveryOnly -or $Compliance) {
         $discoveryResult = [pscustomobject]@{
             schema_version = 1
             repository = $repoRoot
@@ -944,6 +979,41 @@ try {
             tool_resolution = $script:Technologies.tool_resolution
             scan_complete = $script:Technologies.scan_complete
             scan_errors = $script:Technologies.scan_errors
+        }
+        if ($Compliance) {
+            Import-Module (Join-Path $platformRoot 'src/Compliance.Engine.psm1') -Force -ErrorAction Stop
+            $executionPlan = [pscustomobject]@{ schema_version = 1; repository = $repoRoot; controls = @() }
+            $executionResults = @()
+            $preparationFailed = $false
+            try {
+                $executionPlan = New-CompliancePlan -Discovery $discoveryResult.technologies -CapabilityMatrix $discoveryResult.capability_matrix -Resolver $discoveryResult.tool_resolution -RepositoryRoot $repoRoot -Timeout $TimeoutSeconds -AllowNetwork:$AllowNetwork -AllowCodeExecution:$AllowCodeExecution
+                if (-not $PlanOnly -and $discoveryResult.scan_complete) {
+                    $runner = {
+                        param($executable, $arguments, $root, $timeout)
+                        Invoke-BoundedProcess -Executable $executable -Arguments $arguments -WorkingDirectory $root -Timeout $timeout
+                    }
+                    $env:PRE_COMMIT_HOME = Join-Path $platformRoot '.tools/pre-commit'
+                    $env:PIP_CERT = Join-Path $platformRoot '.tools/cache/windows-root-ca.pem'
+                    $executionResults = @(Invoke-CompliancePlan -Plan $executionPlan -ProcessRunner $runner -PlatformRoot $platformRoot)
+                }
+            } catch {
+                $preparationFailed = $true
+                $now = [DateTimeOffset]::UtcNow.ToString('o')
+                $executionResults = @([pscustomobject]@{ control_id = 'engine/preparation'; technology = 'engine'; capability = 'preparation'; root = '.'; status = 'error'; execution_start = $now; execution_end = $now; duration_ms = 0; tool_version = $null; stdout = ''; stderr = ''; exit_code = $null; critical = $true; diagnostics = @([pscustomobject]@{ code = 'preparation_error'; message = $_.Exception.Message; critical = $true }) })
+            }
+            $complianceReport = New-ComplianceReport -Discovery $discoveryResult -Matrix $discoveryResult.capability_matrix -Resolver $discoveryResult.tool_resolution -Plan $executionPlan -Results $executionResults -PlanOnly:($PlanOnly -and -not $preparationFailed)
+            if ($preparationFailed) { $complianceReport.execution_status = 'error' }
+            $complianceJson = $complianceReport | ConvertTo-Json -Depth 20
+            $reportName = if ($ReportPath) { $ReportPath } else { 'compliance-report.json' }
+            $compliancePath = if ([IO.Path]::IsPathRooted($reportName)) { $reportName } else { Join-Path (Join-Path $platformRoot 'reports') $reportName }
+            $reportDirectory = Split-Path -Parent $compliancePath
+            if (-not (Test-Path -LiteralPath $reportDirectory -PathType Container)) { New-Item -ItemType Directory -Path $reportDirectory -Force | Out-Null }
+            [IO.File]::WriteAllText($compliancePath, $complianceJson, [Text.UTF8Encoding]::new($false))
+            Write-Output $complianceJson
+            if ($preparationFailed -or -not $discoveryResult.scan_complete) { exit 2 }
+            if ($PlanOnly) { exit 0 }
+            if ($complianceReport.verdict -eq 'FAIL') { exit 1 }
+            exit 0
         }
         $discoveryJson = $discoveryResult | ConvertTo-Json -Depth 12
         if ($ReportPath) {

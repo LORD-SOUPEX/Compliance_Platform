@@ -172,9 +172,13 @@ pistes d'étude remplaçables, pas des décisions d'architecture.
 | [.editorconfig](.editorconfig), [.gitattributes](.gitattributes) et [.gitignore](.gitignore) | Conventions de fichiers et exclusion des environnements, caches et rapports | Standards transverses à conserver |
 | [docs/](docs/) | Documentation des composants actuels, limites, statuts et tests | Détails opérationnels liés depuis README et ce plan |
 
-`src/` et `tests/unit/` contiennent uniquement des fichiers de maintien des dossiers.
-Il n'existe pas de code métier, de services consommateurs de démonstration, de
-registre de plugins, ni de catalogue exécuté par un moteur indépendant.
+`src/Compliance.Engine.psm1` contient maintenant le moteur Compliance v1;
+`tests/unit/compliance-engine.Tests.ps1` couvre ses contrats et
+`tests/integration/compliance-engine.Tests.ps1` ses audits externes reels.
+Il n'existe pas encore de services consommateurs de demonstration, registre
+de plugins ou catalogue declaratif autonome. Les inventaires et preuves de
+l'audit prealable restent historiques; les livraisons suivantes sont tracees
+dans les phases et documents des composants.
 
 Les environnements `.venv/`, les outils et caches `.tools/`, ainsi que les rapports
 locaux existent sur ce poste. Leur présence n'est pas une preuve de disponibilité
@@ -226,7 +230,7 @@ Markdown locaux du périmètre documentaire sont valides, ancre Roadmap incluse;
 aucun nouveau document ni déplacement n'a été nécessaire. Markdownlint reste
 non exécuté sur le contenu à cause de son cache invalide.
 
-## Bilan d'implémentation audité
+## Bilan de l'audit initial (historique)
 
 | Composant | Fonctionnalités achevées dans le socle | État et éléments manquants |
 | --- | --- | --- |
@@ -536,9 +540,10 @@ copies `.tools/bin`, même si l'index est expérimental.
 
 ## Compliance Engine
 
-**État actuel: non implémenté comme moteur autonome.** Les fonctions du Quality
-Gate gardent l'orchestration, l'exécution et les statuts; la matrice et le resolver
-ne forment pas encore un plan de contrôles générique exécuté.
+**Etat actuel: v1 implemente, PHASE EN COURS.** Le module Compliance construit
+et execute un plan a partir de Discovery, Matrix et Resolver, normalise les
+resultats et produit rapport et verdict. Les modes historiques gardent leur
+orchestration; catalogues, policies et qualifications avancees restent ouverts.
 
 Le Compliance Engine est le moteur local qui transforme l'inventaire d'un dépôt
 et une politique sélectionnée en résultats, rapport et verdict vérifiables. Il
@@ -671,8 +676,8 @@ dans son propre script. Il propose un diagnostic, pas une attestation de conform
 Le Quality Gate accepte `-RepositoryPath`; `-DiscoveryOnly` retourne un JSON de
 Discovery sans lancer de contrôles. Le résultat contient technologies, preuves,
 racines, ambiguïtés, Capability Matrix et Tool Resolver. Les modes Quick/Full/Ci/Fix
-continuent ensuite leur orchestration fixe dans le même script; aucun Compliance
-Engine autonome ni graphe configurable de contrôles n'existe encore.
+gardent leur orchestration fixe. Le mode Compliance utilise maintenant le module
+autonome et son plan; aucun graphe configurable de dependances n'est encore livre.
 
 L'exécuteur commun transforme essentiellement les codes de sortie en statuts.
 Les fonctions des contrôles prennent elles-mêmes les décisions d'applicabilité
@@ -700,10 +705,10 @@ tous les modes.
 - Linux, macOS, ARM64 et l'isolation par plateforme ne sont pas qualifiés.
 - Le Tool Resolver s'appuie sur des profils de capacités codés dans le script;
   il n'existe pas encore de Control Catalog indépendant.
-- Pas de Compliance Engine autonome: les contrôles Quick/Full/Ci/Fix restent
-  orchestrés dans le Quality Gate.
-- Pas de Reporting Engine séparé: Discovery et les rapports Quick/Full sont
-  sérialisés par le Quality Gate, avec des contrats JSON différents.
+- Compliance Engine v1 autonome livre; Quick/Full/Ci/Fix historiques restent
+  dans le gate et ne sont pas encore migres vers le nouveau plan.
+- Reporting Compliance v1 commun livre; Discovery et Quick/Full historiques
+  conservent des enveloppes JSON distinctes, sans migration automatique.
 - Pas de Policy Engine autonome: `.config/quality-gate.yml` ne gouverne pas encore
   les décisions effectives.
 - Pas d'intégrations optionnelles packagées distinctes des scripts et tâches actuels.
@@ -1199,25 +1204,38 @@ bootstrap ne termine pas; autres plateformes et dépendances runtime non couvert
 Statut: **PHASE EN COURS**.
 
 La Phase 4 est autorisee sans attendre la fermeture des phases 1 a 3. Le module
-`src/Compliance.Engine.psm1` construit maintenant un plan autonome a partir des
-contrats Discovery, Matrix et Resolver. Le gate historique reste disponible.
+`src/Compliance.Engine.psm1` fournit maintenant le parcours v1 plan, execution,
+aggregation, rapport et verdict, a partir de Discovery, Matrix et Resolver.
+`scripts/quality-gate.ps1 -Compliance` le lance; les modes historiques restent
+disponibles. Les contrats v1 et les limites sont dans
+[docs/compliance-engine.md](docs/compliance-engine.md).
 
 Objectif: transformer l'inventaire du consommateur et sa politique en plan
 d'exécution, résultats agrégés et décision explicable.
 
-- [ ] Séparer sélection, planification, exécution, agrégation et décision.
+- [x] Separer selection, planification, execution, aggregation et decision dans
+  les fonctions du module Compliance v1 et reutiliser l'executeur borne du gate.
 - [x] Construire et serialiser un Execution Plan v1 avec identifiant, nom,
   technologie, capacite, outil, racine, applicabilite, ordre, timeout et effets;
-  huit tests unitaires de contrat, des six statuts et des racines sont verts.
-- [ ] Définir dépendances, capacités, délais, permissions et effets de bord des
-  contrôles.
-- [ ] Normaliser les statuts et preuves, y compris les erreurs techniques et les
-  contrôles obligatoires impossibles à exécuter.
+  contrats des six statuts, racines et alternatives sont testes.
+- [x] Executer les controles retenus avec racine, budget de temps, stdout,
+  stderr, code et version; exiger explicitement reseau et execution de code.
+- [x] Normaliser success/fail/error/skipped, dates, duree et diagnostics;
+  distinguer defaut execute, erreur critique et controle non applicable.
+- [x] Produire compliance-report.json v1 avec tous les contrats, couverture et
+  verdict deterministe PASS/FAIL; un plan seul ne donne aucun verdict.
+- [x] Ajouter 21 tests unitaires et 11 integrations Compliance: succes, defauts
+  PowerShell/Python, exclusions, captures, delais, permissions, scan incomplet,
+  capacite manquante, resultat manquant/duplique et alternative satisfaite.
+- [ ] Ajouter les dependances entre controles et les budgets globaux de
+  ressources; les permissions v1 ne constituent pas un sandbox.
 - [ ] Comparer les décisions du moteur cible aux comportements actuels avant toute
   migration des consommateurs.
-- [ ] Exécuter à partir des capacités résolues et des racines Discovery, supprimer
-  les attentes de runtime/configuration sous les consommateurs et qualifier
-  l'absence d'écritures implicites dans les dépôts analysés.
+- [x] Executer a partir du resolver et des racines Discovery avec outils/configs
+  de la plateforme; audits externes PowerShell, Markdown et Python verifies.
+- [ ] Qualifier tous les adaptateurs et effets sur des depots representatifs;
+  le mode historique n'est pas encore migre et les operations autorisees a
+  executer du code peuvent avoir des effets libres dans le consommateur.
 
 Réutilisation: exécuteur, familles de contrôles, statuts, politique descriptive
 et rapports existants.
@@ -1258,20 +1276,22 @@ explicable; contrôles et limites identifiables sans dépendance à une forge.
 
 ## Phase 6: Reporting Engine
 
-Statut: **PHASE NON COMMENCÉE**.
+Statut: **PHASE EN COURS**.
 
-Le Quality Gate et DiscoveryOnly produisent déjà des JSON, mais aucun Reporting
-Engine autonome ni schéma commun versionné aux contrôles n'est implémenté.
+Compliance v1 fournit un rapport commun versionne et un modele de resultat
+normalise dans son module. Les JSON historiques restent distincts; les formats
+supplementaires et la gouvernance de conservation ne sont pas encore livres.
 
 Objectif: agréger les constats et produire un rapport standardisé, portable et
 compréhensible, avec un verdict consultatif `PASS` ou `FAIL`.
 
-- [ ] Définir le contrat du rapport, ses versions, ses métadonnées et ses formats
-  lisibles par un humain et exploitables par des outils.
+- [x] Livrer le contrat JSON Compliance v1, metadonnees et versions, teste en
+  serialisation et sur disque. Formats humains supplementaires a qualifier.
 - [ ] Distinguer les constats, sévérités, erreurs techniques, contrôles ignorés et
   limites de couverture.
-- [ ] Calculer et expliquer le verdict à partir du profil et des résultats, sans
-  assimiler `PASS` à une autorisation ni `FAIL` à un blocage.
+- [x] Calculer et expliquer le verdict v1 a partir des resultats et erreurs
+  critiques, avec indication consultative et couverture explicite; profils
+  avances restent au Policy Engine.
 - [ ] Préserver un rapport diagnostique en cas de contrôle échoué ou d'exécution
   partielle, et documenter les règles de confidentialité et de rétention.
 

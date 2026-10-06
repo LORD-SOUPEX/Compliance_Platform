@@ -6,6 +6,7 @@
 
 - Le Quality Gate sans `-RepositoryPath` analyse son propre repository.
 - `-DiscoveryOnly -RepositoryPath <chemin>` inspecte un repository externe en lecture seule et émet du JSON.
+- `-Compliance -RepositoryPath <chemin>` execute le parcours v1 plan/resultats/rapport/verdict; `-PlanOnly` n'execute rien. Les effets reseau/code sont soumis a permission.
 - Quick, Full, Ci et Fix conservent leurs anciens contrôles et leur orchestration dans `scripts/quality-gate.ps1`.
 - Le Bootstrap installe les dépendances locales, vérifie des outils et inscrit les binaires vérifiés dans `.tools/runtime/index.json`.
 
@@ -18,9 +19,9 @@
 | Tool Resolver | Sélectionne les candidats disponibles, déduplique par commande et rapporte les capacités non résolues | N'exécute pas lui-même les contrôles; profils en code |
 | Tool Runtime | Index local versionne et binaires Windows x64 verifies; marqueur `qualified` apres bootstrap complet | Python et PSScriptAnalyzer hors index; securite et autres plateformes non qualifiees |
 | Tool Bootstrap | Installe les dependances, repare le cache deplace, verifie cinq binaires et ecrit l'index | Termine localement; preuves poste neuf/runner encore absentes |
-| Compliance Engine | Non autonome; les contrôles restent des fonctions du Quality Gate | Pas de plan générique ni d'agrégateur de conformité séparé |
+| Compliance Engine | Module autonome v1: plan, execution bornee, aggregation et verdict | Adapteurs codes, migrations historiques et qualifications avancees ouvertes |
 | Control Catalog | Profils de capacités codés dans PowerShell; configurations existantes | Pas de catalogue indépendant chargé à l'exécution |
-| Reporting Engine | JSON Discovery et JSON Quality Gate | Deux formats; pas de moteur de reporting commun |
+| Reporting Engine | Rapport Compliance v1 commun et versionne, en plus des JSON historiques | Formats humains et governance de retention ouverts |
 | Policy Engine | YAML descriptif et décisions dans le script | Le YAML n'est pas la source des décisions effectives |
 | Optional Integrations | Scripts, tâches VS Code et job GitLab propres au dépôt | Pas d'adaptateurs portables autonomes |
 
@@ -34,7 +35,7 @@ Les dépendances Python résident dans `.venv`; PSScriptAnalyzer est sous `.tool
 
 Le cycle courant comprend 38 tests reussis, un bootstrap termine et Quick sans echec. Les avis de dependances et preuves historiques sont centralises dans [testing.md](testing.md).
 
-Linux, macOS, ARM64, exécution de contrôles par plateforme, Control Catalog autonome, Compliance Engine, Reporting Engine et Policy Engine séparé ne sont pas implémentés/qualifiés.
+Linux/macOS/ARM64, qualification de tous les controles par plateforme, Control Catalog autonome et Policy Engine avance restent ouverts. Compliance et Reporting v1 sont maintenant livres dans le module; les parcours historiques ne sont pas migres.
 
 ## Écarts avec la cible
 

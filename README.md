@@ -9,6 +9,8 @@ Plateforme locale actuellement ciblée: Windows x64, PowerShell 5.1. Git et un a
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -DiscoveryOnly -RepositoryPath <chemin-du-depot>
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Compliance -RepositoryPath <chemin-du-depot> -PlanOnly
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Compliance -RepositoryPath <chemin-du-depot>
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Mode Quick
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1
 ```
@@ -16,6 +18,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1
 Remplacer `<chemin-du-depot>` par un chemin local entre guillemets. Exécuter les commandes depuis la racine de Compliance_Platform.
 
 `-DiscoveryOnly` retourne le JSON de détection, matrice de capacités et résolution d'outils sans exécuter de contrôles. Ajouter `-ReportPath discovery.json` pour conserver ce résultat sous `reports/` de Compliance_Platform. Quick/Full valident le socle local; leur utilisation sur un dépôt externe n'est pas encore qualifiée.
+
+`-Compliance` execute le premier moteur v1 et produit le rapport JSON avec verdict consultatif PASS/FAIL. `-PlanOnly` n'execute rien et ne donne pas de verdict. Les controles reseau ou chargeant du code demandent des permissions explicites; voir [le moteur](docs/compliance-engine.md). Le rapport indique la couverture partielle et les controles non executes.
 
 Le bootstrap Windows x64 termine maintenant et marque son index `qualified`; Quick passe sans echec. Ce marqueur ne certifie ni la securite du runtime ni un poste neuf. Le bootstrap installe aussi des hooks dans le depot de la plateforme. Les limites et blocages restants sont decrits dans [les validations](docs/testing.md). Le verdict cible est consultatif, mais les hooks et la CI du socle peuvent echouer.
 
