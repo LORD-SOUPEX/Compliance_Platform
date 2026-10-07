@@ -9,7 +9,7 @@ Synthèse de [la roadmap existante dans plan.md](../plan.md#roadmap), mise à jo
 | Tool Bootstrap & Tool Resolver | PHASE EN COURS | Installation Windows x64 et hash vérifiés; paquets/modules, provenance et qualification produit restent ouverts. |
 | Compliance Engine | PHASE TERMINÉE | Critères v1: DAG, budgets, exécution, résultats, findings/verdict et parité fixtures; sandbox et consommateurs réels suivent en Phase 8. |
 | Control Catalog | PHASE TERMINÉE | Catalogue JSON/Schema v1, 28 contrôles, objectifs/limites; Matrix et Plan consomment les métadonnées. Qualification réelle suivie en Phase 8. |
-| Reporting Engine | PHASE TERMINÉE | Schéma/validateurs v1 et rapport de référence pour Compliance et modes historiques; findings, diagnostics, coverage, limitations, metadata et résumé stderr. Masquage/nettoyage avancés en Phase 8. |
+| Reporting Engine | PHASE TERMINÉE | Schéma/validateurs v1, métriques Discovery/Resolver/Compliance/Reporting et rapport de référence pour les modes historiques; masquage/nettoyage avancés en Phase 8. |
 | Policy Engine | PHASE NON COMMENCÉE | YAML descriptif, non autoritaire à l'exécution. |
 | Optional Integrations | PHASE EN COURS | Contrats testés en fixtures; restent runner GitLab distant, consumer repos autorisés et contextes UI/CI réels. |
 | Industrialisation | PHASE EN COURS | Matrice six plateformes, lock et corpus synthétique automatisés; Windows x64 expérimental, cinq cibles targeted. Mesures réelles, qualification native et support restent ouverts. |

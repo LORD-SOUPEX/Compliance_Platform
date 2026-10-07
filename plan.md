@@ -1390,6 +1390,11 @@ portables pour des usages volontaires variés.
   six plateformes; garder targeted/experimental tant que les preuves manquent.
 - [x] Mesurer faux positifs, faux négatifs et ambiguïtés sur un corpus synthétique
   de dix technologies avec contrôles négatifs et cas ambigus attendus.
+- [x] Exposer les durées Discovery, Resolver, Compliance et Reporting dans le
+  rapport v1, en champs facultatifs rétrocompatibles; DiscoveryOnly expose aussi
+  les deux premières durées.
+- [ ] Compléter les mesures d'utilité des rapports et coût des contrôles avec des
+  données provenant de dépôts consommateurs autorisés.
 - [ ] Répéter ces mesures sur des dépôts externes représentatifs et autorisés.
 - [ ] Qualifier nativement chaque plateforme avec bootstrap, tests et gates; le
   statut runtime `qualified` seul ne qualifie pas le produit.

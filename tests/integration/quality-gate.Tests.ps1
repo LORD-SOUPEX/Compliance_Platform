@@ -132,6 +132,7 @@ try {
             $exitCode = $LASTEXITCODE
             $result = ($output -join "`n") | ConvertFrom-Json
             Assert-Condition ($exitCode -eq 2 -and -not $result.scan_complete -and $result.scan_errors.Count -eq 1) 'Erreur de lecture masquee ou dupliquee.'
+            Assert-Condition ($result.metrics.discovery_ms -ge 0 -and $result.metrics.resolver_ms -ge 0) 'Métriques Discovery/Resolver absentes du rapport DiscoveryOnly.'
             Assert-Condition ($result.scan_errors[0].path -eq 'deployment.yaml' -and $result.scan_errors[0].operation -eq 'read') 'Diagnostic de lecture non localise.'
             Assert-Condition ((Test-Path $reportPath) -and $result.technologies.Count -gt 0) 'Rapport diagnostique non conserve.'
         } finally { $lockedFile.Dispose() }
@@ -520,6 +521,8 @@ try {
         $expectedCatalogHash = (Get-FileHash -LiteralPath (Join-Path $repoRoot '.config/control-catalog.json') -Algorithm SHA256).Hash.ToLowerInvariant()
         Assert-Condition ($reference.metadata.catalog_sha256 -eq $expectedCatalogHash) 'Empreinte du catalogue absente du rapport historique.'
         Assert-Condition ($reference.metadata.platform_qualification_status -eq 'experimental') 'Statut de qualification plateforme absent du rapport.'
+        Assert-Condition (@('discovery_ms', 'resolver_ms', 'compliance_ms', 'reporting_ms' | Where-Object { $reference.metrics.PSObject.Properties.Name -notcontains $_ }).Count -eq 0) 'Métriques de durée absentes du rapport historique.'
+        Assert-Condition (@($reference.metrics.PSObject.Properties | Where-Object { $_.Value -isnot [long] -and $_.Value -isnot [int] -or $_.Value -lt 0 }).Count -eq 0) 'Métriques historiques non entières ou négatives.'
     }
     Invoke-TestCase 'Fix normalise sans infrastructure' {
         Write-Fixture 'notes.txt' 'texte  '

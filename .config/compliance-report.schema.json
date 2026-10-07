@@ -21,6 +21,7 @@
     "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } },
     "summary": { "type": "object", "required": ["success", "fail", "error", "skipped", "critical_errors"] },
     "coverage": { "type": "object", "required": ["complete", "planned_controls", "executed_controls", "omitted_required_controls", "dependency_skips", "limitations"] },
+    "metrics": { "type": "object", "required": ["discovery_ms", "resolver_ms", "compliance_ms", "reporting_ms"], "properties": { "discovery_ms": { "type": "integer", "minimum": 0 }, "resolver_ms": { "type": "integer", "minimum": 0 }, "compliance_ms": { "type": "integer", "minimum": 0 }, "reporting_ms": { "type": "integer", "minimum": 0 } } },
     "limitations": { "type": "array" },
     "verdict": { "enum": ["PASS", "FAIL", null] },
     "verdict_reasons": { "type": "array", "items": { "type": "string" } },

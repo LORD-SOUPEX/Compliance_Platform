@@ -394,7 +394,8 @@ function ConvertTo-ComplianceReportFromChecks {
         [Parameter(Mandatory = $true)][object[]]$Resolver,
         [Parameter(Mandatory = $true)][string]$Mode,
         [string]$CatalogSha256 = $null,
-        [string]$PlatformQualificationStatus = $null
+        [string]$PlatformQualificationStatus = $null,
+        [pscustomobject]$StageMetrics
     )
     $normalized = New-Object System.Collections.Generic.List[object]
     $controls = New-Object System.Collections.Generic.List[object]
@@ -466,7 +467,7 @@ function ConvertTo-ComplianceReportFromChecks {
         permissions = [pscustomobject]@{ network = $false; code_execution = $false }
         controls = @($controls.ToArray())
     }
-    return New-ComplianceReport -Discovery $Discovery -Matrix $Matrix -Resolver $Resolver -Plan $plan -Results @($normalized.ToArray()) -SourceMode $Mode -CatalogSha256 $CatalogSha256 -PlatformQualificationStatus $PlatformQualificationStatus
+    return New-ComplianceReport -Discovery $Discovery -Matrix $Matrix -Resolver $Resolver -Plan $plan -Results @($normalized.ToArray()) -SourceMode $Mode -CatalogSha256 $CatalogSha256 -PlatformQualificationStatus $PlatformQualificationStatus -StageMetrics $StageMetrics
 }
 
 function Test-ComplianceReport {
@@ -481,6 +482,11 @@ function Test-ComplianceReport {
     }
     if ($Report.metadata.PSObject.Properties.Name -contains 'catalog_sha256' -and $null -ne $Report.metadata.catalog_sha256 -and ($Report.metadata.catalog_sha256 -isnot [string] -or $Report.metadata.catalog_sha256 -notmatch '^[a-f0-9]{64}$')) { throw 'Empreinte Control Catalog invalide.' }
     if ($Report.metadata.PSObject.Properties.Name -contains 'platform_qualification_status' -and $null -ne $Report.metadata.platform_qualification_status -and $Report.metadata.platform_qualification_status -notin @('targeted', 'experimental', 'qualified')) { throw 'Statut de qualification plateforme invalide.' }
+    if ($Report.PSObject.Properties.Name -contains 'metrics') {
+        foreach ($field in @('discovery_ms', 'resolver_ms', 'compliance_ms', 'reporting_ms')) {
+            if ($Report.metrics.PSObject.Properties.Name -notcontains $field -or ($Report.metrics.$field -isnot [int] -and $Report.metrics.$field -isnot [long]) -or $Report.metrics.$field -lt 0) { throw "Metrique Compliance invalide: $field" }
+        }
+    }
     if ($Report.schema_version -ne 1 -or $Report.execution_status -notin @('planned', 'completed', 'blocked', 'error')) { throw 'Version ou execution_status Compliance invalide.' }
     if ($Report.verdict -notin @('PASS', 'FAIL', $null)) { throw 'Verdict Compliance invalide.' }
     $generatedAt = [DateTimeOffset]::MinValue
@@ -525,9 +531,11 @@ function New-ComplianceReport {
         [string]$SourceMode = 'Compliance',
         [ValidateSet('PowerShell', 'Bash', 'VSCode', 'GitLab', 'Legacy')][string]$SourceAdapter = 'PowerShell',
         [string]$CatalogSha256 = $null,
-        [string]$PlatformQualificationStatus = $null
+        [string]$PlatformQualificationStatus = $null,
+        [pscustomobject]$StageMetrics
     )
     if (-not $PSCmdlet.ShouldProcess($Plan.repository, 'Construire le rapport Compliance en memoire')) { return }
+    $reportingTimer = [Diagnostics.Stopwatch]::StartNew()
     $discoveryScanComplete = if ($Discovery.PSObject.Properties.Name -contains 'scan_complete') { [bool]$Discovery.scan_complete } else { $true }
     $discoveryScanErrors = if ($Discovery.PSObject.Properties.Name -contains 'scan_errors') { @($Discovery.scan_errors) } else { @() }
     $normalizedResults = @($Results)
@@ -654,8 +662,17 @@ function New-ComplianceReport {
             limitations = @($omitted | ForEach-Object { [pscustomobject]@{ control_id = $_.id; reason = $_.reason } })
         }
         limitations = @($limitations)
+        metrics = [pscustomobject]@{
+            discovery_ms = if ($StageMetrics -and $StageMetrics.PSObject.Properties.Name -contains 'discovery_ms') { [long]$StageMetrics.discovery_ms } else { 0 }
+            resolver_ms = if ($StageMetrics -and $StageMetrics.PSObject.Properties.Name -contains 'resolver_ms') { [long]$StageMetrics.resolver_ms } else { 0 }
+            compliance_ms = if ($StageMetrics -and $StageMetrics.PSObject.Properties.Name -contains 'compliance_ms') { [long]$StageMetrics.compliance_ms } else { 0 }
+            reporting_ms = 0
+        }
         advisory = $true
     }
+    Test-ComplianceReport -Report $report | Out-Null
+    $reportingTimer.Stop()
+    $report.metrics.reporting_ms = $reportingTimer.ElapsedMilliseconds
     Test-ComplianceReport -Report $report | Out-Null
     return $report
 }

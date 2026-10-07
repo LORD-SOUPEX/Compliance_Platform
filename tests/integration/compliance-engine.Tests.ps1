@@ -97,6 +97,9 @@ try {
         $expectedCatalogHash = (Get-FileHash -LiteralPath (Join-Path $platformRoot '.config/control-catalog.json') -Algorithm SHA256).Hash.ToLowerInvariant()
         Assert-ComplianceIntegration ($execution.report.metadata.catalog_sha256 -eq $expectedCatalogHash) 'Empreinte du catalogue non propagee au rapport.'
         Assert-ComplianceIntegration ($execution.report.metadata.platform_qualification_status -eq 'experimental') 'Statut de plateforme non propage au rapport Compliance.'
+        Assert-ComplianceIntegration (@('discovery_ms', 'resolver_ms', 'compliance_ms', 'reporting_ms' | Where-Object { $execution.report.metrics.PSObject.Properties.Name -notcontains $_ }).Count -eq 0) 'Métriques de durée absentes du rapport.'
+        $expectedResolverDuration = [long](@($execution.report.resolver | ForEach-Object { $_.metrics.duration_ms } | Measure-Object -Sum).Sum)
+        Assert-ComplianceIntegration ($execution.report.metrics.resolver_ms -eq $expectedResolverDuration) 'Agrégation du temps Resolver incohérente.'
         $result = $execution.report.execution_results | Where-Object status -eq 'success'
         Assert-ComplianceIntegration ($result.root -eq 'nested/app' -and $result.capability -eq 'linting' -and $result.tool_version -eq '1.25.0') 'Resultat de controle incomplet.'
         Assert-ComplianceIntegration (-not (Test-Path (Join-Path $repoRoot '.venv')) -and -not (Test-Path (Join-Path $repoRoot '.tools'))) 'Outils installes dans le consommateur.'

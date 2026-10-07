@@ -12,7 +12,9 @@ Le contrat `schema_version: 1`, `engine_version: 0.1.0` inclut `repository`, `ge
 
 Le modele de resultat et les regles PASS/FAIL sont decrits dans [compliance-engine.md](compliance-engine.md). `execution_status` vaut `planned`, `completed`, `blocked` (scan incomplet) ou `error` (preparation). Le plan seul ne produit pas de verdict et n'execute pas de controle. Le rapport conserve stdout/stderr, les codes, les versions, les diagnostics et les controles non executes.
 
-`findings` contient un objet par résultat FAIL/ERROR et par erreur de scan critique, avec sévérité, racine et diagnostics. `diagnostics` aplatit les constats d’exécution et de Discovery. `limitations` conserve les contrôles non applicables, les effets non autorisés, les dépendances bloquées et les limites catalogue. `metadata` comprend l'identifiant du run, la plateforme, la version catalogue, les permissions accordées, `catalog_sha256` et le statut produit `platform_qualification_status` (`targeted`, `experimental`, `qualified`). Ces deux dernières propriétés sont facultatives dans le schéma v1 pour accepter les rapports émis avant leur ajout.
+`findings` contient un objet par résultat FAIL/ERROR et par erreur de scan critique, avec sévérité, racine et diagnostics. `diagnostics` aplatit les constats d’exécution et de Discovery. `limitations` conserve les contrôles non applicables, les effets non autorisés, les dépendances bloquées et les limites catalogue. `metadata` comprend l'identifiant du run, la plateforme, la version catalogue, les permissions accordées, `catalog_sha256` et le statut produit `platform_qualification_status` (`targeted`, `experimental`, `qualified`). Ces propriétés sont facultatives dans le schéma v1 pour accepter les rapports émis avant leur ajout.
+
+Le champ facultatif `metrics` expose `discovery_ms`, `resolver_ms`, `compliance_ms` et `reporting_ms`, en millisecondes entières non négatives. Discovery inclut l’inventaire, la détection et la matrice; Resolver est mesuré séparément à partir de ses timers par technologie; Compliance mesure la construction du plan et les contrôles; Reporting mesure l’agrégation et les validations en mémoire, sans l’écriture disque. Les consommateurs v1 qui ne connaissent pas ce champ peuvent l’ignorer.
 
 `coverage.complete` devient faux en presence de controle requis omis, erreur, resultat manquant, dependance bloquee ou scan incomplet. Les alternatives écartées par le resolver ne sont pas des obligations manquantes. La décision porte sur le périmètre effectivement évalué, pas sur une certification.
 
@@ -20,7 +22,7 @@ Les rapports sur disque sont vérifiés par les intégrations, y compris FAIL, c
 
 ## DiscoveryOnly
 
-`-DiscoveryOnly` ecrit sur stdout un objet `schema_version: 1` contenant repository, technologies, project_roots, ambiguities, capability_matrix, tool_resolution, scan_complete et scan_errors. `-ReportPath` ecrit une copie sous `reports/` de la plateforme, ou au chemin absolu indique. Une erreur de parcours ou lecture ne supprime plus cet inventaire partiel.
+`-DiscoveryOnly` ecrit sur stdout un objet `schema_version: 1` contenant repository, technologies, project_roots, ambiguities, capability_matrix, tool_resolution, scan_complete, scan_errors et les durees Discovery/Resolver. `-ReportPath` ecrit une copie sous `reports/` de la plateforme, ou au chemin absolu indique. Une erreur de parcours ou lecture ne supprime plus cet inventaire partiel.
 
 ## Quality Gate
 

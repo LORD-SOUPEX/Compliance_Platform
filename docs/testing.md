@@ -2,7 +2,7 @@
 
 ## Cycle d'implementation courant
 
-Phases 4–8, validation locale du 7 octobre 2026: **27 tests unitaires Compliance, 11 adaptateur, 5 reproductibilité, 6 Control Catalog, 4 matrice plateforme, 13 intégrations Compliance, 4 intégrations adaptateur et 46 scénarios historiques** réussis. Couverture: DAG/cycles, budgets, sorties bornées, catalogue, rapports, permissions, parité, contrats PowerShell/VS Code/GitLab, relais Git Bash, lock exact Windows x64 et corpus consommateurs synthétique.
+Phases 4–8, validation locale du 7 octobre 2026: **27 tests unitaires Compliance, 11 adaptateur, 5 reproductibilité, 6 Control Catalog, 4 matrice plateforme, 13 intégrations Compliance, 4 intégrations adaptateur et 46 scénarios historiques** réussis. Couverture: DAG/cycles, budgets, sorties bornées, catalogue, rapports, permissions, métriques de phase, parité, contrats PowerShell/VS Code/GitLab, relais Git Bash, lock exact Windows x64 et corpus consommateurs synthétique.
 Chaque mode historique écrit aussi le rapport de référence sous `reports/compliance-report.json`; les fixtures valident ce contrat tout en vérifiant que le rapport historique et le code de sortie restent inchangés. Aucun pipeline GitLab distant n'a été exécuté.
 
 Quick du 7 octobre: **10 PASS, 0 FAIL, 1 WARN, 6 SKIP, 0 ERROR**, code 0. Full: **11 PASS, 1 FAIL, 1 WARN, 6 SKIP, 0 ERROR**, code 1; seul pip-audit échoue sur `asteval==1.0.6` et `ecdsa==0.19.2` (quatre lignes d'avis, dont un identifiant répété). Aucun avis n'est ignoré. ShellCheck reste indisponible sur Windows.

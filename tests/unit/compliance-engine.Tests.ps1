@@ -119,7 +119,18 @@ $roundTrip = $report | ConvertTo-Json -Depth 20 | ConvertFrom-Json
 Assert-Compliance ($roundTrip.verdict -eq 'PASS' -and $roundTrip.execution_results.Count -eq 1 -and $roundTrip.advisory) 'Rapport Compliance incomplet.'
 Assert-Compliance ($roundTrip.metadata.catalog_sha256 -eq $catalog.content_sha256 -and $roundTrip.metadata.catalog_schema_version -eq 1) 'Traçabilite du catalogue absente du rapport.'
 Assert-Compliance ($roundTrip.metadata.platform_qualification_status -eq 'experimental') 'Statut plateforme absent du rapport.'
+Assert-Compliance (@('discovery_ms', 'resolver_ms', 'compliance_ms', 'reporting_ms' | Where-Object { $roundTrip.metrics.PSObject.Properties.Name -notcontains $_ }).Count -eq 0 -and @($roundTrip.metrics.PSObject.Properties | Where-Object { $_.Value -lt 0 }).Count -eq 0) 'Métriques de durée absentes ou négatives.'
 $reportSchema = Get-Content -LiteralPath (Join-Path $platformRoot '.config/compliance-report.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+Assert-Compliance ($reportSchema.required -notcontains 'metrics' -and $reportSchema.properties.metrics.required.Count -eq 4) 'Métriques incompatibles avec les anciens rapports v1.'
+$legacyV1Report = $roundTrip | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+$legacyV1Report.PSObject.Properties.Remove('metrics')
+Assert-Compliance (Test-ComplianceReport -Report $legacyV1Report) 'Rapport v1 sans metrics rejete.'
+$invalidMetrics = $roundTrip | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+$invalidMetrics.metrics.resolver_ms = -1
+$schemaRejected = $false
+try { Test-ComplianceReport -Report $invalidMetrics | Out-Null }
+catch { $schemaRejected = $_.Exception.Message -match 'Metrique Compliance invalide: resolver_ms' }
+Assert-Compliance $schemaRejected 'Duree negative acceptee dans les metrics.'
 foreach ($field in @('findings', 'diagnostics', 'coverage', 'limitations', 'metadata', 'verdict')) {
     Assert-Compliance ($reportSchema.required -contains $field -and $roundTrip.PSObject.Properties.Name -contains $field) "Champ report/schema absent: $field"
 }

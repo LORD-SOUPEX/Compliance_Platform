@@ -6,7 +6,7 @@ Discovery est intégré à `scripts/quality-gate.ps1`. Il accepte un dossier ext
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -DiscoveryOnly -RepositoryPath <chemin-du-depot>
 ```
 
-Le JSON Discovery contient `schema_version`, `repository`, `technologies`, `project_roots`, `ambiguities`, `capability_matrix`, `tool_resolution`, `scan_complete` et `scan_errors`. Une entree de technologie expose `technology`, `status`, `evidence`, `roots` et `ambiguities`.
+Le JSON Discovery contient `schema_version`, `repository`, `technologies`, `project_roots`, `ambiguities`, `capability_matrix`, `tool_resolution`, `scan_complete`, `scan_errors` et `metrics.discovery_ms`/`metrics.resolver_ms`. Une entree de technologie expose `technology`, `status`, `evidence`, `roots` et `ambiguities`.
 
 ## Détecteurs
 

@@ -960,8 +960,17 @@ try {
     if ($PlanOnly -and -not $Compliance) { throw 'PlanOnly exige le mode Compliance.' }
     if ($Compliance -and ($DiscoveryOnly -or $Mode -eq 'Fix' -or $Category -ne 'All')) { throw 'Compliance ne se combine pas avec DiscoveryOnly, Fix ou Category.' }
     Push-Location $repoRoot
+    $discoveryTimer = [Diagnostics.Stopwatch]::StartNew()
     $script:Files = @(Get-ProjectFile -Root $repoRoot)
     $script:Technologies = Get-Technology -RepositoryRoot $repoRoot
+    $discoveryTimer.Stop()
+    $resolverDurationMs = [long](@($script:Technologies.tool_resolution | ForEach-Object { $_.metrics.duration_ms } | Measure-Object -Sum).Sum)
+    $script:StageMetrics = [pscustomobject]@{
+        discovery_ms = [Math]::Max(0, $discoveryTimer.ElapsedMilliseconds - $resolverDurationMs)
+        resolver_ms = $resolverDurationMs
+        compliance_ms = 0
+        reporting_ms = 0
+    }
     if ($DiscoveryOnly -or $Compliance) {
         $discoveryResult = [pscustomobject]@{
             schema_version = 1
@@ -973,12 +982,17 @@ try {
             tool_resolution = $script:Technologies.tool_resolution
             scan_complete = $script:Technologies.scan_complete
             scan_errors = $script:Technologies.scan_errors
+            metrics = [pscustomobject]@{
+                discovery_ms = $script:StageMetrics.discovery_ms
+                resolver_ms = $script:StageMetrics.resolver_ms
+            }
         }
         if ($Compliance) {
             Import-Module (Join-Path $platformRoot 'src/Compliance.Engine.psm1') -Force -ErrorAction Stop
             $executionPlan = [pscustomobject]@{ schema_version = 1; repository = $repoRoot; controls = @() }
             $executionResults = @()
             $preparationFailed = $false
+            $complianceTimer = [Diagnostics.Stopwatch]::StartNew()
             try {
                 $executionPlan = New-CompliancePlan -Discovery $discoveryResult.technologies -CapabilityMatrix $discoveryResult.capability_matrix -Resolver $discoveryResult.tool_resolution -RepositoryRoot $repoRoot -Timeout $TimeoutSeconds -GlobalTimeout $ComplianceTimeoutSeconds -MaxOutputBytes $ComplianceMaxOutputBytes -AllowNetwork:$AllowNetwork -AllowCodeExecution:$AllowCodeExecution
                 if (-not $PlanOnly -and $discoveryResult.scan_complete) {
@@ -994,9 +1008,12 @@ try {
                 $preparationFailed = $true
                 $now = [DateTimeOffset]::UtcNow.ToString('o')
                 $executionResults = @([pscustomobject]@{ control_id = 'engine/preparation'; technology = 'engine'; capability = 'preparation'; root = '.'; status = 'error'; execution_start = $now; execution_end = $now; duration_ms = 0; tool_version = $null; stdout = ''; stderr = ''; exit_code = $null; critical = $true; diagnostics = @([pscustomobject]@{ code = 'preparation_error'; message = $_.Exception.Message; critical = $true }) })
+            } finally {
+                $complianceTimer.Stop()
+                $script:StageMetrics.compliance_ms = $complianceTimer.ElapsedMilliseconds
             }
             $platformQualificationStatus = Get-PlatformQualificationStatus -PlatformId (Get-ExecutionPlatform).id
-            $complianceReport = New-ComplianceReport -Discovery $discoveryResult -Matrix $discoveryResult.capability_matrix -Resolver $discoveryResult.tool_resolution -Plan $executionPlan -Results $executionResults -PlanOnly:($PlanOnly -and -not $preparationFailed) -SourceAdapter $Adapter -CatalogSha256 $script:ControlCatalog.content_sha256 -PlatformQualificationStatus $platformQualificationStatus
+            $complianceReport = New-ComplianceReport -Discovery $discoveryResult -Matrix $discoveryResult.capability_matrix -Resolver $discoveryResult.tool_resolution -Plan $executionPlan -Results $executionResults -PlanOnly:($PlanOnly -and -not $preparationFailed) -SourceAdapter $Adapter -CatalogSha256 $script:ControlCatalog.content_sha256 -PlatformQualificationStatus $platformQualificationStatus -StageMetrics $script:StageMetrics
             if ($preparationFailed) { $complianceReport.execution_status = 'error' }
             $complianceJson = $complianceReport | ConvertTo-Json -Depth 20
             $reportName = if ($ReportPath) { $ReportPath } else { 'compliance-report.json' }
@@ -1067,7 +1084,7 @@ try {
         scan_errors = $script:Technologies.scan_errors
     }
     $platformQualificationStatus = Get-PlatformQualificationStatus -PlatformId (Get-ExecutionPlatform).id
-    $referenceReport = ConvertTo-ComplianceReportFromChecks -Checks $script:Results.ToArray() -RepositoryRoot $repoRoot -Discovery $legacyDiscovery -Matrix $script:Technologies.capability_matrix -Resolver $script:Technologies.tool_resolution -Mode $script:RequestedMode -CatalogSha256 $script:ControlCatalog.content_sha256 -PlatformQualificationStatus $platformQualificationStatus
+    $referenceReport = ConvertTo-ComplianceReportFromChecks -Checks $script:Results.ToArray() -RepositoryRoot $repoRoot -Discovery $legacyDiscovery -Matrix $script:Technologies.capability_matrix -Resolver $script:Technologies.tool_resolution -Mode $script:RequestedMode -CatalogSha256 $script:ControlCatalog.content_sha256 -PlatformQualificationStatus $platformQualificationStatus -StageMetrics $script:StageMetrics
     $referencePath = Join-Path (Join-Path $platformRoot 'reports') 'compliance-report.json'
     if (-not (Test-Path (Split-Path -Parent $referencePath) -PathType Container)) { New-Item -ItemType Directory -Path (Split-Path -Parent $referencePath) -Force | Out-Null }
     [IO.File]::WriteAllText($referencePath, ($referenceReport | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
