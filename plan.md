@@ -1377,6 +1377,8 @@ portables pour des usages volontaires variés.
   procédures de mise à jour.
 - [x] Formaliser les commandes reproductibles de qualification Windows x64 et
   consigner les résultats Quick/Full, les limites et le statut du runner distant.
+- [x] Inclure dans les rapports l'empreinte SHA-256 du catalogue réellement chargé,
+  sans invalider les consommateurs des rapports v1 précédents.
 - [ ] Mesurer qualité de détection, coût, temps d'exécution, couverture et utilité
   des rapports sans compter l'adoption comme une obligation.
 - [ ] Organiser les contributions, la qualification des contrôles et le support des

@@ -114,13 +114,15 @@ $results = @(Invoke-CompliancePlan -Plan $executionPlan -ProcessRunner { throw '
 Assert-Compliance ($results[0].status -eq 'skipped' -and -not $results[0].critical) 'Technologie absente mal restituee.'
 $passed++
 $discoveryReport = [pscustomobject]@{ scan_complete = $true; technologies = @() }
-$report = New-ComplianceReport -Discovery $discoveryReport -Matrix @() -Resolver @() -Plan $executionPlan -Results $results
+$report = New-ComplianceReport -Discovery $discoveryReport -Matrix @() -Resolver @() -Plan $executionPlan -Results $results -CatalogSha256 $catalog.content_sha256
 $roundTrip = $report | ConvertTo-Json -Depth 20 | ConvertFrom-Json
 Assert-Compliance ($roundTrip.verdict -eq 'PASS' -and $roundTrip.execution_results.Count -eq 1 -and $roundTrip.advisory) 'Rapport Compliance incomplet.'
+Assert-Compliance ($roundTrip.metadata.catalog_sha256 -eq $catalog.content_sha256 -and $roundTrip.metadata.catalog_schema_version -eq 1) 'Traçabilite du catalogue absente du rapport.'
 $reportSchema = Get-Content -LiteralPath (Join-Path $platformRoot '.config/compliance-report.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 foreach ($field in @('findings', 'diagnostics', 'coverage', 'limitations', 'metadata', 'verdict')) {
     Assert-Compliance ($reportSchema.required -contains $field -and $roundTrip.PSObject.Properties.Name -contains $field) "Champ report/schema absent: $field"
 }
+Assert-Compliance ($reportSchema.properties.metadata.properties.catalog_sha256.pattern -eq '^[a-f0-9]{64}$' -and 'catalog_sha256' -notin $reportSchema.properties.metadata.required) 'Empreinte catalogue incompatible avec la retrocompatibilite v1.'
 $invalidReport = $roundTrip | ConvertTo-Json -Depth 20 | ConvertFrom-Json
 $invalidReport.verdict = 'SUCCESS'
 $schemaRejected = $false
@@ -133,6 +135,12 @@ $schemaRejected = $false
 try { Test-ComplianceReport -Report $invalidSummary | Out-Null }
 catch { $schemaRejected = $_.Exception.Message -match 'Resume Compliance incoherent' }
 Assert-Compliance $schemaRejected 'Resume de rapport incoherent accepte.'
+$invalidDigest = $roundTrip | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+$invalidDigest.metadata.catalog_sha256 = 'invalid'
+$schemaRejected = $false
+try { Test-ComplianceReport -Report $invalidDigest | Out-Null }
+catch { $schemaRejected = $_.Exception.Message -match 'Empreinte Control Catalog invalide' }
+Assert-Compliance $schemaRejected 'Empreinte catalogue invalide acceptee.'
 $passed++
 $planned = New-ComplianceReport -Discovery $discoveryReport -Matrix @() -Resolver @() -Plan $executionPlan -Results @() -PlanOnly
 Assert-Compliance ($null -eq $planned.verdict -and $planned.execution_status -eq 'planned') 'Un plan seul a produit un verdict de conformite.'

@@ -985,7 +985,7 @@ try {
                 $now = [DateTimeOffset]::UtcNow.ToString('o')
                 $executionResults = @([pscustomobject]@{ control_id = 'engine/preparation'; technology = 'engine'; capability = 'preparation'; root = '.'; status = 'error'; execution_start = $now; execution_end = $now; duration_ms = 0; tool_version = $null; stdout = ''; stderr = ''; exit_code = $null; critical = $true; diagnostics = @([pscustomobject]@{ code = 'preparation_error'; message = $_.Exception.Message; critical = $true }) })
             }
-            $complianceReport = New-ComplianceReport -Discovery $discoveryResult -Matrix $discoveryResult.capability_matrix -Resolver $discoveryResult.tool_resolution -Plan $executionPlan -Results $executionResults -PlanOnly:($PlanOnly -and -not $preparationFailed) -SourceAdapter $Adapter
+            $complianceReport = New-ComplianceReport -Discovery $discoveryResult -Matrix $discoveryResult.capability_matrix -Resolver $discoveryResult.tool_resolution -Plan $executionPlan -Results $executionResults -PlanOnly:($PlanOnly -and -not $preparationFailed) -SourceAdapter $Adapter -CatalogSha256 $script:ControlCatalog.content_sha256
             if ($preparationFailed) { $complianceReport.execution_status = 'error' }
             $complianceJson = $complianceReport | ConvertTo-Json -Depth 20
             $reportName = if ($ReportPath) { $ReportPath } else { 'compliance-report.json' }
@@ -1055,7 +1055,7 @@ try {
         scan_complete = $script:Technologies.scan_complete
         scan_errors = $script:Technologies.scan_errors
     }
-    $referenceReport = ConvertTo-ComplianceReportFromChecks -Checks $script:Results.ToArray() -RepositoryRoot $repoRoot -Discovery $legacyDiscovery -Matrix $script:Technologies.capability_matrix -Resolver $script:Technologies.tool_resolution -Mode $script:RequestedMode
+    $referenceReport = ConvertTo-ComplianceReportFromChecks -Checks $script:Results.ToArray() -RepositoryRoot $repoRoot -Discovery $legacyDiscovery -Matrix $script:Technologies.capability_matrix -Resolver $script:Technologies.tool_resolution -Mode $script:RequestedMode -CatalogSha256 $script:ControlCatalog.content_sha256
     $referencePath = Join-Path (Join-Path $platformRoot 'reports') 'compliance-report.json'
     if (-not (Test-Path (Split-Path -Parent $referencePath) -PathType Container)) { New-Item -ItemType Directory -Path (Split-Path -Parent $referencePath) -Force | Out-Null }
     [IO.File]::WriteAllText($referencePath, ($referenceReport | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))

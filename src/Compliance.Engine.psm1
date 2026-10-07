@@ -392,7 +392,8 @@ function ConvertTo-ComplianceReportFromChecks {
         [Parameter(Mandatory = $true)][pscustomobject]$Discovery,
         [Parameter(Mandatory = $true)][object[]]$Matrix,
         [Parameter(Mandatory = $true)][object[]]$Resolver,
-        [Parameter(Mandatory = $true)][string]$Mode
+        [Parameter(Mandatory = $true)][string]$Mode,
+        [string]$CatalogSha256 = $null
     )
     $normalized = New-Object System.Collections.Generic.List[object]
     $controls = New-Object System.Collections.Generic.List[object]
@@ -464,7 +465,7 @@ function ConvertTo-ComplianceReportFromChecks {
         permissions = [pscustomobject]@{ network = $false; code_execution = $false }
         controls = @($controls.ToArray())
     }
-    return New-ComplianceReport -Discovery $Discovery -Matrix $Matrix -Resolver $Resolver -Plan $plan -Results @($normalized.ToArray()) -SourceMode $Mode
+    return New-ComplianceReport -Discovery $Discovery -Matrix $Matrix -Resolver $Resolver -Plan $plan -Results @($normalized.ToArray()) -SourceMode $Mode -CatalogSha256 $CatalogSha256
 }
 
 function Test-ComplianceReport {
@@ -477,6 +478,7 @@ function Test-ComplianceReport {
     foreach ($field in @('run_id', 'source_mode', 'source_adapter', 'platform', 'catalog_schema_version', 'network_authorized', 'code_execution_authorized')) {
         if ($Report.metadata.PSObject.Properties.Name -notcontains $field) { throw "Metadata Compliance absente: $field" }
     }
+    if ($Report.metadata.PSObject.Properties.Name -contains 'catalog_sha256' -and $null -ne $Report.metadata.catalog_sha256 -and ($Report.metadata.catalog_sha256 -isnot [string] -or $Report.metadata.catalog_sha256 -notmatch '^[a-f0-9]{64}$')) { throw 'Empreinte Control Catalog invalide.' }
     if ($Report.schema_version -ne 1 -or $Report.execution_status -notin @('planned', 'completed', 'blocked', 'error')) { throw 'Version ou execution_status Compliance invalide.' }
     if ($Report.verdict -notin @('PASS', 'FAIL', $null)) { throw 'Verdict Compliance invalide.' }
     $generatedAt = [DateTimeOffset]::MinValue
@@ -519,7 +521,8 @@ function New-ComplianceReport {
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Results,
         [switch]$PlanOnly,
         [string]$SourceMode = 'Compliance',
-        [ValidateSet('PowerShell', 'Bash', 'VSCode', 'GitLab', 'Legacy')][string]$SourceAdapter = 'PowerShell'
+        [ValidateSet('PowerShell', 'Bash', 'VSCode', 'GitLab', 'Legacy')][string]$SourceAdapter = 'PowerShell',
+        [string]$CatalogSha256 = $null
     )
     if (-not $PSCmdlet.ShouldProcess($Plan.repository, 'Construire le rapport Compliance en memoire')) { return }
     $discoveryScanComplete = if ($Discovery.PSObject.Properties.Name -contains 'scan_complete') { [bool]$Discovery.scan_complete } else { $true }
@@ -621,7 +624,8 @@ function New-ComplianceReport {
             source_mode = $SourceMode
             source_adapter = $SourceAdapter
             platform = if ($runtimePlatform.Count -gt 0) { $runtimePlatform[0] } else { $null }
-            catalog_schema_version = if ($catalogIds.Count -gt 0) { 1 } else { $null }
+            catalog_schema_version = if ($catalogIds.Count -gt 0 -or $CatalogSha256) { 1 } else { $null }
+            catalog_sha256 = if ([string]::IsNullOrWhiteSpace($CatalogSha256)) { $null } else { $CatalogSha256 }
             network_authorized = [bool]$permissions.network
             code_execution_authorized = [bool]$permissions.code_execution
         }

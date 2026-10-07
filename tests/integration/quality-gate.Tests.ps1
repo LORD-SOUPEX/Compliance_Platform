@@ -469,6 +469,8 @@ try {
         Assert-Condition ($report.technologies.shell_files.Count -eq 1 -and $report.technologies.shell_files[0] -eq 'run.sh') 'Objets fichiers non normalisés.'
         $reference = Get-Content (Join-Path $repoRoot 'reports/compliance-report.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         Assert-Condition ($reference.schema_version -eq 1 -and $reference.metadata.source_mode -eq 'Ci' -and $reference.verdict -eq 'PASS' -and $reference.execution_results.Count -eq 1) 'Rapport de référence absent ou divergent du mode historique.'
+        $expectedCatalogHash = (Get-FileHash -LiteralPath (Join-Path $repoRoot '.config/control-catalog.json') -Algorithm SHA256).Hash.ToLowerInvariant()
+        Assert-Condition ($reference.metadata.catalog_sha256 -eq $expectedCatalogHash) 'Empreinte du catalogue absente du rapport historique.'
     }
     Invoke-TestCase 'Fix normalise sans infrastructure' {
         Write-Fixture 'notes.txt' 'texte  '

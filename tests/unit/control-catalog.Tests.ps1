@@ -13,8 +13,10 @@ function Assert-Catalog {
 }
 
 $schema = Get-Content -LiteralPath (Join-Path $platformRoot '.config/control-catalog.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-$catalog = Import-ControlCatalog -Path (Join-Path $platformRoot '.config/control-catalog.json')
+$catalogPath = Join-Path $platformRoot '.config/control-catalog.json'
+$catalog = Import-ControlCatalog -Path $catalogPath
 Assert-Catalog ($schema.properties.schema_version.const -eq $catalog.schema_version -and $schema.'$defs'.control.properties.severity.enum.Count -eq 4) 'Schema JSON incompatible avec le catalogue.'
+Assert-Catalog ($catalog.content_sha256 -eq (Get-FileHash -LiteralPath $catalogPath -Algorithm SHA256).Hash.ToLowerInvariant()) 'Empreinte du catalogue absente ou incoherente.'
 Assert-Catalog ($schema.'$defs'.control.required -contains 'objective' -and $schema.'$defs'.control.required -contains 'limitations' -and @($catalog.controls | Where-Object { [string]::IsNullOrWhiteSpace($_.objective) -or $null -eq $_.limitations }).Count -eq 0) 'Objectif ou limites explicites absents d un controle.'
 Assert-Catalog (@($catalog.controls.id | Select-Object -Unique).Count -eq $catalog.controls.Count) 'IDs de controle dupliques.'
 $python = @(Get-CatalogCapabilityProfile -Catalog $catalog -Technology python)

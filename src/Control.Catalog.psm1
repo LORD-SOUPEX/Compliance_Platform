@@ -52,6 +52,7 @@ function Import-ControlCatalog {
             foreach ($dependency in $ids[$current].dependencies) { $pending.Push($dependency) }
         }
     }
+    $catalog | Add-Member -MemberType NoteProperty -Name content_sha256 -Value ((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant())
     return $catalog
 }
 
