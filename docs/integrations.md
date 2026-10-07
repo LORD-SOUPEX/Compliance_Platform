@@ -25,12 +25,12 @@ Le contrat exige un dossier local existant; il refuse les URI de rapport distant
 
 | Adaptateur | Lancement | Compatibilité vérifiée | Résultat |
 | --- | --- | --- | --- |
-| PowerShell | `scripts/compliance-adapter.ps1 -Adapter PowerShell -RepositoryPath <chemin>` | Windows x64, Windows PowerShell 5.1 | Code moteur et rapport v1 |
+| PowerShell | `scripts/compliance-adapter.ps1 -Adapter PowerShell -RepositoryPath <chemin>` | Windows x64, PowerShell 5.1; statut produit experimental | Code moteur et rapport v1 |
 | Bash | `scripts/compliance.sh -RepositoryPath <chemin>` | Git Bash sous Windows avec `powershell.exe` | Relais vers PowerShell, rapport v1 |
-| VS Code | Tâche `Compliance v1` | Workspace Windows qualifié, tâche locale | Même contrat; résumé humain sur stderr |
+| VS Code | Tâche `Compliance v1` | Tâche locale invoquée en fixture Windows; expérience UI non qualifiée | Même contrat; résumé humain sur stderr |
 | GitLab | Job `compliance-report` | Configuration YAML validée; runner distant non exécuté | Rapport artifact, verdict non bloquant |
 
-Le script Bash peut trouver `pwsh`, mais cela ne qualifie pas le moteur natif Linux/macOS: chemins d'outils, runtime, intégrité et contrôles restent qualifiés Windows x64 seulement.
+Le script Bash peut trouver `pwsh`, mais cela ne qualifie pas le moteur natif Linux/macOS: chemins d'outils, runtime, intégrité et contrôles ne sont pas vérifiés sur ces systèmes. Windows x64 reste experimental dans la matrice de qualification produit.
 
 ## Permissions GitLab
 
@@ -42,4 +42,4 @@ Le job historique `quality-gate` conserve son comportement et peut échouer ind�
 
 ## Limites
 
-Les quatre contrats sont testés; Git Bash a été exécuté sur Windows. Un pipeline GitLab distant n'a pas été lancé: son job est vérifié statiquement et demeure opt-in. L'adaptateur n'envoie ni sources ni secrets à une API, et ne publie que l'artifact local configuré par GitLab. Les permissions autorisent des processus dans le dépôt sans sandbox; les contributions non fiables exigent un runner isolé. Toute extension à une nouvelle plateforme ou forge demande une qualification propre.
+Les quatre contrats et wrappers sont testés en fixtures; Git Bash a été exécuté sur Windows. Aucun pipeline GitLab distant, véritable workspace UI VS Code ni dépôt consommateur autorisé n'a été qualifié. Les mesures faites sur fixtures ne démontrent pas le comportement de dépôts réels. L'adaptateur n'envoie ni sources ni secrets à une API, et ne publie que l'artifact local configuré par GitLab. Les permissions autorisent des processus dans le dépôt sans sandbox; les contributions non fiables exigent un runner isolé. Toute extension à une nouvelle plateforme ou forge demande une qualification propre.

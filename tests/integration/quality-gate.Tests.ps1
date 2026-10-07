@@ -43,8 +43,10 @@ function Copy-GateFixture {
     New-Item -ItemType Directory -Path (Join-Path $repoRoot 'scripts'), (Join-Path $repoRoot 'src'), (Join-Path $repoRoot '.config') -Force | Out-Null
     Copy-Item $gatePath (Join-Path $repoRoot 'scripts/quality-gate.ps1')
     Copy-Item (Join-Path $originalRoot 'src/Control.Catalog.psm1') (Join-Path $repoRoot 'src/Control.Catalog.psm1')
+    Copy-Item (Join-Path $originalRoot 'src/Platform.Support.psm1') (Join-Path $repoRoot 'src/Platform.Support.psm1')
     Copy-Item (Join-Path $originalRoot 'src/Compliance.Engine.psm1') (Join-Path $repoRoot 'src/Compliance.Engine.psm1')
     Copy-Item (Join-Path $originalRoot '.config/control-catalog.json') (Join-Path $repoRoot '.config/control-catalog.json')
+    Copy-Item (Join-Path $originalRoot '.config/platform-support.json') (Join-Path $repoRoot '.config/platform-support.json')
     Copy-Item (Join-Path $originalRoot 'scripts/check-emoji.ps1') (Join-Path $repoRoot 'scripts/check-emoji.ps1')
 }
 
@@ -195,6 +197,52 @@ try {
         Assert-Condition ($javascript.status -eq 'detected' -and $typescript.status -eq 'detected' -and $javascript.roots -contains 'services/web' -and $typescript.roots -contains 'services/web') 'Détection ou racine JavaScript/TypeScript incorrecte.'
         Assert-Condition ($kubernetes.status -eq 'detected' -and $kubernetes.evidence -contains 'clusters/dev/deployment.yaml') 'Preuve Kubernetes manquante.'
         Assert-Condition ($helm.status -eq 'detected' -and $helm.roots -contains 'charts/app') 'Racine Helm absente.'
+    }
+    Invoke-TestCase 'Corpus consommateurs synthétique et métriques étiquetées' {
+        $corpus = @(
+            [pscustomobject]@{ id = 'powershell'; cohort = 'positive'; expected = @('powershell'); ambiguous = @(); files = @{ 'module.psm1' = 'function Get-Value { return 1 }' } },
+            [pscustomobject]@{ id = 'terraform'; cohort = 'positive'; expected = @('terraform'); ambiguous = @(); files = @{ '.terraform-version' = '1.15.8'; 'main.tf' = 'terraform {}' } },
+            [pscustomobject]@{ id = 'opentofu'; cohort = 'positive'; expected = @('opentofu'); ambiguous = @(); files = @{ '.opentofu-version' = '1.10.0'; 'main.tf' = 'terraform {}' } },
+            [pscustomobject]@{ id = 'terragrunt'; cohort = 'positive'; expected = @('terragrunt'); ambiguous = @(); files = @{ 'terragrunt.hcl' = 'locals {}' } },
+            [pscustomobject]@{ id = 'ansible'; cohort = 'positive'; expected = @('ansible'); ambiguous = @(); files = @{ 'ansible.cfg' = '[defaults]'; 'roles/web/tasks/main.yml' = '---' } },
+            [pscustomobject]@{ id = 'docker'; cohort = 'positive'; expected = @('docker'); ambiguous = @(); files = @{ 'Dockerfile' = 'FROM scratch' } },
+            [pscustomobject]@{ id = 'kubernetes'; cohort = 'positive'; expected = @('kubernetes'); ambiguous = @(); files = @{ 'deployment.yaml' = "apiVersion: apps/v1`nkind: Deployment`nmetadata:`n  name: app" } },
+            [pscustomobject]@{ id = 'helm'; cohort = 'positive'; expected = @('helm'); ambiguous = @(); files = @{ 'Chart.yaml' = "apiVersion: v2`nname: app`nversion: 1.0.0" } },
+            [pscustomobject]@{ id = 'javascript'; cohort = 'positive'; expected = @('javascript'); ambiguous = @(); files = @{ 'package.json' = '{}'; 'index.js' = 'export const value = 1' } },
+            [pscustomobject]@{ id = 'typescript'; cohort = 'positive'; expected = @('javascript', 'typescript'); ambiguous = @(); files = @{ 'package.json' = '{}'; 'tsconfig.json' = '{}'; 'index.ts' = 'export const value: number = 1' } },
+            [pscustomobject]@{ id = 'empty'; cohort = 'negative'; expected = @(); ambiguous = @(); files = @{} },
+            [pscustomobject]@{ id = 'generic-yaml'; cohort = 'negative'; expected = @(); ambiguous = @(); files = @{ 'config.yml' = "service:`n  name: app" } },
+            [pscustomobject]@{ id = 'unmarked-hcl'; cohort = 'ambiguity'; expected = @(); ambiguous = @('terraform', 'opentofu'); files = @{ 'main.tf' = 'terraform {}' } },
+            [pscustomobject]@{ id = 'weak-ansible-signal'; cohort = 'ambiguity'; expected = @(); ambiguous = @('ansible'); files = @{ 'config.yml' = "- hosts: localhost`n  tasks: []" } }
+        )
+        $falsePositives = 0
+        $falseNegatives = 0
+        $unexpectedAmbiguities = 0
+        $missedExpectedAmbiguities = 0
+        $positiveSamples = 0
+        $negativeSamples = 0
+        $expectedAmbiguitySamples = 0
+        foreach ($case in $corpus) {
+            if (Test-Path $repoRoot) { Remove-Item -LiteralPath $repoRoot -Recurse -Force }
+            New-Item -ItemType Directory -Path $repoRoot -Force | Out-Null
+            foreach ($relativePath in $case.files.Keys) { Write-Fixture $relativePath $case.files[$relativePath] }
+            Update-Detection
+            $detected = @($script:Technologies.discoveries | Where-Object status -eq 'detected' | Select-Object -ExpandProperty technology)
+            $ambiguous = @($script:Technologies.discoveries | Where-Object status -eq 'ambiguous' | Select-Object -ExpandProperty technology)
+            foreach ($technology in $case.expected) { if ($technology -notin $detected) { $falseNegatives++ } }
+            foreach ($technology in $detected) { if ($technology -notin $case.expected) { $falsePositives++ } }
+            foreach ($technology in $case.ambiguous) {
+                $expectedAmbiguitySamples++
+                if ($technology -notin $ambiguous) { $missedExpectedAmbiguities++ }
+            }
+            foreach ($technology in $ambiguous) { if ($technology -notin $case.ambiguous) { $unexpectedAmbiguities++ } }
+            if ($case.cohort -eq 'positive') { $positiveSamples++ }
+            elseif ($case.cohort -eq 'negative') { $negativeSamples++ }
+        }
+        Assert-Condition ($positiveSamples -eq 10 -and $negativeSamples -eq 2) 'Taille du corpus positif/négatif incohérente.'
+        Assert-Condition ($falsePositives -eq 0 -and $falseNegatives -eq 0) "Métriques corpus en échec: FP=$falsePositives FN=$falseNegatives."
+        Assert-Condition ($expectedAmbiguitySamples -eq 3 -and $missedExpectedAmbiguities -eq 0 -and $unexpectedAmbiguities -eq 0) "Ambiguïtés corpus incohérentes: attendues=$expectedAmbiguitySamples manquées=$missedExpectedAmbiguities inattendues=$unexpectedAmbiguities."
+        Write-Information -InformationAction Continue "[METRICS] Corpus synthétique Windows x64: positifs=$positiveSamples négatifs=$negativeSamples faux_positifs=$falsePositives faux_negatifs=$falseNegatives ambiguïtés_attendues=$expectedAmbiguitySamples ambiguïtés_manquées=$missedExpectedAmbiguities ambiguïtés_inattendues=$unexpectedAmbiguities"
     }
     Invoke-TestCase 'Hosts YAML seul reste ambigu Ansible' {
         Write-Fixture 'config/deployment.yml' "- hosts: localhost`n  tasks: []`n"
@@ -471,6 +519,7 @@ try {
         Assert-Condition ($reference.schema_version -eq 1 -and $reference.metadata.source_mode -eq 'Ci' -and $reference.verdict -eq 'PASS' -and $reference.execution_results.Count -eq 1) 'Rapport de référence absent ou divergent du mode historique.'
         $expectedCatalogHash = (Get-FileHash -LiteralPath (Join-Path $repoRoot '.config/control-catalog.json') -Algorithm SHA256).Hash.ToLowerInvariant()
         Assert-Condition ($reference.metadata.catalog_sha256 -eq $expectedCatalogHash) 'Empreinte du catalogue absente du rapport historique.'
+        Assert-Condition ($reference.metadata.platform_qualification_status -eq 'experimental') 'Statut de qualification plateforme absent du rapport.'
     }
     Invoke-TestCase 'Fix normalise sans infrastructure' {
         Write-Fixture 'notes.txt' 'texte  '

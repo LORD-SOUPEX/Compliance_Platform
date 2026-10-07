@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "platforms": [
+    {
+      "id": "windows-x64",
+      "os": "windows",
+      "architecture": "x64",
+      "status": "experimental",
+      "evidence": ["Local PowerShell test suites pass", "Quality Gate Quick passes"],
+      "limitations": ["Quality Gate Full fails dependency audit", "GitLab remote runner and external consumers are not qualified"]
+    },
+    {
+      "id": "windows-arm64",
+      "os": "windows",
+      "architecture": "arm64",
+      "status": "targeted",
+      "evidence": [],
+      "limitations": ["Bootstrap and runtime artifacts are not qualified on Windows ARM64"]
+    },
+    {
+      "id": "linux-x64",
+      "os": "linux",
+      "architecture": "x64",
+      "status": "targeted",
+      "evidence": [],
+      "limitations": ["Native Linux bootstrap and runtime are not qualified"]
+    },
+    {
+      "id": "linux-arm64",
+      "os": "linux",
+      "architecture": "arm64",
+      "status": "targeted",
+      "evidence": [],
+      "limitations": ["Native Linux ARM64 bootstrap and runtime are not qualified"]
+    },
+    {
+      "id": "macos-x64",
+      "os": "macos",
+      "architecture": "x64",
+      "status": "targeted",
+      "evidence": [],
+      "limitations": ["Native macOS Intel bootstrap and runtime are not qualified"]
+    },
+    {
+      "id": "macos-arm64",
+      "os": "macos",
+      "architecture": "arm64",
+      "status": "targeted",
+      "evidence": [],
+      "limitations": ["Native Apple Silicon bootstrap and runtime are not qualified"]
+    }
+  ]
+}

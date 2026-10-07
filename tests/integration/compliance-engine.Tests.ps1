@@ -96,6 +96,7 @@ try {
         Assert-ComplianceIntegration ($execution.code -eq 0 -and $execution.report.verdict -eq 'PASS' -and $execution.report.summary.success -eq 1) 'Audit valide non reussi.'
         $expectedCatalogHash = (Get-FileHash -LiteralPath (Join-Path $platformRoot '.config/control-catalog.json') -Algorithm SHA256).Hash.ToLowerInvariant()
         Assert-ComplianceIntegration ($execution.report.metadata.catalog_sha256 -eq $expectedCatalogHash) 'Empreinte du catalogue non propagee au rapport.'
+        Assert-ComplianceIntegration ($execution.report.metadata.platform_qualification_status -eq 'experimental') 'Statut de plateforme non propage au rapport Compliance.'
         $result = $execution.report.execution_results | Where-Object status -eq 'success'
         Assert-ComplianceIntegration ($result.root -eq 'nested/app' -and $result.capability -eq 'linting' -and $result.tool_version -eq '1.25.0') 'Resultat de controle incomplet.'
         Assert-ComplianceIntegration (-not (Test-Path (Join-Path $repoRoot '.venv')) -and -not (Test-Path (Join-Path $repoRoot '.tools'))) 'Outils installes dans le consommateur.'

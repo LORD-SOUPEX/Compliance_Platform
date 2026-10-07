@@ -24,7 +24,20 @@ Python et les paquets verrouillés restent dans `.venv`; PSScriptAnalyzer reste 
 
 ## État de qualification
 
-Le bootstrap actuel ne vise que Windows x64. Il retrograde la plateforme a `experimental` au debut d'une installation/mise a jour et ne la passe a `qualified` qu'apres toutes ses etapes. Le cycle d'implementation a termine ces etapes en code 0. Le blocage historique du cache pre-commit est corrige.
+Le bootstrap runtime actuel ne vise que Windows x64. Son statut `qualified` dans l'index signifie que l'installation des outils est terminee; ce n'est pas la qualification produit. La matrice produit est maintenue dans [platform-support.json](../.config/platform-support.json), chargee et validee par le gate, et son statut est expose facultativement dans les rapports v1.
+
+| Plateforme | Statut produit | Preuve et limite principale |
+| --- | --- | --- |
+| Windows x64 | experimental | Tests locaux et Quick passent; Full échoue sur pip-audit et les consommateurs externes ne sont pas qualifiés. |
+| Windows ARM64 | targeted | Bootstrap et runtime natifs non qualifiés. |
+| Linux x64 | targeted | Exécution native et runtime non qualifiés. |
+| Linux ARM64 | targeted | Exécution native et runtime non qualifiés. |
+| macOS x64 | targeted | Exécution native et runtime non qualifiés. |
+| macOS ARM64 | targeted | Exécution native et runtime non qualifiés. |
+
+Le validateur exige exactement ces six couples OS/architecture, des statuts connus et une preuve non vide avant `qualified`. Le statut n'autorise ni ne bloque les contrôles; il rend la qualification visible. Aucun produit n'est actuellement `qualified` au sens de cette matrice.
+
+Le bootstrap Windows x64 retrograde le statut runtime a `experimental` au debut d'une installation/mise a jour et ne le passe a `qualified` qu'apres toutes ses etapes. Le cycle d'implementation a termine ces etapes en code 0. Le blocage historique du cache pre-commit est corrige.
 
 `Repair-PreCommitCache` lit en SQLite les clones enregistres. Si leur chemin sort du cache courant ou n'existe plus, il execute `pre-commit clean` avant la reconstruction officielle des hooks. Un cache valide est conserve. En mode hors ligne, un cache deplace provoque une erreur explicite sans suppression. Le test couvre plusieurs clones et la preservation des autres outils et de `PRE_COMMIT_HOME`.
 

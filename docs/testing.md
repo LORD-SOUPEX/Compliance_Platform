@@ -2,12 +2,16 @@
 
 ## Cycle d'implementation courant
 
-Phases 4–7, validation locale du 7 octobre 2026: **27 tests unitaires Compliance, 6 tests Control Catalog, 13 intégrations Compliance, 4 intégrations adaptateur et 45 scénarios historiques** réussis. Couverture: DAG/cycles, budgets, sorties bornées, catalogue, rapports, permissions, parité, contrats PowerShell/VS Code/GitLab et relais Git Bash.
+Phases 4–8, validation locale du 7 octobre 2026: **27 tests unitaires Compliance, 11 adaptateur, 6 Control Catalog, 4 matrice plateforme, 13 intégrations Compliance, 4 intégrations adaptateur et 46 scénarios historiques** réussis. Couverture: DAG/cycles, budgets, sorties bornées, catalogue, rapports, permissions, parité, contrats PowerShell/VS Code/GitLab, relais Git Bash et corpus consommateurs synthétique.
 Chaque mode historique écrit aussi le rapport de référence sous `reports/compliance-report.json`; les fixtures valident ce contrat tout en vérifiant que le rapport historique et le code de sortie restent inchangés. Aucun pipeline GitLab distant n'a été exécuté.
 
 Quick du 7 octobre: **10 PASS, 0 FAIL, 1 WARN, 6 SKIP, 0 ERROR**, code 0. Full: **11 PASS, 1 FAIL, 1 WARN, 6 SKIP, 0 ERROR**, code 1; seul pip-audit échoue sur `asteval==1.0.6` et `ecdsa==0.19.2` (quatre lignes d'avis, dont un identifiant répété). Aucun avis n'est ignoré. ShellCheck reste indisponible sur Windows.
 
 La procédure de qualification locale prévue sous Windows x64 est: bootstrap, Doctor, tests, Quick puis Full. Un index `qualified` prouve la fin du bootstrap seulement; la réussite Quick/tests ne qualifie ni les consommateurs réels, ni un runner CI, ni une plateforme différente. Le Full en échec reste un blocage explicite de qualification globale.
+
+Le corpus synthétique Discovery rapporte 10 échantillons positifs, 2 négatifs, 3 ambiguïtés attendues, 0 faux positif, 0 faux négatif et 0 ambiguïté inattendue. Ces mesures sont des tests de régression à marqueurs connus, pas une mesure sur la diversité de dépôts consommateurs.
+
+Le corpus synthétique de Discovery rapporte 10 échantillons positifs, 2 négatifs, 3 ambiguïtés attendues, 0 faux positif, 0 faux négatif et 0 ambiguïté inattendue. Ce résultat est un test de régression à marqueurs connus, pas une mesure sur la prévalence ni la diversité de dépôts consommateurs.
 
 Le lancement Compliance sur le depot local a produit [compliance-report.json](../reports/compliance-report.json): 32 controles planifies, 4 success, 1 fail, 1 error et 26 skipped, verdict **FAIL**, couverture partielle. Le fail concerne `Update-Detection` du harnais historique (`PSUseShouldProcessForStateChangingFunctions`); l'erreur critique est ShellCheck indisponible sous Windows. Les nouveaux fichiers du module, de l'adaptateur et des tests passent l'analyse PowerShell. Aucun controle n'a ete ignore pour rendre ce rapport vert.
 

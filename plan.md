@@ -234,17 +234,17 @@ non exécuté sur le contenu à cause de son cache invalide.
 
 | Composant | Fonctionnalités achevées dans le socle | État et éléments manquants |
 | --- | --- | --- |
-| Discovery Engine | CLI externe, JSON v1, 13 technologies, preuves, racines, ambiguïtés | Partiel: corpus réel, overrides, exclusion configurable, limites de lecture et racines mixtes non qualifiés |
-| Tool Bootstrap | Installation locale épinglée, vérification des téléchargements binaires, copie/indexation multiversion | Partiel: hooks en échec, qualification poste neuf/runner et autres plateformes absente |
-| Tool Runtime | Index v1, version active, chemin relatif, SHA-256 enregistré et statuts | Partiel: cinq binaires Windows x64, plateforme expérimentale; paquets/modules hors index, hash non revérifié à l'usage |
-| Capability Matrix | Capacités et candidats par technologie, disponibilités et motifs OS + architecture | Partiel: profils en code, disponibilité fondée sur présence, alternatives et exécution native non qualifiées |
+| Discovery Engine | CLI externe, JSON v1, 13 technologies, preuves, racines, ambiguïtés et corpus synthétique étiqueté | Partiel: corpus réel, overrides, exclusion configurable, limites de lecture et racines mixtes non qualifiés |
+| Tool Bootstrap | Installation locale épinglée, vérification des téléchargements binaires, copie/indexation multiversion | Partiel: poste neuf/runner et autres plateformes non qualifiés |
+| Tool Runtime | Index v1, version active, chemin relatif, SHA-256 enregistré et statuts | Runtime d'installation Windows x64 qualifié; qualification produit expérimentale, paquets/modules hors index |
+| Capability Matrix | Capacités et candidats par technologie, disponibilités et motifs OS + architecture | Profils du catalogue; disponibilité fondée sur présence, alternatives et exécution native non qualifiées |
 | Tool Resolver | Sélection des candidats disponibles, déduplication par commande au sein d'une technologie, refus des ambiguïtés | Partiel: sélection descriptive de tous les candidats disponibles, sans pilotage Quick/Full ni déduplication globale |
 | Compliance Engine | Execution Plan v1, DAG, budgets, executeur borne, resultats, findings et verdict | Phase 4 v1 terminee; sandbox et qualification consommateurs suivis en Phase 8 |
 | Control Catalog | 28 contrôles v1, objectifs, schéma strict et profils consommés par Matrix/Plan | Phase 5 v1 terminee; qualification execution et evolution catalogue suivies en Phase 8 |
 | Reporting Engine | Contrat JSON v1, schéma, validateur, findings, diagnostics, coverage, limitations, metadata et résumé humain | Phase 6 v1 terminee; masquage et retention automatisee restent une évolution ultérieure |
 | Policy Engine | YAML descriptif et règles codées du gate | Aucun moteur, profil consommateur ou cycle d'exceptions évalué |
-| Optional Integrations | Relais Bash Windows, tâches VS Code, hooks et job GitLab du socle | Aucun adaptateur produit portable; hooks/CI peuvent bloquer contrairement à la cible consultative |
-| Industrialisation | Pins, contraintes, cache local et 37 tests synthétiques | Non commencée comme qualification produit multi-plateforme reproductible |
+| Optional Integrations | Contrat et wrappers PowerShell, Bash, VS Code et GitLab | Tests en fixtures; runner GitLab, UI VS Code et consommateurs réels non qualifiés |
+| Industrialisation | Matrice six plateformes, corpus synthétique etiquete et suites de tests | En cours; Windows x64 experimental; autres plateformes targeted; Full et validation consommateurs réels ouverts |
 
 Une fonctionnalité implémentée ne suffit pas à clore la phase qui la contient.
 Aucune phase entière n'atteint actuellement tous ses critères de sortie.
@@ -1355,6 +1355,8 @@ Objectif: proposer des points d'entrée facultatifs sans coupler le moteur à un
 - [x] Documenter permissions, données locales/artifacts, compatibilité et limites;
   tester les quatre contrats et wrappers.
 - [ ] Exécuter le job sur un runner GitLab réel et qualifier artifacts/règles.
+- [ ] Valider les intégrations sur des dépôts consommateurs autorisés et dans les contextes GitLab/VS Code réels.
+- [ ] Qualifier les adaptateurs sur des dépôts réels représentatifs; les fixtures locales ne démontrent pas leur comportement chez un consommateur.
 
 Réutilisation: tâches VS Code, scripts PowerShell et Bash, job GitLab et formats
 de rapports existants, après qualification de leur comportement consultatif.
@@ -1367,8 +1369,9 @@ qui n'empêchent aucune opération Git.
 
 Statut: **PHASE EN COURS**.
 
-Le runtime n'est pas qualifié au-delà de Windows x64 et son bootstrap ne termine
-pas avec l'état local actuel. Aucune exploitation multi-plateforme n'est établie.
+L'installation du Tool Runtime est qualifiée uniquement sur Windows x64; la
+qualification produit Windows x64 reste expérimentale à cause du Full bloqué.
+Aucune exécution native des cinq autres plateformes n'est établie.
 
 Objectif: rendre le moteur et ses contrôles maintenables, reproductibles et
 portables pour des usages volontaires variés.
@@ -1381,6 +1384,13 @@ portables pour des usages volontaires variés.
   sans invalider les consommateurs des rapports v1 précédents.
 - [x] Documenter la mise à jour des pins Python, outils et binaires, ainsi que
   les contrôles et critères de qualification après changement.
+- [x] Définir et valider une matrice distincte de qualification produit pour les
+  six plateformes; garder targeted/experimental tant que les preuves manquent.
+- [x] Mesurer faux positifs, faux négatifs et ambiguïtés sur un corpus synthétique
+  de dix technologies avec contrôles négatifs et cas ambigus attendus.
+- [ ] Répéter ces mesures sur des dépôts externes représentatifs et autorisés.
+- [ ] Qualifier nativement chaque plateforme avec bootstrap, tests et gates; le
+  statut runtime `qualified` seul ne qualifie pas le produit.
 - [ ] Mesurer qualité de détection, coût, temps d'exécution, couverture et utilité
   des rapports sans compter l'adoption comme une obligation.
 - [ ] Organiser les contributions, la qualification des contrôles et le support des

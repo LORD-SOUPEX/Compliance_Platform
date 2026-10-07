@@ -32,7 +32,7 @@ Remplacer `<chemin-du-depot>` par un chemin local entre guillemets. Le parcours 
 
 Une détection ambiguë reste une entrée distincte, avec ses preuves et raisons. Un `.tf` partagé ne déclenche pas les contrôles Terraform. Une clé YAML `hosts:` seule ne déclenche pas le contrôle Ansible. Ces cas apparaissent aussi dans la Capability Matrix et le Tool Resolver.
 
-Les tests utilisent des fixtures synthétiques. Aucun corpus de repositories représentatifs ni mesure de faux positifs/faux négatifs n'est présent.
+Un corpus synthétique etiqueté couvre PowerShell, Terraform, OpenTofu, Terragrunt, Ansible, Docker, Kubernetes, Helm, JavaScript et TypeScript, plus deux contrôles négatifs et les ambiguïtés HCL/Ansible attendues. Résultat Windows x64: 10 échantillons positifs, 2 négatifs, 3 ambiguïtés attendues, 0 faux positif, 0 faux négatif et 0 ambiguïté inattendue. Le fixture TypeScript étiquette aussi JavaScript comme attendu à cause du `package.json` partagé. Ces comptes mesurent uniquement les fixtures et ne qualifient pas des dépôts réels; le pipeline GitLab et les contextes consommateurs restent à tester.
 
 ## Portée vérifiée
 

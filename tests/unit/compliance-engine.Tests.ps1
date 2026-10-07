@@ -114,15 +114,17 @@ $results = @(Invoke-CompliancePlan -Plan $executionPlan -ProcessRunner { throw '
 Assert-Compliance ($results[0].status -eq 'skipped' -and -not $results[0].critical) 'Technologie absente mal restituee.'
 $passed++
 $discoveryReport = [pscustomobject]@{ scan_complete = $true; technologies = @() }
-$report = New-ComplianceReport -Discovery $discoveryReport -Matrix @() -Resolver @() -Plan $executionPlan -Results $results -CatalogSha256 $catalog.content_sha256
+$report = New-ComplianceReport -Discovery $discoveryReport -Matrix @() -Resolver @() -Plan $executionPlan -Results $results -CatalogSha256 $catalog.content_sha256 -PlatformQualificationStatus 'experimental'
 $roundTrip = $report | ConvertTo-Json -Depth 20 | ConvertFrom-Json
 Assert-Compliance ($roundTrip.verdict -eq 'PASS' -and $roundTrip.execution_results.Count -eq 1 -and $roundTrip.advisory) 'Rapport Compliance incomplet.'
 Assert-Compliance ($roundTrip.metadata.catalog_sha256 -eq $catalog.content_sha256 -and $roundTrip.metadata.catalog_schema_version -eq 1) 'Traçabilite du catalogue absente du rapport.'
+Assert-Compliance ($roundTrip.metadata.platform_qualification_status -eq 'experimental') 'Statut plateforme absent du rapport.'
 $reportSchema = Get-Content -LiteralPath (Join-Path $platformRoot '.config/compliance-report.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 foreach ($field in @('findings', 'diagnostics', 'coverage', 'limitations', 'metadata', 'verdict')) {
     Assert-Compliance ($reportSchema.required -contains $field -and $roundTrip.PSObject.Properties.Name -contains $field) "Champ report/schema absent: $field"
 }
 Assert-Compliance ($reportSchema.properties.metadata.properties.catalog_sha256.pattern -eq '^[a-f0-9]{64}$' -and 'catalog_sha256' -notin $reportSchema.properties.metadata.required) 'Empreinte catalogue incompatible avec la retrocompatibilite v1.'
+Assert-Compliance ($reportSchema.properties.metadata.properties.platform_qualification_status.enum -contains 'experimental' -and 'platform_qualification_status' -notin $reportSchema.properties.metadata.required) 'Statut plateforme incompatible avec la retrocompatibilite v1.'
 $invalidReport = $roundTrip | ConvertTo-Json -Depth 20 | ConvertFrom-Json
 $invalidReport.verdict = 'SUCCESS'
 $schemaRejected = $false
@@ -141,6 +143,12 @@ $schemaRejected = $false
 try { Test-ComplianceReport -Report $invalidDigest | Out-Null }
 catch { $schemaRejected = $_.Exception.Message -match 'Empreinte Control Catalog invalide' }
 Assert-Compliance $schemaRejected 'Empreinte catalogue invalide acceptee.'
+$invalidPlatformStatus = $roundTrip | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+$invalidPlatformStatus.metadata.platform_qualification_status = 'certified'
+$schemaRejected = $false
+try { Test-ComplianceReport -Report $invalidPlatformStatus | Out-Null }
+catch { $schemaRejected = $_.Exception.Message -match 'Statut de qualification plateforme invalide' }
+Assert-Compliance $schemaRejected 'Statut plateforme inconnu accepte.'
 $passed++
 $planned = New-ComplianceReport -Discovery $discoveryReport -Matrix @() -Resolver @() -Plan $executionPlan -Results @() -PlanOnly
 Assert-Compliance ($null -eq $planned.verdict -and $planned.execution_status -eq 'planned') 'Un plan seul a produit un verdict de conformite.'
