@@ -3,7 +3,10 @@ Set-StrictMode -Version Latest
 function Import-ControlCatalog {
     [CmdletBinding()]
     param([Parameter(Mandatory = $true)][string]$Path)
-    $catalog = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+    $catalogBytes = [System.IO.File]::ReadAllBytes($Path)
+    $catalogText = [System.Text.UTF8Encoding]::new($false, $true).GetString($catalogBytes)
+    if ($catalogText.Length -gt 0 -and $catalogText[0] -eq [char]0xFEFF) { $catalogText = $catalogText.Substring(1) }
+    $catalog = $catalogText | ConvertFrom-Json -ErrorAction Stop
     if ($catalog.schema_version -ne 1 -or -not $catalog.controls -or $catalog.controls.Count -eq 0) { throw 'Schema Control Catalog invalide.' }
     $ids = @{}
     $allowedFields = @('id', 'name', 'objective', 'technology', 'capability', 'tool', 'severity', 'selection_policy', 'applicability', 'parameters', 'dependencies', 'timeout_seconds', 'cost', 'side_effect_level', 'permissions', 'platform_support', 'limitations')
@@ -52,7 +55,10 @@ function Import-ControlCatalog {
             foreach ($dependency in $ids[$current].dependencies) { $pending.Push($dependency) }
         }
     }
-    $catalog | Add-Member -MemberType NoteProperty -Name content_sha256 -Value ((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant())
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try { $contentSha256 = [BitConverter]::ToString($sha256.ComputeHash($catalogBytes)).Replace('-', '').ToLowerInvariant() }
+    finally { $sha256.Dispose() }
+    $catalog | Add-Member -MemberType NoteProperty -Name content_sha256 -Value $contentSha256
     return $catalog
 }
 
