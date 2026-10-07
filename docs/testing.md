@@ -2,7 +2,12 @@
 
 ## Cycle d'implementation courant
 
-Phase 4: **21 tests unitaires et 11 integrations Compliance reussis**, en plus des **44 scenarios historiques**. Les nouvelles suites testent plan et applicabilite, execution reelle, stdout/stderr/code, timeout, version, permissions, alternatives, couverture, aggregation et rapports PASS/FAIL sur disque. Les modes historiques restent verifies par leurs 44 regressions.
+Phases 4–7, validation locale du 7 octobre 2026: **27 tests unitaires Compliance, 6 tests Control Catalog, 13 intégrations Compliance, 4 intégrations adaptateur et 45 scénarios historiques** réussis. Couverture: DAG/cycles, budgets, sorties bornées, catalogue, rapports, permissions, parité, contrats PowerShell/VS Code/GitLab et relais Git Bash.
+Chaque mode historique écrit aussi le rapport de référence sous `reports/compliance-report.json`; les fixtures valident ce contrat tout en vérifiant que le rapport historique et le code de sortie restent inchangés. Aucun pipeline GitLab distant n'a été exécuté.
+
+Quick du 7 octobre: **10 PASS, 0 FAIL, 1 WARN, 6 SKIP, 0 ERROR**, code 0. Full: **11 PASS, 1 FAIL, 1 WARN, 6 SKIP, 0 ERROR**, code 1; seul pip-audit échoue sur `asteval==1.0.6` et `ecdsa==0.19.2` (quatre lignes d'avis, dont un identifiant répété). Aucun avis n'est ignoré. ShellCheck reste indisponible sur Windows.
+
+La procédure de qualification locale prévue sous Windows x64 est: bootstrap, Doctor, tests, Quick puis Full. Un index `qualified` prouve la fin du bootstrap seulement; la réussite Quick/tests ne qualifie ni les consommateurs réels, ni un runner CI, ni une plateforme différente. Le Full en échec reste un blocage explicite de qualification globale.
 
 Le lancement Compliance sur le depot local a produit [compliance-report.json](../reports/compliance-report.json): 32 controles planifies, 4 success, 1 fail, 1 error et 26 skipped, verdict **FAIL**, couverture partielle. Le fail concerne `Update-Detection` du harnais historique (`PSUseShouldProcessForStateChangingFunctions`); l'erreur critique est ShellCheck indisponible sous Windows. Les nouveaux fichiers du module, de l'adaptateur et des tests passent l'analyse PowerShell. Aucun controle n'a ete ignore pour rendre ce rapport vert.
 

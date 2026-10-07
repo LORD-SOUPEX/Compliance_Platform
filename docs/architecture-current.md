@@ -20,10 +20,10 @@
 | Tool Runtime | Index local versionne et binaires Windows x64 verifies; marqueur `qualified` apres bootstrap complet | Python et PSScriptAnalyzer hors index; securite et autres plateformes non qualifiees |
 | Tool Bootstrap | Installe les dependances, repare le cache deplace, verifie cinq binaires et ecrit l'index | Termine localement; preuves poste neuf/runner encore absentes |
 | Compliance Engine | Module autonome v1: plan, execution bornee, aggregation et verdict | Adapteurs codes, migrations historiques et qualifications avancees ouvertes |
-| Control Catalog | Profils de capacités codés dans PowerShell; configurations existantes | Pas de catalogue indépendant chargé à l'exécution |
-| Reporting Engine | Rapport Compliance v1 commun et versionne, en plus des JSON historiques | Formats humains et governance de retention ouverts |
+| Control Catalog | `.config/control-catalog.json` v1 validé; profils et métadonnées consommés par Matrix/Plan | 28 contrôles déclarés; exécution historique encore codée, qualifications externes ouvertes |
+| Reporting Engine | Rapport Compliance v1 versionné: findings, diagnostics, couverture, limitations et verdict | JSON historiques non migrés; masquage et gouvernance de rétention ouverts |
 | Policy Engine | YAML descriptif et décisions dans le script | Le YAML n'est pas la source des décisions effectives |
-| Optional Integrations | Scripts, tâches VS Code et job GitLab propres au dépôt | Pas d'adaptateurs portables autonomes |
+| Optional Integrations | Contrat commun, wrappers PS/Bash, tâche VS Code, job GitLab opt-in | Runner GitLab distant non exécuté; limites dans [integrations.md](integrations.md) |
 
 ## Runtime constaté
 
@@ -35,7 +35,7 @@ Les dépendances Python résident dans `.venv`; PSScriptAnalyzer est sous `.tool
 
 Le cycle courant comprend 38 tests reussis, un bootstrap termine et Quick sans echec. Les avis de dependances et preuves historiques sont centralises dans [testing.md](testing.md).
 
-Linux/macOS/ARM64, qualification de tous les controles par plateforme, Control Catalog autonome et Policy Engine avance restent ouverts. Compliance et Reporting v1 sont maintenant livres dans le module; les parcours historiques ne sont pas migres.
+Linux/macOS/ARM64, qualification d'exécution de tous les contrôles et Policy Engine avancé restent ouverts. Compliance, catalogue et reporting v1 sont livrés; les parcours Quick/Full historiques ne sont pas migrés.
 
 ## Écarts avec la cible
 

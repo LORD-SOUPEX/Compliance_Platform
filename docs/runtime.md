@@ -30,6 +30,20 @@ Le bootstrap actuel ne vise que Windows x64. Il retrograde la plateforme a `expe
 
 Linux, macOS, Windows ARM64, Linux ARM64, macOS Intel x64 et Apple Silicon ARM64 ne sont pas qualifiés par le code actuel. L'index ne contient pas encore leurs binaires.
 
+## Qualification reproductible
+
+Pour vérifier une installation Windows x64 depuis la racine, exécuter dans cet ordre:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor.ps1 -NoColor
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1 -NoColor
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Mode Quick -NoColor
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Mode Full -NoColor
+```
+
+Conserver les codes de sortie et les rapports datés comme preuves; ne pas remplacer une exécution Full bloquée par Quick. Au 7 octobre 2026, tests et Quick passent, mais Full échoue sur les avis pip-audit `asteval==1.0.6` et `ecdsa==0.19.2`. Le runner GitLab distant, les dépôts consommateurs représentatifs et les plateformes autres que Windows x64 restent non qualifiés. Répéter cette procédure après toute modification des verrous, du bootstrap, du runtime ou des contrôles.
+
 ## Bootstrap réellement livré
 
 Depuis la racine de la plateforme:

@@ -4,6 +4,10 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $originalRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+$catalogModule = Join-Path $originalRoot 'src/Control.Catalog.psm1'
+Import-Module $catalogModule -Force
+Import-Module (Join-Path $originalRoot 'src/Compliance.Engine.psm1') -Force
+$script:ControlCatalog = Import-ControlCatalog -Path (Join-Path $originalRoot '.config/control-catalog.json')
 $gatePath = Join-Path $originalRoot 'scripts/quality-gate.ps1'
 $tokens = $null
 $parseErrors = $null
@@ -33,6 +37,15 @@ function Write-Fixture {
     $destination = Join-Path $repoRoot $RelativePath
     New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null
     [IO.File]::WriteAllText($destination, $Content, [Text.UTF8Encoding]::new($false))
+}
+
+function Copy-GateFixture {
+    New-Item -ItemType Directory -Path (Join-Path $repoRoot 'scripts'), (Join-Path $repoRoot 'src'), (Join-Path $repoRoot '.config') -Force | Out-Null
+    Copy-Item $gatePath (Join-Path $repoRoot 'scripts/quality-gate.ps1')
+    Copy-Item (Join-Path $originalRoot 'src/Control.Catalog.psm1') (Join-Path $repoRoot 'src/Control.Catalog.psm1')
+    Copy-Item (Join-Path $originalRoot 'src/Compliance.Engine.psm1') (Join-Path $repoRoot 'src/Compliance.Engine.psm1')
+    Copy-Item (Join-Path $originalRoot '.config/control-catalog.json') (Join-Path $repoRoot '.config/control-catalog.json')
+    Copy-Item (Join-Path $originalRoot 'scripts/check-emoji.ps1') (Join-Path $repoRoot 'scripts/check-emoji.ps1')
 }
 
 function Update-Detection {
@@ -208,6 +221,21 @@ try {
         Assert-Condition ($resolution.unresolved_capabilities.Count -eq 2) 'Les capacités partielles/indisponibles ne sont pas restituées.'
         Assert-Condition ($resolution.metrics.selected_commands -eq 1 -and $resolution.metrics.reused_assignments -eq 1 -and $resolution.metrics.required_capabilities -eq 3) 'Compteurs de resolution incoherents.'
         Assert-Condition ($resolution.metrics.duration_ms -ge 0) 'Duree de resolution invalide.'
+    }
+    Invoke-TestCase 'Control Catalog alimente Matrix et Execution Plan' {
+        Write-Fixture 'app.py' "value = 1`n"
+        Update-Detection
+        $technology = $script:Technologies.discoveries | Where-Object technology -eq 'python'
+        $matrix = Get-CapabilityMatrix -Discoveries @($technology)
+        $resolution = Resolve-CapabilityTool -CapabilityMatrix $matrix
+        $pythonMatrix = $matrix | Where-Object technology -eq 'python'
+        $lint = $pythonMatrix.capabilities | Where-Object name -eq 'linting'
+        $ruff = $lint.candidate_tools | Where-Object command -eq 'ruff'
+        Assert-Condition ($ruff.catalog_id -eq 'python.lint.ruff' -and $ruff.severity -eq 'medium' -and $lint.catalog_controls.Count -eq 2) 'Metadonnees catalogue absentes de la Matrix.'
+        $plan = New-CompliancePlan -Discovery @($technology) -CapabilityMatrix $matrix -Resolver $resolution -RepositoryRoot $repoRoot -AllowCodeExecution
+        $planControls = @($plan.controls | Where-Object technology -eq 'python')
+        Assert-Condition (@($planControls | Where-Object { $_.control_catalog_id -eq 'python.lint.ruff' -and $_.severity -eq 'medium' -and $_.side_effect_level -eq 'read_only' }).Count -eq 1) 'Metadonnees catalogue non propagees au plan.'
+        Assert-Condition (@($planControls | Where-Object { $_.control_catalog_id -eq 'python.lint.pylint' -and $_.side_effect_level -eq 'code_execution' -and $_.permissions -contains 'code_execution' }).Count -eq 1) 'Permissions outil non propagees au plan.'
     }
     Invoke-TestCase 'Resolver alternatives explicites et priorite du profil' {
         $primary = [pscustomobject]@{ name = 'primary'; command = 'primary'; status = 'not_installed'; source = $null }
@@ -431,22 +459,24 @@ try {
     }
     Invoke-TestCase 'Rapport Ci et code cohérents' {
         Write-Fixture 'run.sh' "#!/usr/bin/env bash`nexit 0`n"
-        New-Item -ItemType Directory -Path (Join-Path $repoRoot 'scripts') -Force | Out-Null
+        Copy-GateFixture
         $fixtureGate = Join-Path $repoRoot 'scripts/quality-gate.ps1'
-        Copy-Item $gatePath $fixtureGate
-        & powershell -NoProfile -ExecutionPolicy Bypass -File $fixtureGate -Mode Ci -Category Shell -ReportPath result.json -NoColor | Out-Null
+        $childOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $fixtureGate -Mode Ci -Category Shell -ReportPath result.json -NoColor
         $exitCode = $LASTEXITCODE
+        Assert-Condition ($exitCode -eq 0) "Gate enfant en echec ($exitCode): $($childOutput -join ' ')"
         $report = Get-Content (Join-Path $repoRoot 'reports/result.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         Assert-Condition ($exitCode -eq 0 -and $report.code_sortie -eq 0 -and $report.mode -eq 'Ci' -and $report.resume.WARN -eq 1) 'Rapport incohérent.'
         Assert-Condition ($report.technologies.shell_files.Count -eq 1 -and $report.technologies.shell_files[0] -eq 'run.sh') 'Objets fichiers non normalisés.'
+        $reference = Get-Content (Join-Path $repoRoot 'reports/compliance-report.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        Assert-Condition ($reference.schema_version -eq 1 -and $reference.metadata.source_mode -eq 'Ci' -and $reference.verdict -eq 'PASS' -and $reference.execution_results.Count -eq 1) 'Rapport de référence absent ou divergent du mode historique.'
     }
     Invoke-TestCase 'Fix normalise sans infrastructure' {
         Write-Fixture 'notes.txt' 'texte  '
-        New-Item -ItemType Directory -Path (Join-Path $repoRoot 'scripts') -Force | Out-Null
+        Copy-GateFixture
         $fixtureGate = Join-Path $repoRoot 'scripts/quality-gate.ps1'
-        Copy-Item $gatePath $fixtureGate
-        & powershell -NoProfile -ExecutionPolicy Bypass -File $fixtureGate -Mode Fix -Category Shell -NoColor | Out-Null
-        Assert-Condition ($LASTEXITCODE -eq 0 -and [IO.File]::ReadAllText((Join-Path $repoRoot 'notes.txt')) -ceq "texte`n") 'Fix incorrect.'
+        $childOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $fixtureGate -Mode Fix -Category Shell -NoColor
+        $exitCode = $LASTEXITCODE
+        Assert-Condition ($exitCode -eq 0 -and [IO.File]::ReadAllText((Join-Path $repoRoot 'notes.txt')) -ceq "texte`n") "Fix incorrect ($exitCode): $($childOutput -join ' ')"
     }
     Invoke-TestCase 'Formats JSON TOML XML valides' {
         & git -C $repoRoot init --quiet | Out-Null
@@ -475,9 +505,8 @@ try {
     }
     Invoke-TestCase 'Rapport ERROR reste bloquant' {
         Write-Fixture 'notes.md' "# Notes`n"
-        New-Item -ItemType Directory -Path (Join-Path $repoRoot 'scripts') -Force | Out-Null
+        Copy-GateFixture
         $fixtureGate = Join-Path $repoRoot 'scripts/quality-gate.ps1'
-        Copy-Item $gatePath $fixtureGate
         & powershell -NoProfile -ExecutionPolicy Bypass -File $fixtureGate -Mode Ci -Category Documentation -ReportPath result.json -NoColor | Out-Null
         $exitCode = $LASTEXITCODE
         $report = Get-Content (Join-Path $repoRoot 'reports/result.json') -Raw -Encoding UTF8 | ConvertFrom-Json

@@ -1,0 +1,1166 @@
+{
+    "schema_version":  1,
+    "controls":  [
+                     {
+                         "id":  "terraform.format.terraform",
+                         "name":  "Terraform format",
+                         "technology":  "terraform",
+                         "capability":  "formatting",
+                         "tool":  {
+                                      "name":  "terraform fmt",
+                                      "command":  "terraform"
+                                  },
+                         "severity":  "medium",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".tf"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "arguments":  [
+                                                              "fmt",
+                                                              "-check",
+                                                              "-diff",
+                                                              "-recursive"
+                                                          ]
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  300,
+                         "cost":  "low",
+                         "side_effect_level":  "read_only",
+                         "permissions":  [
+
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Terraform format",
+                         "limitations":  [
+
+                                         ]
+                     },
+                     {
+                         "id":  "terraform.lint.tflint",
+                         "name":  "Terraform lint",
+                         "technology":  "terraform",
+                         "capability":  "linting",
+                         "tool":  {
+                                      "name":  "TFLint",
+                                      "command":  "tflint"
+                                  },
+                         "severity":  "medium",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".tf"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "arguments":  [
+                                                              "--recursive",
+                                                              "--no-color"
+                                                          ]
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  300,
+                         "cost":  "medium",
+                         "side_effect_level":  "code_execution",
+                         "permissions":  [
+                                             "code_execution"
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Terraform lint",
+                         "limitations":  [
+
+                                         ]
+                     },
+                     {
+                         "id":  "terraform.security.checkov",
+                         "name":  "Terraform security",
+                         "technology":  "terraform",
+                         "capability":  "security",
+                         "tool":  {
+                                      "name":  "Checkov",
+                                      "command":  "checkov"
+                                  },
+                         "severity":  "high",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".tf"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "framework":  "terraform"
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  600,
+                         "cost":  "high",
+                         "side_effect_level":  "network_code_execution",
+                         "permissions":  [
+                                             "network",
+                                             "code_execution"
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Terraform security",
+                         "limitations":  [
+                                             "Requires network and code-execution authorization."
+                                         ]
+                     },
+                     {
+                         "id":  "opentofu.format.tofu",
+                         "name":  "OpenTofu format",
+                         "technology":  "opentofu",
+                         "capability":  "formatting",
+                         "tool":  {
+                                      "name":  "tofu fmt",
+                                      "command":  "tofu"
+                                  },
+                         "severity":  "medium",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".tf",
+                                                                           ".tofu"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "arguments":  [
+                                                              "fmt",
+                                                              "-check",
+                                                              "-diff",
+                                                              "-recursive"
+                                                          ]
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  300,
+                         "cost":  "low",
+                         "side_effect_level":  "read_only",
+                         "permissions":  [
+
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: OpenTofu format",
+                         "limitations":  [
+
+                                         ]
+                     },
+                     {
+                         "id":  "opentofu.lint.tflint",
+                         "name":  "OpenTofu lint",
+                         "technology":  "opentofu",
+                         "capability":  "linting",
+                         "tool":  {
+                                      "name":  "TFLint",
+                                      "command":  "tflint"
+                                  },
+                         "severity":  "medium",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".tf",
+                                                                           ".tofu"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "arguments":  [
+                                                              "--recursive",
+                                                              "--no-color"
+                                                          ]
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  300,
+                         "cost":  "medium",
+                         "side_effect_level":  "code_execution",
+                         "permissions":  [
+                                             "code_execution"
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: OpenTofu lint",
+                         "limitations":  [
+
+                                         ]
+                     },
+                     {
+                         "id":  "opentofu.security.checkov",
+                         "name":  "OpenTofu security",
+                         "technology":  "opentofu",
+                         "capability":  "security",
+                         "tool":  {
+                                      "name":  "Checkov",
+                                      "command":  "checkov"
+                                  },
+                         "severity":  "high",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".tf",
+                                                                           ".tofu"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "framework":  "terraform"
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  600,
+                         "cost":  "high",
+                         "side_effect_level":  "network_code_execution",
+                         "permissions":  [
+                                             "network",
+                                             "code_execution"
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: OpenTofu security",
+                         "limitations":  [
+                                             "Requires network and code-execution authorization."
+                                         ]
+                     },
+                     {
+                         "id":  "terragrunt.format.terragrunt",
+                         "name":  "Terragrunt format",
+                         "technology":  "terragrunt",
+                         "capability":  "formatting",
+                         "tool":  {
+                                      "name":  "Terragrunt",
+                                      "command":  "terragrunt"
+                                  },
+                         "severity":  "medium",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".hcl"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "arguments":  [
+                                                              "hcl",
+                                                              "fmt",
+                                                              "--check"
+                                                          ]
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  300,
+                         "cost":  "low",
+                         "side_effect_level":  "read_only",
+                         "permissions":  [
+
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Terragrunt format",
+                         "limitations":  [
+
+                                         ]
+                     },
+                     {
+                         "id":  "ansible.lint.ansible-lint",
+                         "name":  "Ansible lint",
+                         "technology":  "ansible",
+                         "capability":  "linting",
+                         "tool":  {
+                                      "name":  "ansible-lint",
+                                      "command":  "ansible-lint"
+                                  },
+                         "severity":  "medium",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "arguments":  [
+                                                              "--profile",
+                                                              "production",
+                                                              "--strict"
+                                                          ]
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  600,
+                         "cost":  "medium",
+                         "side_effect_level":  "code_execution",
+                         "permissions":  [
+                                             "code_execution"
+                                         ],
+                         "platform_support":  [
+                                                  "linux-x64",
+                                                  "macos-arm64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Ansible lint",
+                         "limitations":  [
+                                             "Native Windows controller execution is unsupported."
+                                         ]
+                     },
+                     {
+                         "id":  "ansible.lint.yamllint",
+                         "name":  "Ansible YAML lint",
+                         "technology":  "ansible",
+                         "capability":  "linting",
+                         "tool":  {
+                                      "name":  "yamllint",
+                                      "command":  "yamllint"
+                                  },
+                         "severity":  "medium",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".yml",
+                                                                           ".yaml"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "configuration":  ".yamllint.yml"
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  300,
+                         "cost":  "low",
+                         "side_effect_level":  "read_only",
+                         "permissions":  [
+
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Ansible YAML lint",
+                         "limitations":  [
+
+                                         ]
+                     },
+                     {
+                         "id":  "python.format.ruff",
+                         "name":  "Python format",
+                         "technology":  "python",
+                         "capability":  "formatting",
+                         "tool":  {
+                                      "name":  "ruff",
+                                      "command":  "ruff"
+                                  },
+                         "severity":  "medium",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".py"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "arguments":  [
+                                                              "format",
+                                                              "--check",
+                                                              "--no-cache"
+                                                          ]
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  300,
+                         "cost":  "low",
+                         "side_effect_level":  "read_only",
+                         "permissions":  [
+
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Python format",
+                         "limitations":  [
+
+                                         ]
+                     },
+                     {
+                         "id":  "python.lint.ruff",
+                         "name":  "Python Ruff lint",
+                         "technology":  "python",
+                         "capability":  "linting",
+                         "tool":  {
+                                      "name":  "ruff",
+                                      "command":  "ruff"
+                                  },
+                         "severity":  "medium",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".py"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "arguments":  [
+                                                              "check",
+                                                              "--no-cache"
+                                                          ]
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  300,
+                         "cost":  "low",
+                         "side_effect_level":  "read_only",
+                         "permissions":  [
+
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Python Ruff lint",
+                         "limitations":  [
+
+                                         ]
+                     },
+                     {
+                         "id":  "python.lint.pylint",
+                         "name":  "Python Pylint",
+                         "technology":  "python",
+                         "capability":  "linting",
+                         "tool":  {
+                                      "name":  "pylint",
+                                      "command":  "pylint"
+                                  },
+                         "severity":  "medium",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".py"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "arguments":  [
+                                                              "--persistent=n"
+                                                          ]
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  600,
+                         "cost":  "medium",
+                         "side_effect_level":  "code_execution",
+                         "permissions":  [
+                                             "code_execution"
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Python Pylint",
+                         "limitations":  [
+
+                                         ]
+                     },
+                     {
+                         "id":  "python.test.pytest",
+                         "name":  "Python tests",
+                         "technology":  "python",
+                         "capability":  "testing",
+                         "tool":  {
+                                      "name":  "pytest",
+                                      "command":  "pytest"
+                                  },
+                         "severity":  "high",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".py"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "arguments":  [
+                                                              "-p",
+                                                              "no:cacheprovider"
+                                                          ]
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  1800,
+                         "cost":  "high",
+                         "side_effect_level":  "code_execution",
+                         "permissions":  [
+                                             "code_execution"
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Python tests",
+                         "limitations":  [
+
+                                         ]
+                     },
+                     {
+                         "id":  "python.security.bandit",
+                         "name":  "Python security",
+                         "technology":  "python",
+                         "capability":  "security",
+                         "tool":  {
+                                      "name":  "bandit",
+                                      "command":  "bandit"
+                                  },
+                         "severity":  "high",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".py"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "arguments":  [
+                                                              "-q"
+                                                          ]
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  600,
+                         "cost":  "medium",
+                         "side_effect_level":  "read_only",
+                         "permissions":  [
+
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Python security",
+                         "limitations":  [
+
+                                         ]
+                     },
+                     {
+                         "id":  "python.dependencies.pip-audit",
+                         "name":  "Python dependency audit",
+                         "technology":  "python",
+                         "capability":  "dependency audit",
+                         "tool":  {
+                                      "name":  "pip-audit",
+                                      "command":  "pip-audit"
+                                  },
+                         "severity":  "high",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           "requirements.txt"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "arguments":  [
+                                                              "--no-deps",
+                                                              "--disable-pip",
+                                                              "--strict"
+                                                          ]
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  900,
+                         "cost":  "high",
+                         "side_effect_level":  "network",
+                         "permissions":  [
+                                             "network"
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Python dependency audit",
+                         "limitations":  [
+
+                                         ]
+                     },
+                     {
+                         "id":  "powershell.lint.psscriptanalyzer",
+                         "name":  "PowerShell lint",
+                         "technology":  "powershell",
+                         "capability":  "linting",
+                         "tool":  {
+                                      "name":  "PSScriptAnalyzer",
+                                      "command":  "Invoke-ScriptAnalyzer"
+                                  },
+                         "severity":  "medium",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".ps1",
+                                                                           ".psm1",
+                                                                           ".psd1"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "settings":  ".config/PSScriptAnalyzerSettings.psd1"
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  600,
+                         "cost":  "medium",
+                         "side_effect_level":  "read_only",
+                         "permissions":  [
+
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: PowerShell lint",
+                         "limitations":  [
+
+                                         ]
+                     },
+                     {
+                         "id":  "docker.lint.hadolint",
+                         "name":  "Container lint",
+                         "technology":  "docker",
+                         "capability":  "linting",
+                         "tool":  {
+                                      "name":  "Hadolint",
+                                      "command":  "hadolint"
+                                  },
+                         "severity":  "medium",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           "Dockerfile",
+                                                                           "Containerfile"
+                                                                       ]
+                                           },
+                         "parameters":  {
+
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  300,
+                         "cost":  "low",
+                         "side_effect_level":  "read_only",
+                         "permissions":  [
+
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Container lint",
+                         "limitations":  [
+                                             "Compose manifests are not linted by this Dockerfile adapter."
+                                         ]
+                     },
+                     {
+                         "id":  "docker.security.trivy",
+                         "name":  "Container security",
+                         "technology":  "docker",
+                         "capability":  "security",
+                         "tool":  {
+                                      "name":  "Trivy",
+                                      "command":  "trivy"
+                                  },
+                         "severity":  "high",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           "Dockerfile",
+                                                                           "Containerfile"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "scanners":  [
+                                                             "vuln",
+                                                             "misconfig",
+                                                             "secret"
+                                                         ]
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  900,
+                         "cost":  "high",
+                         "side_effect_level":  "network",
+                         "permissions":  [
+                                             "network"
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Container security",
+                         "limitations":  [
+                                             "Filesystem scan may contact vulnerability databases."
+                                         ]
+                     },
+                     {
+                         "id":  "kubernetes.security.checkov",
+                         "name":  "Kubernetes Checkov",
+                         "technology":  "kubernetes",
+                         "capability":  "security",
+                         "tool":  {
+                                      "name":  "Checkov",
+                                      "command":  "checkov"
+                                  },
+                         "severity":  "high",
+                         "selection_policy":  "alternative",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".yml",
+                                                                           ".yaml"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "framework":  "kubernetes"
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  900,
+                         "cost":  "high",
+                         "side_effect_level":  "network_code_execution",
+                         "permissions":  [
+                                             "network",
+                                             "code_execution"
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Kubernetes Checkov",
+                         "limitations":  [
+                                             "Requires network and code-execution authorization."
+                                         ]
+                     },
+                     {
+                         "id":  "kubernetes.security.trivy",
+                         "name":  "Kubernetes Trivy",
+                         "technology":  "kubernetes",
+                         "capability":  "security",
+                         "tool":  {
+                                      "name":  "Trivy",
+                                      "command":  "trivy"
+                                  },
+                         "severity":  "high",
+                         "selection_policy":  "alternative",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".yml",
+                                                                           ".yaml"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "scanners":  [
+                                                             "misconfig"
+                                                         ]
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  900,
+                         "cost":  "high",
+                         "side_effect_level":  "network",
+                         "permissions":  [
+                                             "network"
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Kubernetes Trivy",
+                         "limitations":  [
+                                             "Requires network authorization."
+                                         ]
+                     },
+                     {
+                         "id":  "kubernetes.policy.checkov",
+                         "name":  "Kubernetes policy",
+                         "technology":  "kubernetes",
+                         "capability":  "policy validation",
+                         "tool":  {
+                                      "name":  "Checkov",
+                                      "command":  "checkov"
+                                  },
+                         "severity":  "high",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".yml",
+                                                                           ".yaml"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "framework":  "kubernetes"
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  900,
+                         "cost":  "high",
+                         "side_effect_level":  "network_code_execution",
+                         "permissions":  [
+                                             "network",
+                                             "code_execution"
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Kubernetes policy",
+                         "limitations":  [
+                                             "Requires network and code-execution authorization."
+                                         ]
+                     },
+                     {
+                         "id":  "helm.security.checkov",
+                         "name":  "Helm Checkov",
+                         "technology":  "helm",
+                         "capability":  "security",
+                         "tool":  {
+                                      "name":  "Checkov",
+                                      "command":  "checkov"
+                                  },
+                         "severity":  "high",
+                         "selection_policy":  "alternative",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           "Chart.yaml"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "framework":  "helm"
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  900,
+                         "cost":  "high",
+                         "side_effect_level":  "network_code_execution",
+                         "permissions":  [
+                                             "network",
+                                             "code_execution"
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Helm Checkov",
+                         "limitations":  [
+                                             "Requires network and code-execution authorization."
+                                         ]
+                     },
+                     {
+                         "id":  "helm.security.trivy",
+                         "name":  "Helm Trivy",
+                         "technology":  "helm",
+                         "capability":  "security",
+                         "tool":  {
+                                      "name":  "Trivy",
+                                      "command":  "trivy"
+                                  },
+                         "severity":  "high",
+                         "selection_policy":  "alternative",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           "Chart.yaml"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "scanners":  [
+                                                             "misconfig"
+                                                         ]
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  900,
+                         "cost":  "high",
+                         "side_effect_level":  "network",
+                         "permissions":  [
+                                             "network"
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Helm Trivy",
+                         "limitations":  [
+                                             "Requires network authorization."
+                                         ]
+                     },
+                     {
+                         "id":  "helm.policy.checkov",
+                         "name":  "Helm policy",
+                         "technology":  "helm",
+                         "capability":  "policy validation",
+                         "tool":  {
+                                      "name":  "Checkov",
+                                      "command":  "checkov"
+                                  },
+                         "severity":  "high",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           "Chart.yaml"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "framework":  "helm"
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  900,
+                         "cost":  "high",
+                         "side_effect_level":  "network_code_execution",
+                         "permissions":  [
+                                             "network",
+                                             "code_execution"
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Helm policy",
+                         "limitations":  [
+                                             "Requires network and code-execution authorization."
+                                         ]
+                     },
+                     {
+                         "id":  "shell.lint.shellcheck",
+                         "name":  "Shell lint",
+                         "technology":  "shell",
+                         "capability":  "linting",
+                         "tool":  {
+                                      "name":  "ShellCheck",
+                                      "command":  "shellcheck"
+                                  },
+                         "severity":  "medium",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".sh"
+                                                                       ]
+                                           },
+                         "parameters":  {
+
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  300,
+                         "cost":  "low",
+                         "side_effect_level":  "read_only",
+                         "permissions":  [
+
+                                         ],
+                         "platform_support":  [
+                                                  "linux-x64",
+                                                  "macos-arm64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Shell lint",
+                         "limitations":  [
+                                             "No Windows x64 artifact is currently qualified."
+                                         ]
+                     },
+                     {
+                         "id":  "javascript.lint.unconfigured",
+                         "name":  "JavaScript lint",
+                         "technology":  "javascript",
+                         "capability":  "linting",
+                         "tool":  null,
+                         "severity":  "medium",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".js",
+                                                                           ".jsx",
+                                                                           ".mjs",
+                                                                           ".cjs"
+                                                                       ]
+                                           },
+                         "parameters":  {
+
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  300,
+                         "cost":  "low",
+                         "side_effect_level":  "read_only",
+                         "permissions":  [
+
+                                         ],
+                         "platform_support":  [
+
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: JavaScript lint",
+                         "limitations":  [
+                                             "No lint tool is configured."
+                                         ]
+                     },
+                     {
+                         "id":  "typescript.lint.unconfigured",
+                         "name":  "TypeScript lint",
+                         "technology":  "typescript",
+                         "capability":  "linting",
+                         "tool":  null,
+                         "severity":  "medium",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".ts",
+                                                                           ".tsx",
+                                                                           ".mts",
+                                                                           ".cts"
+                                                                       ]
+                                           },
+                         "parameters":  {
+
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  300,
+                         "cost":  "low",
+                         "side_effect_level":  "read_only",
+                         "permissions":  [
+
+                                         ],
+                         "platform_support":  [
+
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: TypeScript lint",
+                         "limitations":  [
+                                             "No lint tool is configured."
+                                         ]
+                     },
+                     {
+                         "id":  "markdown.documentation.markdownlint",
+                         "name":  "Markdown lint",
+                         "technology":  "markdown",
+                         "capability":  "documentation",
+                         "tool":  {
+                                      "name":  "markdownlint",
+                                      "command":  "pre-commit"
+                                  },
+                         "severity":  "low",
+                         "selection_policy":  "all",
+                         "applicability":  {
+                                               "technology_status":  [
+                                                                         "detected"
+                                                                     ],
+                                               "evidence_extensions":  [
+                                                                           ".md"
+                                                                       ]
+                                           },
+                         "parameters":  {
+                                            "hook":  "markdownlint"
+                                        },
+                         "dependencies":  [
+
+                                          ],
+                         "timeout_seconds":  600,
+                         "cost":  "low",
+                         "side_effect_level":  "code_execution",
+                         "permissions":  [
+                                             "code_execution"
+                                         ],
+                         "platform_support":  [
+                                                  "windows-x64"
+                                              ],
+                         "objective":  "Evaluer le controle de conformite: Markdown lint",
+                         "limitations":  [
+
+                                         ]
+                     }
+                 ]
+}

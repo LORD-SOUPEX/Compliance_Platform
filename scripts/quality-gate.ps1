@@ -7,8 +7,12 @@ param(
     [switch]$DiscoveryOnly,
     [switch]$Compliance,
     [switch]$PlanOnly,
+    [switch]$HumanSummary,
     [switch]$AllowNetwork,
     [switch]$AllowCodeExecution,
+    [ValidateSet('PowerShell', 'Bash', 'VSCode', 'GitLab')][string]$Adapter = 'PowerShell',
+    [ValidateRange(1, 86400)][int]$ComplianceTimeoutSeconds = 1800,
+    [ValidateRange(1024, 10485760)][int]$ComplianceMaxOutputBytes = 1048576,
     [switch]$NoColor,
     [ValidateRange(1, 3600)][int]$TimeoutSeconds = 300
 )
@@ -16,6 +20,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $platformRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+Import-Module (Join-Path $platformRoot 'src/Control.Catalog.psm1') -Force -ErrorAction Stop
+$script:ControlCatalog = Import-ControlCatalog -Path (Join-Path $platformRoot '.config/control-catalog.json')
 if ([string]::IsNullOrWhiteSpace($RepositoryPath)) {
     $repoRoot = $platformRoot
 } else {
@@ -100,11 +106,15 @@ function Invoke-BoundedProcess {
         [Parameter(Mandatory = $true)][string]$Executable,
         [string[]]$Arguments = @(),
         [Parameter(Mandatory = $true)][string]$WorkingDirectory,
-        [ValidateRange(1, 3600)][int]$Timeout = 300
+        [ValidateRange(1, 3600)][int]$Timeout = 300,
+        [int]$TimeoutMilliseconds = 0,
+        [ValidateRange(1024, 10485760)][int]$MaxOutputBytes = 1048576
     )
+    $waitMilliseconds = if ($TimeoutMilliseconds -gt 0) { $TimeoutMilliseconds } else { $Timeout * 1000 }
+    if ($waitMilliseconds -lt 1 -or $waitMilliseconds -gt 86400000) { throw 'Timeout processus hors limites.' }
     $started = [DateTimeOffset]::UtcNow
     $timer = [Diagnostics.Stopwatch]::StartNew()
-    $result = [pscustomobject]@{ execution_start = $started.ToString('o'); execution_end = $null; duration_ms = 0; stdout = ''; stderr = ''; exit_code = $null; error = $null; timed_out = $false }
+    $result = [pscustomobject]@{ execution_start = $started.ToString('o'); execution_end = $null; duration_ms = 0; stdout = ''; stderr = ''; exit_code = $null; error = $null; timed_out = $false; output_truncated = $false }
     $process = New-Object Diagnostics.Process
     try {
         $resolved = if (Test-Path -LiteralPath $Executable -PathType Leaf) { [IO.Path]::GetFullPath($Executable) } else {
@@ -126,7 +136,7 @@ function Invoke-BoundedProcess {
         $null = $process.Start()
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit($Timeout * 1000)) {
+        if (-not $process.WaitForExit($waitMilliseconds)) {
             $result.timed_out = $true
             $result.error = "Delai depasse : $Timeout secondes."
             if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { & taskkill /PID $process.Id /T /F | Out-Null }
@@ -136,6 +146,13 @@ function Invoke-BoundedProcess {
         $result.stdout = $stdout.Result
         $result.stderr = $stderr.Result
         $result.exit_code = $process.ExitCode
+        foreach ($streamName in @('stdout', 'stderr')) {
+            $streamBytes = [Text.Encoding]::UTF8.GetBytes([string]$result.$streamName)
+            if ($streamBytes.Length -gt $MaxOutputBytes) {
+                $result.$streamName = [Text.Encoding]::UTF8.GetString($streamBytes, 0, $MaxOutputBytes)
+                $result.output_truncated = $true
+            }
+        }
     } catch { $result.error = $_.Exception.Message }
     finally {
         $process.Dispose()
@@ -557,45 +574,7 @@ function Resolve-CandidateTool {
 
 function Get-CapabilityProfile {
     param([string]$Technology)
-    switch ($Technology) {
-        'terraform' { return @(
-            [pscustomobject]@{ name = 'formatting'; tools = @(@{ name = 'terraform fmt'; command = 'terraform' }) },
-            [pscustomobject]@{ name = 'linting'; tools = @(@{ name = 'tflint'; command = 'tflint' }) },
-            [pscustomobject]@{ name = 'security'; tools = @(@{ name = 'checkov'; command = 'checkov' }) }
-        ) }
-        'opentofu' { return @(
-            [pscustomobject]@{ name = 'formatting'; tools = @(@{ name = 'tofu fmt'; command = 'tofu' }) },
-            [pscustomobject]@{ name = 'linting'; tools = @(@{ name = 'tflint'; command = 'tflint' }) },
-            [pscustomobject]@{ name = 'security'; tools = @(@{ name = 'checkov'; command = 'checkov' }) }
-        ) }
-        'terragrunt' { return @([pscustomobject]@{ name = 'formatting'; tools = @(@{ name = 'terragrunt'; command = 'terragrunt' }) }) }
-        'ansible' { return @([pscustomobject]@{ name = 'linting'; tools = @(@{ name = 'ansible-lint'; command = 'ansible-lint' }, @{ name = 'yamllint'; command = 'yamllint' }) }) }
-        'python' { return @(
-            [pscustomobject]@{ name = 'formatting'; tools = @(@{ name = 'ruff'; command = 'ruff' }) },
-            [pscustomobject]@{ name = 'linting'; tools = @(@{ name = 'ruff'; command = 'ruff' }, @{ name = 'pylint'; command = 'pylint' }) },
-            [pscustomobject]@{ name = 'testing'; tools = @(@{ name = 'pytest'; command = 'pytest' }) },
-            [pscustomobject]@{ name = 'security'; tools = @(@{ name = 'bandit'; command = 'bandit' }) },
-            [pscustomobject]@{ name = 'dependency audit'; tools = @(@{ name = 'pip-audit'; command = 'pip-audit' }) }
-        ) }
-        'powershell' { return @([pscustomobject]@{ name = 'linting'; tools = @(@{ name = 'PSScriptAnalyzer'; command = 'Invoke-ScriptAnalyzer' }) }) }
-        'docker' { return @(
-            [pscustomobject]@{ name = 'linting'; tools = @(@{ name = 'Hadolint'; command = 'hadolint' }) },
-            [pscustomobject]@{ name = 'security'; tools = @(@{ name = 'Trivy'; command = 'trivy' }) }
-        ) }
-        'kubernetes' { return @(
-            [pscustomobject]@{ name = 'security'; selection_policy = 'alternative'; tools = @(@{ name = 'Checkov'; command = 'checkov' }, @{ name = 'Trivy'; command = 'trivy' }) },
-            [pscustomobject]@{ name = 'policy validation'; tools = @(@{ name = 'Checkov'; command = 'checkov' }) }
-        ) }
-        'helm' { return @(
-            [pscustomobject]@{ name = 'security'; selection_policy = 'alternative'; tools = @(@{ name = 'Checkov'; command = 'checkov' }, @{ name = 'Trivy'; command = 'trivy' }) },
-            [pscustomobject]@{ name = 'policy validation'; tools = @(@{ name = 'Checkov'; command = 'checkov' }) }
-        ) }
-        'shell' { return @([pscustomobject]@{ name = 'linting'; tools = @(@{ name = 'ShellCheck'; command = 'shellcheck' }) }) }
-        'javascript' { return @([pscustomobject]@{ name = 'linting'; tools = @() }) }
-        'typescript' { return @([pscustomobject]@{ name = 'linting'; tools = @() }) }
-        'markdown' { return @([pscustomobject]@{ name = 'documentation'; tools = @(@{ name = 'markdownlint'; command = 'pre-commit' }) }) }
-        default { return @() }
-    }
+    return @(Get-CatalogCapabilityProfile -Catalog $script:ControlCatalog -Technology $Technology)
 }
 
 function Get-CapabilityMatrix {
@@ -607,7 +586,11 @@ function Get-CapabilityMatrix {
                 $selectionPolicy = if ($capability.PSObject.Properties.Name -contains 'selection_policy') { $capability.selection_policy } else { 'all' }
                 if ($selectionPolicy -notin @('all', 'alternative')) { throw 'Politique de selection de capacite invalide.' }
                 $toolStates = @($capability.tools | ForEach-Object {
-                    Resolve-CandidateTool -Name $_.name -Command $_.command
+                    $tool = Resolve-CandidateTool -Name $_.name -Command $_.command
+                    foreach ($property in @('catalog_id', 'severity', 'side_effect_level', 'permissions', 'timeout_seconds', 'cost', 'parameters', 'dependencies', 'limitations', 'platform_support')) {
+                        if ($_.PSObject.Properties.Name -contains $property) { $tool | Add-Member -MemberType NoteProperty -Name $property -Value $_.$property -Force }
+                    }
+                    $tool
                 })
             $availableTools = @($toolStates | Where-Object status -eq 'available')
             $availability = if ($discovery.status -eq 'ambiguous') { 'ambiguous' }
@@ -628,6 +611,7 @@ function Get-CapabilityMatrix {
             [pscustomobject]@{
                 name = $capability.name
                 selection_policy = $selectionPolicy
+                catalog_controls = @($capability.controls)
                     required = ($discovery.status -eq 'detected')
                 availability = $availability
                 candidate_tools = @($toolStates)
@@ -986,22 +970,22 @@ try {
             $executionResults = @()
             $preparationFailed = $false
             try {
-                $executionPlan = New-CompliancePlan -Discovery $discoveryResult.technologies -CapabilityMatrix $discoveryResult.capability_matrix -Resolver $discoveryResult.tool_resolution -RepositoryRoot $repoRoot -Timeout $TimeoutSeconds -AllowNetwork:$AllowNetwork -AllowCodeExecution:$AllowCodeExecution
+                $executionPlan = New-CompliancePlan -Discovery $discoveryResult.technologies -CapabilityMatrix $discoveryResult.capability_matrix -Resolver $discoveryResult.tool_resolution -RepositoryRoot $repoRoot -Timeout $TimeoutSeconds -GlobalTimeout $ComplianceTimeoutSeconds -MaxOutputBytes $ComplianceMaxOutputBytes -AllowNetwork:$AllowNetwork -AllowCodeExecution:$AllowCodeExecution
                 if (-not $PlanOnly -and $discoveryResult.scan_complete) {
                     $runner = {
-                        param($executable, $arguments, $root, $timeout)
-                        Invoke-BoundedProcess -Executable $executable -Arguments $arguments -WorkingDirectory $root -Timeout $timeout
+                        param($executable, $arguments, $root, $timeout, $maximumOutputBytes)
+                        Invoke-BoundedProcess -Executable $executable -Arguments $arguments -WorkingDirectory $root -Timeout ([int][Math]::Ceiling($timeout)) -TimeoutMilliseconds ([int][Math]::Ceiling($timeout * 1000)) -MaxOutputBytes $maximumOutputBytes
                     }
                     $env:PRE_COMMIT_HOME = Join-Path $platformRoot '.tools/pre-commit'
                     $env:PIP_CERT = Join-Path $platformRoot '.tools/cache/windows-root-ca.pem'
-                    $executionResults = @(Invoke-CompliancePlan -Plan $executionPlan -ProcessRunner $runner -PlatformRoot $platformRoot)
+                    $executionResults = @(Invoke-CompliancePlan -Plan $executionPlan -ProcessRunner $runner -PlatformRoot $platformRoot -GlobalTimeout $ComplianceTimeoutSeconds)
                 }
             } catch {
                 $preparationFailed = $true
                 $now = [DateTimeOffset]::UtcNow.ToString('o')
                 $executionResults = @([pscustomobject]@{ control_id = 'engine/preparation'; technology = 'engine'; capability = 'preparation'; root = '.'; status = 'error'; execution_start = $now; execution_end = $now; duration_ms = 0; tool_version = $null; stdout = ''; stderr = ''; exit_code = $null; critical = $true; diagnostics = @([pscustomobject]@{ code = 'preparation_error'; message = $_.Exception.Message; critical = $true }) })
             }
-            $complianceReport = New-ComplianceReport -Discovery $discoveryResult -Matrix $discoveryResult.capability_matrix -Resolver $discoveryResult.tool_resolution -Plan $executionPlan -Results $executionResults -PlanOnly:($PlanOnly -and -not $preparationFailed)
+            $complianceReport = New-ComplianceReport -Discovery $discoveryResult -Matrix $discoveryResult.capability_matrix -Resolver $discoveryResult.tool_resolution -Plan $executionPlan -Results $executionResults -PlanOnly:($PlanOnly -and -not $preparationFailed) -SourceAdapter $Adapter
             if ($preparationFailed) { $complianceReport.execution_status = 'error' }
             $complianceJson = $complianceReport | ConvertTo-Json -Depth 20
             $reportName = if ($ReportPath) { $ReportPath } else { 'compliance-report.json' }
@@ -1009,6 +993,10 @@ try {
             $reportDirectory = Split-Path -Parent $compliancePath
             if (-not (Test-Path -LiteralPath $reportDirectory -PathType Container)) { New-Item -ItemType Directory -Path $reportDirectory -Force | Out-Null }
             [IO.File]::WriteAllText($compliancePath, $complianceJson, [Text.UTF8Encoding]::new($false))
+            if ($HumanSummary) {
+                $displayVerdict = if ($PlanOnly) { 'PLAN' } else { $complianceReport.verdict }
+                [Console]::Error.WriteLine("Compliance ${displayVerdict}: $($complianceReport.summary.success) success, $($complianceReport.summary.fail) fail, $($complianceReport.summary.error) error, $($complianceReport.summary.skipped) skipped. Rapport: $compliancePath")
+            }
             Write-Output $complianceJson
             if ($preparationFailed -or -not $discoveryResult.scan_complete) { exit 2 }
             if ($PlanOnly) { exit 0 }
@@ -1055,6 +1043,22 @@ try {
 
     $summary = [pscustomobject]@{ PASS = $script:Counts.PASS; FAIL = $script:Counts.FAIL; WARN = $script:Counts.WARN; SKIP = $script:Counts.SKIP; ERROR = $script:Counts.ERROR }
     $exitCode = if ($script:Counts.FAIL -gt 0 -or $script:Counts.ERROR -gt 0) { 1 } else { 0 }
+    Import-Module (Join-Path $platformRoot 'src/Compliance.Engine.psm1') -Force -ErrorAction Stop
+    $legacyDiscovery = [pscustomobject]@{
+        schema_version = 1
+        repository = $repoRoot
+        technologies = $script:Technologies.discoveries
+        project_roots = $script:Technologies.project_roots
+        ambiguities = $script:Technologies.ambiguities
+        capability_matrix = $script:Technologies.capability_matrix
+        tool_resolution = $script:Technologies.tool_resolution
+        scan_complete = $script:Technologies.scan_complete
+        scan_errors = $script:Technologies.scan_errors
+    }
+    $referenceReport = ConvertTo-ComplianceReportFromChecks -Checks $script:Results.ToArray() -RepositoryRoot $repoRoot -Discovery $legacyDiscovery -Matrix $script:Technologies.capability_matrix -Resolver $script:Technologies.tool_resolution -Mode $script:RequestedMode
+    $referencePath = Join-Path (Join-Path $platformRoot 'reports') 'compliance-report.json'
+    if (-not (Test-Path (Split-Path -Parent $referencePath) -PathType Container)) { New-Item -ItemType Directory -Path (Split-Path -Parent $referencePath) -Force | Out-Null }
+    [IO.File]::WriteAllText($referencePath, ($referenceReport | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
     if ($ReportPath -or $Mode -eq 'Ci') {
         $relativeReport = if ($ReportPath) { $ReportPath } else { 'quality-report.json' }
         $reportPathResolved = if ([System.IO.Path]::IsPathRooted($relativeReport)) { $relativeReport } else { Join-Path (Join-Path $repoRoot 'reports') $relativeReport }

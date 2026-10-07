@@ -47,14 +47,16 @@ function Invoke-ComplianceCase {
 }
 
 function Invoke-ComplianceFixture {
-    param([switch]$PlanOnly, [switch]$AllowCodeExecution)
+    param([switch]$PlanOnly, [switch]$AllowCodeExecution, [switch]$HumanSummary)
     $reportPath = Join-Path $repoRoot 'reports/compliance-report.json'
     $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $gatePath, '-Compliance', '-RepositoryPath', $repoRoot, '-ReportPath', $reportPath, '-NoColor')
     if ($PlanOnly) { $arguments += '-PlanOnly' }
     if ($AllowCodeExecution) { $arguments += '-AllowCodeExecution' }
+    if ($HumanSummary) { $arguments += '-HumanSummary' }
     $output = & $processHost @arguments
     $code = $LASTEXITCODE
-    $report = ($output -join "`n") | ConvertFrom-Json
+    try { $report = ($output -join "`n") | ConvertFrom-Json -ErrorAction Stop }
+    catch { throw "Sortie Compliance non JSON (code $code): $($output -join "`n")" }
     Assert-ComplianceIntegration (Test-Path $reportPath) 'Rapport non ecrit.'
     $saved = Get-Content -LiteralPath $reportPath -Raw -Encoding UTF8 | ConvertFrom-Json
     Assert-ComplianceIntegration ($saved.verdict -eq $report.verdict -and $saved.schema_version -eq 1) 'Rapport sur disque incoherent.'
@@ -77,9 +79,14 @@ try {
         $execution = Invoke-BoundedProcess -Executable $processHost -Arguments @('-NoProfile', '-File', (Join-Path $repoRoot 'timeout.ps1')) -WorkingDirectory $repoRoot -Timeout 1
         Assert-ComplianceIntegration ($execution.timed_out -and $execution.error -and $execution.stdout -match 'avant') 'Timeout ou sortie partielle perdus.'
     }
+    Invoke-ComplianceCase 'Sorties conservees bornees par flux' {
+        Write-ComplianceFixture 'large-output.ps1' '[Console]::Out.Write(("x" * 10000)); [Console]::Error.Write(("y" * 10000))'
+        $execution = Invoke-BoundedProcess -Executable $processHost -Arguments @('-NoProfile', '-File', (Join-Path $repoRoot 'large-output.ps1')) -WorkingDirectory $repoRoot -Timeout 10 -MaxOutputBytes 1024
+        Assert-ComplianceIntegration ($execution.output_truncated -and [Text.Encoding]::UTF8.GetByteCount($execution.stdout) -le 1024 -and [Text.Encoding]::UTF8.GetByteCount($execution.stderr) -le 1024) 'Les sorties conservent plus que le budget.'
+    }
     Invoke-ComplianceCase 'Plan seul sans execution ni verdict' {
         Write-ComplianceFixture 'nested/app/main.ps1' "param()`nWrite-Output 'ok'`n"
-        $execution = Invoke-ComplianceFixture -PlanOnly
+        $execution = Invoke-ComplianceFixture -PlanOnly -HumanSummary
         Assert-ComplianceIntegration ($execution.code -eq 0 -and $execution.report.execution_status -eq 'planned' -and $null -eq $execution.report.verdict -and $execution.report.execution_results.Count -eq 0) 'Plan seul execute ou qualifie.'
         Assert-ComplianceIntegration (@($execution.report.execution_plan.controls | Where-Object { $_.technology -eq 'powershell' -and $_.root -eq 'nested/app' -and $_.applicability -eq 'applicable' }).Count -eq 1) 'Controle PowerShell ou racine absents.'
     }
@@ -108,6 +115,19 @@ try {
         foreach ($result in $execution.report.execution_results) { Assert-ComplianceIntegration (($result.stdout + $result.stderr) -notmatch 'generated\.py') 'Cache genere analyse.' }
         Assert-ComplianceIntegration (-not (Test-Path (Join-Path $repoRoot '.ruff_cache'))) 'Cache Ruff cree dans le consommateur.'
     }
+    Invoke-ComplianceCase 'Parite Quick historique et Compliance sur Python' {
+        Write-ComplianceFixture 'app.py' "value = 1`n"
+        $legacyArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $gatePath, '-Mode', 'Quick', '-Category', 'Python', '-RepositoryPath', $repoRoot, '-NoColor')
+        $null = & $processHost @legacyArguments
+        $legacyValidCode = $LASTEXITCODE
+        $complianceValid = Invoke-ComplianceFixture
+        Assert-ComplianceIntegration ($legacyValidCode -eq 0 -and $complianceValid.code -eq 0 -and $complianceValid.report.verdict -eq 'PASS') 'Verdicts divergents sur Python valide.'
+        Write-ComplianceFixture 'app.py' "value=1`n"
+        $null = & $processHost @legacyArguments
+        $legacyInvalidCode = $LASTEXITCODE
+        $complianceInvalid = Invoke-ComplianceFixture
+        Assert-ComplianceIntegration ($legacyInvalidCode -ne 0 -and $complianceInvalid.code -eq 1 -and $complianceInvalid.report.verdict -eq 'FAIL') 'Verdicts divergents sur Python mal formate.'
+    }
     Invoke-ComplianceCase 'Syntaxe Python invalide ne produit pas PASS' {
         Write-ComplianceFixture 'app.py' "def broken(:`n"
         $execution = Invoke-ComplianceFixture
@@ -126,6 +146,7 @@ try {
             $execution = Invoke-ComplianceFixture
             Assert-ComplianceIntegration ($execution.code -eq 2 -and $execution.report.verdict -eq 'FAIL' -and $execution.report.execution_status -eq 'blocked' -and $execution.report.execution_results.Count -eq 0) 'Scan incomplet execute ou perdu.'
             Assert-ComplianceIntegration ($execution.report.discovery.scan_errors.Count -eq 1) 'Diagnostic Discovery absent.'
+            Assert-ComplianceIntegration ($execution.report.findings.Count -eq 1 -and $execution.report.findings[0].technology -eq 'engine' -and $execution.report.diagnostics[0].critical) 'Erreur Discovery absente des findings normalises.'
         } finally { $locked.Dispose() }
     }
     Invoke-ComplianceCase 'Markdown unique utilise le cache partage' {

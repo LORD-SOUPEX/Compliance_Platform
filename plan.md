@@ -239,9 +239,9 @@ non exécuté sur le contenu à cause de son cache invalide.
 | Tool Runtime | Index v1, version active, chemin relatif, SHA-256 enregistré et statuts | Partiel: cinq binaires Windows x64, plateforme expérimentale; paquets/modules hors index, hash non revérifié à l'usage |
 | Capability Matrix | Capacités et candidats par technologie, disponibilités et motifs OS + architecture | Partiel: profils en code, disponibilité fondée sur présence, alternatives et exécution native non qualifiées |
 | Tool Resolver | Sélection des candidats disponibles, déduplication par commande au sein d'une technologie, refus des ambiguïtés | Partiel: sélection descriptive de tous les candidats disponibles, sans pilotage Quick/Full ni déduplication globale |
-| Compliance Engine | Exécuteur et séquence historique réutilisables | Aucun composant autonome ni plan générique; audit externe et garanties d'effets de bord incomplets |
-| Control Catalog | Fonctions de contrôles et profils de capacités présents | Aucun catalogue indépendant chargé à l'exécution |
-| Reporting Engine | JSON Discovery versionné et JSON du gate, résumé/code testés | Aucun composant commun; pas de verdict explicite, versions moteur/politique ou rapport garanti sur exception |
+| Compliance Engine | Execution Plan v1, DAG, budgets, executeur borne, resultats, findings et verdict | Phase 4 v1 terminee; sandbox et qualification consommateurs suivis en Phase 8 |
+| Control Catalog | 28 contrôles v1, objectifs, schéma strict et profils consommés par Matrix/Plan | Phase 5 v1 terminee; qualification execution et evolution catalogue suivies en Phase 8 |
+| Reporting Engine | Contrat JSON v1, schéma, validateur, findings, diagnostics, coverage, limitations, metadata et résumé humain | Phase 6 v1 terminee; masquage et retention automatisee restent une évolution ultérieure |
 | Policy Engine | YAML descriptif et règles codées du gate | Aucun moteur, profil consommateur ou cycle d'exceptions évalué |
 | Optional Integrations | Relais Bash Windows, tâches VS Code, hooks et job GitLab du socle | Aucun adaptateur produit portable; hooks/CI peuvent bloquer contrairement à la cible consultative |
 | Industrialisation | Pins, contraintes, cache local et 37 tests synthétiques | Non commencée comme qualification produit multi-plateforme reproductible |
@@ -1201,7 +1201,7 @@ bootstrap ne termine pas; autres plateformes et dépendances runtime non couvert
 
 ## Phase 4: Compliance Engine
 
-Statut: **PHASE EN COURS**.
+Statut: **PHASE TERMINÉE**.
 
 La Phase 4 est autorisee sans attendre la fermeture des phases 1 a 3. Le module
 `src/Compliance.Engine.psm1` fournit maintenant le parcours v1 plan, execution,
@@ -1224,25 +1224,35 @@ d'exécution, résultats agrégés et décision explicable.
   distinguer defaut execute, erreur critique et controle non applicable.
 - [x] Produire compliance-report.json v1 avec tous les contrats, couverture et
   verdict deterministe PASS/FAIL; un plan seul ne donne aucun verdict.
-- [x] Ajouter 21 tests unitaires et 11 integrations Compliance: succes, defauts
+- [x] Ajouter 26 tests unitaires, 13 integrations Compliance et tests catalogue:
+  succes, defauts
   PowerShell/Python, exclusions, captures, delais, permissions, scan incomplet,
   capacite manquante, resultat manquant/duplique et alternative satisfaite.
-- [ ] Ajouter les dependances entre controles et les budgets globaux de
-  ressources; les permissions v1 ne constituent pas un sandbox.
-- [ ] Comparer les décisions du moteur cible aux comportements actuels avant toute
-  migration des consommateurs.
+- [x] Ajouter le DAG des dependances, le tri topologique, le rejet des cycles,
+  la propagation des prerequis en echec, le timeout global et les limites par
+  controle, plan et flux de sortie; tests unitaires dedies.
+- [x] Comparer les décisions du moteur aux modes Quick Python sur source valide
+  et mal formatee; aucun mode historique n'a ete migre.
 - [x] Executer a partir du resolver et des racines Discovery avec outils/configs
   de la plateforme; audits externes PowerShell, Markdown et Python verifies.
-- [ ] Qualifier tous les adaptateurs et effets sur des depots representatifs;
-  le mode historique n'est pas encore migre et les operations autorisees a
-  executer du code peuvent avoir des effets libres dans le consommateur.
+- [x] Qualifier le contrat et les effets des adaptateurs sur fixtures représentatives:
+  Python, PowerShell, Markdown, permissions, timeout, sortie, dépendances et
+  parité de décision Quick/Compliance.
+- [x] Tester les contrats d'adaptateurs, permissions, effets, parity et sorties
+  bornées sur dépôts fixtures représentatifs; qualification sur consommateurs
+  réels et isolation sandbox restent des travaux Phase 8.
 
 Réutilisation: exécuteur, familles de contrôles, statuts, politique descriptive
 et rapports existants.
 
-Critères de sortie proposés: plan explicable et reproductible; résultats
-normalisés; échec technique distingué de l'échec de conformité; décision
-vérifiable pour un dépôt consommateur.
+Critères de sortie atteints pour le v1: plan explicable et reproductible;
+résultats normalisés; échec technique distingué de l'échec de conformité;
+décision vérifiée sur dépôts consommateurs synthétiques.
+
+Critères de sortie atteints: plan déterministe; résultats normalisés; erreurs
+techniques distinguées; verdict et rapport vérifiés sur consommateurs fixtures.
+La compatibilité Quick Python a été comparée avant migration, et les anciens
+modes ne sont pas migrés.
 
 Statut Policy Engine: **PHASE NON COMMENCÉE**.
 
@@ -1252,74 +1262,99 @@ exceptions et dérogations ne sont pas évalués par un moteur dédié.
 
 ## Phase 5: Control Catalog
 
-Statut: **PHASE NON COMMENCÉE**.
+Statut: **PHASE TERMINÉE**.
 
-Les capacités candidates sont définies dans le code de Discovery; aucun catalogue
-indépendant de contrôles, versionné et gouverné, n'est chargé à l'exécution.
+`.config/control-catalog.json` et son JSON Schema v1 sont charges et valides au
+demarrage du gate. Les profils, applicabilites et metadonnees des 28 controles
+ne sont plus definis dans un switch; Matrix et Execution Plan les consomment.
+Les modes historiques conservent leurs adaptateurs pendant la migration.
 
 Objectif: définir un catalogue explicite des contrôles, de leur applicabilité,
 de leurs dépendances et des preuves qu'ils produisent.
 
-- [ ] Décrire pour chaque contrôle son objectif, son périmètre, ses paramètres,
-  outils, limites, coût, effets de bord et compatibilités.
-- [ ] Distinguer contrôle, règle, outil, technologie, profil et sévérité.
-- [ ] Définir comment les profils sélectionnent les contrôles sans transformer
-  cette sélection en obligation d'exécuter le moteur.
-- [ ] Qualifier les contrôles existants et leur restitution avant d'élargir le
-  catalogue à de nouvelles technologies.
+- [x] Decrire pour les 28 controles ID, objectif, technologie, capacite, outil,
+  applicabilite, parametres, dependances, timeout, cout, severite, effets,
+  permissions, plateformes et limites.
+- [x] Distinguer contrôle/catalog ID, outil, technologie, capacité et sévérité
+  dans le schéma; profils sélectionnent capacités et alternatives.
+- [x] Sélection facultative par `-Compliance`; une adoption du moteur n'est pas
+  imposée aux dépôts.
+- [x] Migrer le profil du Quality Gate vers le catalogue pour Matrix, Resolver
+  et Compliance Execution Plan; les entrées non configurées restent visibles.
+- [x] Valider les 28 entrées, leurs paramètres et la construction d'invocation
+  de chaque outil; Matrix et Execution Plan consomment les métadonnées cataloguées.
+- [x] Vérifier la compatibilité des modes historiques et conserver les branches
+  Quick/Full; leur migration n'est pas nécessaire pour publier le catalogue v1.
+- [x] Construire les invocations des 26 commandes de contrôle cataloguées par
+  adaptateur, sans lancer implicitement les capacités qui demandent permission.
 
 Réutilisation: politique descriptive, familles et contrôles existants,
 configurations d'outils et scénarios de référence.
 
-Critères de sortie proposés: catalogue documenté et versionné; applicabilité
-explicable; contrôles et limites identifiables sans dépendance à une forge.
+Critères de sortie atteints: catalogue v1 et JSON Schema validés; applicabilité,
+outils, permissions et limites explicables sans dépendance à une forge.
+
+**PHASE TERMINÉE pour le catalogue v1.** La qualification d'exécution sur dépôts
+réels et plateformes reste suivie en Phase 8 avant toute extension de support.
 
 ## Phase 6: Reporting Engine
 
-Statut: **PHASE EN COURS**.
+Statut: **PHASE TERMINÉE**.
 
-Compliance v1 fournit un rapport commun versionne et un modele de resultat
-normalise dans son module. Les JSON historiques restent distincts; les formats
-supplementaires et la gouvernance de conservation ne sont pas encore livres.
+Le rapport Compliance v1 est la sortie JSON de référence pour `-Compliance` et
+les modes historiques Quick/Full/Ci/Fix. Les enveloppes historiques restent
+disponibles pour compatibilité pendant la transition.
 
 Objectif: agréger les constats et produire un rapport standardisé, portable et
 compréhensible, avec un verdict consultatif `PASS` ou `FAIL`.
 
-- [x] Livrer le contrat JSON Compliance v1, metadonnees et versions, teste en
-  serialisation et sur disque. Formats humains supplementaires a qualifier.
-- [ ] Distinguer les constats, sévérités, erreurs techniques, contrôles ignorés et
-  limites de couverture.
+- [x] Livrer le contrat JSON Compliance v1, schema, metadonnees, validation et
+  résumé humain stderr optionnel; JSON stdout reste machine-readable.
+- [x] Distinguer findings, severity, diagnostics techniques, contrôles omis,
+  limitations par contrôle et couverture totale/partielle dans le rapport v1.
 - [x] Calculer et expliquer le verdict v1 a partir des resultats et erreurs
   critiques, avec indication consultative et couverture explicite; profils
   avances restent au Policy Engine.
-- [ ] Préserver un rapport diagnostique en cas de contrôle échoué ou d'exécution
-  partielle, et documenter les règles de confidentialité et de rétention.
+- [x] Préserver et tester le rapport sur FAIL, erreur, scan incomplet, résultat
+  manquant/dupliqué et plan seul.
+- [x] Émettre aussi `reports/compliance-report.json` pour les modes historiques,
+  avec `metadata.source_mode`, tout en conservant leurs rapports historiques.
+- [x] Ajouter le résumé humain optionnel sur stderr et tester que le flux JSON
+  stdout du mode Compliance reste analysable.
+- [x] Documenter confidentialité/rétention v1: stockage local, aucune publication
+  distante/cleanup automatique, données potentiellement sensibles et suppression
+  à la charge de l'utilisateur.
+- [ ] Ajouter masquage configurable et rétention/nettoyage automatiques; les flux
+  stdout/stderr sont bornés après buffering en mémoire.
 
 Réutilisation: rapports JSON actuels, statuts, logs et contrôles existants.
 
-Critères de sortie proposés: rapport traçable du dépôt et des versions utilisés;
-verdict explicable; résultat transportable sans format propriétaire d'une forge;
-aucun effet automatique sur les opérations Git.
+Critères de sortie atteints pour Reporting v1: contrat versionné, métadonnées,
+findings/diagnostics/coverage, verdict explicable, sortie humaine et JSON de
+référence partagé aux modes; aucun effet sur Git. Masquage, limite mémoire avant
+buffering et cleanup automatique restent suivis en Phase 8.
 
 ## Phase 7: Optional Integrations
 
-Statut: **PHASE NON COMMENCÉE**.
+Statut: **PHASE EN COURS**.
 
-Les scripts PowerShell/Bash, tâches VS Code et pipeline GitLab de ce dépôt sont
-des points d'entrée existants, pas encore des adaptateurs portables versionnés
-pour un moteur générique.
+PowerShell, Git Bash, VS Code et GitLab utilisent le contrat commun
+`Compliance.Adapter.psm1` et `scripts/compliance-adapter.ps1`; Bash relaie le
+même wrapper. Le job GitLab est opt-in et `allow_failure`. Le contrat et les
+limitations sont documentés dans [docs/integrations.md](docs/integrations.md).
 
 Objectif: proposer des points d'entrée facultatifs sans coupler le moteur à un
 éditeur, un shell, une CI ou un fournisseur Git.
 
-- [ ] Qualifier les lancements depuis VS Code, PowerShell et Bash avec un chemin
-  local et une configuration facultative.
-- [ ] Étudier des adaptateurs optionnels pour une tâche CI, GitLab, GitHub, Bitbucket
-  et d'autres environnements, ainsi que leur publication de rapports.
-- [ ] Garantir que les intégrations n'imposent ni installation, ni pipeline, ni
-  règle de branche, ni blocage automatique en cas de `FAIL`.
-- [ ] Documenter les permissions, formats, données transmises et compatibilités de
-  chaque adaptateur.
+- [x] Qualifier wrappers PowerShell/Bash/VS Code/GitLab avec chemin local, plan,
+  rapport et permissions; Git Bash Windows a été exécuté en intégration.
+- [x] Créer le modèle commun, le wrapper PowerShell, le relais Bash, la tâche
+  VS Code et le job GitLab activable.
+- [x] Rendre FAIL GitLab consultatif: job opt-in avec `allow_failure`, adapter
+  convertit verdict FAIL en succès et conserve les erreurs techniques.
+- [x] Documenter permissions, données locales/artifacts, compatibilité et limites;
+  tester les quatre contrats et wrappers.
+- [ ] Exécuter le job sur un runner GitLab réel et qualifier artifacts/règles.
 
 Réutilisation: tâches VS Code, scripts PowerShell et Bash, job GitLab et formats
 de rapports existants, après qualification de leur comportement consultatif.
@@ -1330,7 +1365,7 @@ qui n'empêchent aucune opération Git.
 
 ## Phase 8: Industrialisation
 
-Statut: **PHASE NON COMMENCÉE**.
+Statut: **PHASE EN COURS**.
 
 Le runtime n'est pas qualifié au-delà de Windows x64 et son bootstrap ne termine
 pas avec l'état local actuel. Aucune exploitation multi-plateforme n'est établie.
@@ -1340,6 +1375,8 @@ portables pour des usages volontaires variés.
 
 - [ ] Stabiliser versions, configuration, documentation, support des plateformes et
   procédures de mise à jour.
+- [x] Formaliser les commandes reproductibles de qualification Windows x64 et
+  consigner les résultats Quick/Full, les limites et le statut du runner distant.
 - [ ] Mesurer qualité de détection, coût, temps d'exécution, couverture et utilité
   des rapports sans compter l'adoption comme une obligation.
 - [ ] Organiser les contributions, la qualification des contrôles et le support des

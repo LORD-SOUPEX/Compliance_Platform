@@ -1,0 +1,38 @@
+stages:
+  - validation
+  - informational
+
+quality-gate:
+  stage: validation
+  tags:
+    - windows
+  script:
+    - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -NoColor
+    - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor.ps1 -NoColor -ReportPath doctor.json
+    - >-
+      powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1
+      -Mode Ci -NoColor -ReportPath quality-report.json
+  artifacts:
+    when: always
+    expire_in: 7 days
+    paths:
+      - reports/*.json
+
+compliance-report:
+  stage: informational
+  tags:
+    - windows
+  rules:
+    - if: '$COMPLIANCE_ADAPTER_ENABLED == "true"'
+      when: always
+  allow_failure: true
+  script:
+    - powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -NoColor
+    - >-
+      powershell -NoProfile -ExecutionPolicy Bypass -File scripts/compliance-adapter.ps1
+      -Adapter GitLab -RepositoryPath "$env:CI_PROJECT_DIR"
+  artifacts:
+    when: always
+    expire_in: 7 days
+    paths:
+      - reports/compliance-report.json

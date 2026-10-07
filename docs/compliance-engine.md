@@ -1,6 +1,6 @@
 # Compliance Engine
 
-Etat: **PHASE EN COURS**, v1 exploitable sous Windows x64/PowerShell 5.1. Le module [src/Compliance.Engine.psm1](../src/Compliance.Engine.psm1) separe planification, execution, aggregation et verdict. Les modes historiques du Quality Gate restent disponibles.
+Etat: v1 de la Phase 4 terminé; qualification consommateur, sandbox et rétention restent suivies en Phase 8. Le module [src/Compliance.Engine.psm1](../src/Compliance.Engine.psm1) sépare planification, exécution, agrégation et verdict sous Windows x64/PowerShell 5.1. Les modes historiques du Quality Gate restent disponibles.
 
 ## Lancement
 
@@ -50,9 +50,15 @@ La CLI retourne 0 sur PASS ou plan seul valide, 1 sur verdict FAIL et 2 sur scan
 
 ## Preuves et limites
 
-21 tests unitaires et 11 integrations Compliance passent, en plus des 44 scenarios historiques. Les integrations executent de vrais audits externes PowerShell, Python et Markdown, avec cas negatifs, stdout/stderr, timeout et rapports sur disque.
+27 tests unitaires Compliance, 6 tests Control Catalog, 13 intégrations Compliance, 4 intégrations adaptateur et 45 scénarios historiques passent. Les tests couvrent le DAG, budgets, schémas, rapports, permissions, parité et audits externes PowerShell/Python/Markdown.
 
-Le catalogue d'adaptateurs est encore code, sans DAG ni Policy Engine avance. Les budgets globaux, le masquage general des sorties, leurs limites de taille et la qualification de tous les effets/technologies restent ouverts. Les donnees et sorties d'outils sont conservees dans le rapport local; il faut maitriser son partage. Voir [reporting.md](reporting.md) et [testing.md](testing.md).
+Le DAG catalogue est trié topologiquement; cycles et références absentes sont refusés. Un prérequis non réussi bloque les contrôles dépendants requis. Le moteur applique deadline globale, maximum de contrôles et plafond de sortie conservée par flux. Le résumé humain optionnel s'écrit sur stderr sans polluer stdout JSON.
+
+Le Control Catalog source est [`.config/control-catalog.json`](../.config/control-catalog.json), son schéma est [`.config/control-catalog.schema.json`](../.config/control-catalog.schema.json). Il contient 28 contrôles v1 couvrant 13 technologies, avec objectif, applicabilité, paramètres, outil, dépendances, timeout, coût, sévérité, effets, permissions, plateformes et limites. `Get-CapabilityProfile` ne contient plus de switch de profils; Matrix expose les IDs et métadonnées du catalogue, et le plan les transporte. Les paramètres des adaptateurs Ruff/Pylint/Bandit/pytest, IaC, Checkov, Trivy, Ansible, YAML et Markdown sont lus du catalogue.
+
+Le rapport v1 contient maintenant `findings`, diagnostics aplatis, limitations, metadata et coverage; les erreurs de scan produisent un finding critique. Le schéma est [`.config/compliance-report.schema.json`](../.config/compliance-report.schema.json) et `Test-ComplianceReport` valide la cohérence avant écriture. Les 6 tests du catalogue vérifient champs inconnus, permissions, références et cycles; les intégrations couvrent le flux catalogue → Matrix → Plan.
+
+Restent ouverts: qualification sur dépôts consommateurs représentatifs, migration des modes Quick/Full historiques, isolation des contrôles pouvant exécuter du code, limites mémoire réelles (les flux sont tronqués après buffering) et gouvernance de confidentialité/rétention. Les sorties du rapport peuvent contenir des données sensibles; aucune publication distante ou rétention automatique n'est configurée. Voir [reporting.md](reporting.md) et [testing.md](testing.md).
 
 ## Gate historique
 

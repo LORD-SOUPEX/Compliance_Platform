@@ -1,0 +1,76 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Bootstrap",
+      "type": "process",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/bootstrap.ps1"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Doctor",
+      "type": "process",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/doctor.ps1", "-NoColor", "-ReportPath", "doctor-report.json"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Quality Gate Quick",
+      "type": "process",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/quality-gate.ps1", "-Mode", "Quick", "-ReportPath", "quick.json"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Quality Gate Full",
+      "type": "process",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/quality-gate.ps1", "-Mode", "Full", "-ReportPath", "full.json"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Quality Gate Fix",
+      "type": "process",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/quality-gate.ps1", "-Mode", "Fix"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Quality Gate CI",
+      "type": "process",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/quality-gate.ps1", "-Mode", "Ci", "-NoColor", "-ReportPath", "quality-report.json"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Compliance v1",
+      "type": "process",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/compliance-adapter.ps1", "-Adapter", "VSCode", "-RepositoryPath", "${workspaceFolder}", "-HumanSummary"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Contrôle des pictogrammes",
+      "type": "process",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/check-emoji.ps1", "-Path", "${workspaceFolder}"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Hooks pre-commit",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv/Scripts/pre-commit.exe",
+      "args": ["run", "--all-files"],
+      "options": {"cwd": "${workspaceFolder}", "env": {"PRE_COMMIT_HOME": "${workspaceFolder}/.tools/pre-commit", "PIP_CERT": "${workspaceFolder}/.tools/cache/windows-root-ca.pem"}},
+      "problemMatcher": []
+    },
+    {
+      "label": "Tests",
+      "type": "process",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/test.ps1"],
+      "problemMatcher": []
+    }
+  ]
+}

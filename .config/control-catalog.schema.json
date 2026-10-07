@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://compliance-platform.local/schemas/control-catalog-v1.json",
+  "title": "Compliance Platform Control Catalog v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "controls"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "controls": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/control" }
+    }
+  },
+  "$defs": {
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "command"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "command": { "type": "string", "minLength": 1 }
+      }
+    },
+    "control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "objective", "technology", "capability", "tool", "severity", "selection_policy", "applicability", "parameters", "dependencies", "timeout_seconds", "cost", "side_effect_level", "permissions", "platform_support", "limitations"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+        "name": { "type": "string", "minLength": 1 },
+        "objective": { "type": "string", "minLength": 1 },
+        "technology": { "type": "string", "minLength": 1 },
+        "capability": { "type": "string", "minLength": 1 },
+        "tool": { "anyOf": [{ "$ref": "#/$defs/tool" }, { "type": "null" }] },
+        "severity": { "enum": ["low", "medium", "high", "critical"] },
+        "selection_policy": { "enum": ["all", "alternative"] },
+        "applicability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["technology_status", "evidence_extensions"],
+          "properties": {
+            "technology_status": { "type": "array", "items": { "const": "detected" }, "minItems": 1 },
+            "evidence_extensions": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "parameters": { "type": "object" },
+        "dependencies": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 3600 },
+        "cost": { "enum": ["low", "medium", "high"] },
+        "side_effect_level": { "enum": ["read_only", "code_execution", "network", "network_code_execution"] },
+        "permissions": { "type": "array", "uniqueItems": true, "items": { "enum": ["network", "code_execution"] } },
+        "platform_support": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "limitations": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}
