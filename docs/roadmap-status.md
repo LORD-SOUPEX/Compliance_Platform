@@ -12,7 +12,7 @@ Synthèse de [la roadmap existante dans plan.md](../plan.md#roadmap), mise à jo
 | Reporting Engine | PHASE TERMINÉE | Schéma/validateurs v1, métriques Discovery/Resolver/Compliance/Reporting et rapport de référence pour les modes historiques; masquage/nettoyage avancés en Phase 8. |
 | Policy Engine | PHASE NON COMMENCÉE | YAML descriptif, non autoritaire à l'exécution. |
 | Optional Integrations | PHASE EN COURS | Contrats testés en fixtures; restent runner GitLab distant, consumer repos autorisés et contextes UI/CI réels. |
-| Industrialisation | PHASE EN COURS | Matrice six plateformes, lock et corpus synthétique automatisés; Windows x64 expérimental, cinq cibles targeted. Mesures réelles, qualification native et support restent ouverts. |
+| Industrialisation | PHASE EN COURS | Matrice, lock, corpus synthétique, métriques et critères de support définis; mesures réelles, qualification native et responsables de support restent ouverts. |
 
 ## Gates de validation courants
 

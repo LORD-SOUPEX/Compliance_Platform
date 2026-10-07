@@ -43,6 +43,14 @@ Le bootstrap Windows x64 retrograde le statut runtime a `experimental` au debut 
 
 Linux, macOS, Windows ARM64, Linux ARM64, macOS Intel x64 et Apple Silicon ARM64 ne sont pas qualifiés par le code actuel. L'index ne contient pas encore leurs binaires.
 
+## Support et contributions
+
+La matrice produit est le contrat de support: `qualified` désigne une plateforme supportée après preuve des suites, Quick et Full; `experimental` est utilisable au mieux sans garantie de délai de réponse; `targeted` n'est pas supporté et ne doit pas être présenté comme compatible. Aujourd'hui aucune plateforme produit n'est `qualified`, Windows x64 est `experimental`, et les cinq autres cibles sont `targeted`. Aucun SLA ni responsable de support n'est désigné; les signalements passent par le canal du dépôt hôte.
+
+Un signalement devrait inclure commit, OS/architecture, versions runtime, mode, codes de sortie des tests/Quick/Full et extrait de rapport expurgé. Les rapports peuvent contenir stdout/stderr ou chemins sensibles: ne pas joindre sources, secrets, credentials, artefacts propriétaires ni rapport brut sans revue.
+
+Toute contribution de contrôle doit mettre à jour le catalogue et son schéma si nécessaire, l'applicabilité/permissions/limites, les fixtures positives et négatives, puis tests, Quick et Full. Une dépendance suit les pins exacts, le lock généré et vérifié, les avis de sécurité et les preuves de source; une plateforme ou intégration ne monte de statut qu'avec des preuves natives. Aucune règle ne peut être supprimée pour faire passer un gate.
+
 ## Qualification reproductible
 
 Pour vérifier une installation Windows x64 depuis la racine, exécuter dans cet ordre:

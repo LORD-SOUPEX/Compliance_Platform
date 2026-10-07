@@ -1404,8 +1404,9 @@ portables pour des usages volontaires variés.
   statut runtime `qualified` seul ne qualifie pas le produit.
 - [ ] Mesurer qualité de détection, coût, temps d'exécution, couverture et utilité
   des rapports sans compter l'adoption comme une obligation.
-- [ ] Organiser les contributions, la qualification des contrôles et le support des
-  utilisateurs et mainteneurs.
+- [x] Définir les seuils de support `targeted`/`experimental`/`qualified`, les
+  éléments à fournir pour un signalement et les vérifications des contributions.
+- [ ] Désigner les mainteneurs, le canal de triage et les responsabilités de support.
 - [ ] Étendre progressivement les technologies et adaptateurs selon des besoins
   observés et des critères de qualité documentés.
 
@@ -1424,7 +1425,7 @@ Statut: **BLOQUÉ**; les critères ci-dessous ne sont pas encore tous démontré
 | Plateformes | Chaque plateforme annoncée supportée est `qualified` avec preuves bootstrap, suite, Quick et Full natives; les autres restent explicitement `targeted`. | Windows x64 `experimental`; les cinq autres ciblées. |
 | Consommateurs | Corpus réel autorisé couvrant chaque technologie annoncée; faux négatifs et ambiguïtés expliqués; erreurs et faux positifs documentés. | Corpus synthétique uniquement. |
 | Intégrations | Pipeline GitLab distant, artifact/règles et contexte VS Code réel testés; les verdicts restent consultatifs et les sources ne sont pas transmises. | Tests locaux en fixtures; exécution distante et UI non qualifiées. |
-| Support | Plateformes supportées, limites, versions runtime, procédure de mise à jour, support et remontée d'incident documentés; aucun engagement sur une plateforme `targeted`. | Procédure de mise à jour présente; politique de support à compléter après qualification. |
+| Support | Plateformes qualifiées uniquement, procédure de signalement, contribution et sécurité des données; aucun engagement sur `targeted`/`experimental`. | Modèle documenté; aucun responsable, SLA ou canal de triage dédié nommé. |
 
 Ne pas publier une RC tant qu'un critère obligatoire est bloqué. Un statut runtime `qualified` ne suffit pas à qualifier le produit ni ses contrôles.
 
