@@ -1384,6 +1384,8 @@ portables pour des usages volontaires variés.
   sans invalider les consommateurs des rapports v1 précédents.
 - [x] Documenter la mise à jour des pins Python, outils et binaires, ainsi que
   les contrôles et critères de qualification après changement.
+- [x] Automatiser la génération contrainte et la vérification non destructive du
+  lock Windows x64 avec pip-tools isolé/épinglé, validation des pins et versions installées.
 - [x] Définir et valider une matrice distincte de qualification produit pour les
   six plateformes; garder targeted/experimental tant que les preuves manquent.
 - [x] Mesurer faux positifs, faux négatifs et ambiguïtés sur un corpus synthétique
@@ -1401,6 +1403,21 @@ portables pour des usages volontaires variés.
 Critères de sortie proposés: exécutions reproductibles, limites connues,
 maintenance définie, usages locaux et intégrés documentés, sans dépendance
 obligatoire à une forge ni mécanisme de blocage.
+
+## Préparation Release Candidate
+
+Statut: **BLOQUÉ**; les critères ci-dessous ne sont pas encore tous démontrés.
+
+| Domaine | Critère RC | État actuel |
+| --- | --- | --- |
+| Tests et sécurité | Suite, Quick et Full passent sans avis de sécurité masqué; toute dérogation future a un propriétaire, une portée et une échéance écrits. | Bloqué par 4 lignes pip-audit sur asteval/ecdsa. |
+| Reproductibilité | Bootstrap depuis un poste propre, `update-lock.ps1 -Check`, `pip check`, Doctor et hooks réussis; lock généré par l'outil épinglé. | Vérification locale et résolution lock passent; poste propre non qualifié. |
+| Plateformes | Chaque plateforme annoncée supportée est `qualified` avec preuves bootstrap, suite, Quick et Full natives; les autres restent explicitement `targeted`. | Windows x64 `experimental`; les cinq autres ciblées. |
+| Consommateurs | Corpus réel autorisé couvrant chaque technologie annoncée; faux négatifs et ambiguïtés expliqués; erreurs et faux positifs documentés. | Corpus synthétique uniquement. |
+| Intégrations | Pipeline GitLab distant, artifact/règles et contexte VS Code réel testés; les verdicts restent consultatifs et les sources ne sont pas transmises. | Tests locaux en fixtures; exécution distante et UI non qualifiées. |
+| Support | Plateformes supportées, limites, versions runtime, procédure de mise à jour, support et remontée d'incident documentés; aucun engagement sur une plateforme `targeted`. | Procédure de mise à jour présente; politique de support à compléter après qualification. |
+
+Ne pas publier une RC tant qu'un critère obligatoire est bloqué. Un statut runtime `qualified` ne suffit pas à qualifier le produit ni ses contrôles.
 
 ## Questions ouvertes
 

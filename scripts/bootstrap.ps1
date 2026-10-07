@@ -448,6 +448,18 @@ try {
     }
     Invoke-CheckedCommand -FilePath $venvPython -Arguments $installArguments -Description 'installation des dépendances Python verrouillées'
 
+    $lockToolsRequirementsPath = Join-Path $repoRoot 'requirements-lock-tools.txt'
+    $lockVenvRoot = Join-Path $toolsRoot 'lock-venv'
+    $lockVenvPython = Join-Path $lockVenvRoot 'Scripts\python.exe'
+    if ($Force -and (Test-Path -LiteralPath $lockVenvRoot -PathType Container)) { Remove-Item -LiteralPath $lockVenvRoot -Recurse -Force }
+    if (-not (Test-Path -LiteralPath $lockVenvPython -PathType Leaf)) {
+        Invoke-CheckedCommand -FilePath $pythonExe -Arguments (@($pythonRuntime.Prefix) + @('-m', 'venv', $lockVenvRoot)) -Description 'création de .tools/lock-venv'
+    }
+    $lockToolsArguments = @('-m', 'pip', 'install', '-r', $lockToolsRequirementsPath)
+    if ($Offline) { $lockToolsArguments += @('--no-index', '--find-links', (Join-Path $cacheRoot 'wheels')) }
+    Invoke-CheckedCommand -FilePath $lockVenvPython -Arguments $lockToolsArguments -Description 'installation des outils verrouillés de génération du lock'
+    Invoke-CheckedCommand -FilePath $lockVenvPython -Arguments @('-m', 'pip', 'check') -Description 'validation du venv de génération du lock'
+
     Install-PSScriptAnalyzer
     foreach ($toolName in @('gitleaks', 'tflint', 'terragrunt', 'hadolint', 'trivy')) {
         $toolBlock = Get-ToolBlock -Section $script:BinaryTools -Name $toolName
@@ -499,6 +511,12 @@ try {
             Write-Status WARN "$tool $metadata installé; son exécution complète n’est pas prise en charge sur un contrôleur Windows."
         }
         else { throw "L’outil obligatoire $tool a échoué lors du contrôle --version (code $code)." }
+    }
+    if ($Offline) {
+        Write-Status WARN 'Validation de résolution pip-compile ignorée en mode hors ligne; installation et pins locaux restent vérifiés.'
+    } else {
+        $lockCheck = Join-Path $repoRoot 'scripts/update-lock.ps1'
+        Invoke-CheckedCommand -FilePath (Join-Path $PSHOME 'powershell.exe') -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $lockCheck, '-Check') -Description 'validation du lock Python'
     }
     Write-Status INFO "PSScriptAnalyzer : $((Get-Module PSScriptAnalyzer).Version)"
     Update-ToolRuntimePlatformStatus -RuntimeRoot $runtimeRoot -PlatformId $script:RuntimePlatform -Status 'qualified'

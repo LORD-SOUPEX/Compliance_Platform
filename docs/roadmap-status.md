@@ -4,7 +4,7 @@ Synthèse de [la roadmap existante dans plan.md](../plan.md#roadmap), mise à jo
 
 | Phase/composant | Statut | Preuve et reste principal |
 | --- | --- | --- |
-| Stabilisation du socle | PHASE EN COURS | 46 historiques, 27 Compliance unitaires, 11 adaptateur unitaires, 13 intégrations Compliance, 4 intégrations adaptateur, 6 catalogue et 4 matrice plateforme; Quick vert, Full bloqué par pip-audit. |
+| Stabilisation du socle | PHASE EN COURS | 46 historiques, 27 Compliance unitaires, 11 adaptateur, 5 reproductibilité, 13 intégrations Compliance, 4 intégrations adaptateur, 6 catalogue et 4 matrice plateforme; Quick vert, Full bloqué par pip-audit. |
 | Discovery Engine | PHASE EN COURS | Corpus synthétique de 10 technologies: 0 faux positif/négatif et 0 ambiguïté inattendue; corpus réel, overrides et layouts complexes restent ouverts. |
 | Tool Bootstrap & Tool Resolver | PHASE EN COURS | Installation Windows x64 et hash vérifiés; paquets/modules, provenance et qualification produit restent ouverts. |
 | Compliance Engine | PHASE TERMINÉE | Critères v1: DAG, budgets, exécution, résultats, findings/verdict et parité fixtures; sandbox et consommateurs réels suivent en Phase 8. |
@@ -12,7 +12,7 @@ Synthèse de [la roadmap existante dans plan.md](../plan.md#roadmap), mise à jo
 | Reporting Engine | PHASE TERMINÉE | Schéma/validateurs v1 et rapport de référence pour Compliance et modes historiques; findings, diagnostics, coverage, limitations, metadata et résumé stderr. Masquage/nettoyage avancés en Phase 8. |
 | Policy Engine | PHASE NON COMMENCÉE | YAML descriptif, non autoritaire à l'exécution. |
 | Optional Integrations | PHASE EN COURS | Contrats testés en fixtures; restent runner GitLab distant, consumer repos autorisés et contextes UI/CI réels. |
-| Industrialisation | PHASE EN COURS | Matrice six plateformes validée; Windows x64 expérimental, cinq cibles targeted. Mesures réelles, qualification native, locks et support restent ouverts. |
+| Industrialisation | PHASE EN COURS | Matrice six plateformes, lock et corpus synthétique automatisés; Windows x64 expérimental, cinq cibles targeted. Mesures réelles, qualification native et support restent ouverts. |
 
 ## Gates de validation courants
 
