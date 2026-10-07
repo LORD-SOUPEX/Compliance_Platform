@@ -367,24 +367,38 @@ try {
         $bootstrapTokens = $null
         $bootstrapErrors = $null
         $bootstrapAst = [Management.Automation.Language.Parser]::ParseFile($bootstrapPath, [ref]$bootstrapTokens, [ref]$bootstrapErrors)
-        $runtimeFunctions = @($bootstrapAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -in @('Register-ToolRuntimeEntry', 'Update-ToolRuntimePlatformStatus', 'Write-Status') }, $false))
+        $runtimeFunctions = @($bootstrapAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -in @('Register-ToolRuntimeEntry', 'Update-ToolRuntimePlatformStatus', 'Get-VerifiedDownload', 'Write-Status') }, $false))
         foreach ($definition in $runtimeFunctions) { . ([scriptblock]::Create($definition.Extent.Text)) }
-        Write-Fixture 'source-ruff.exe' 'locked-binary'
+        Write-Fixture 'source-ruff-1.1.exe' 'locked-binary-old'
+        Write-Fixture 'source-ruff-1.2.exe' 'locked-binary-new'
+        Write-Fixture 'verified/release.zip' 'published-archive'
+        $expectedArchiveHash = (Get-FileHash (Join-Path $repoRoot 'verified/release.zip') -Algorithm SHA256).Hash
+        Assert-Condition ((Get-VerifiedDownload -Uri 'https://example.invalid/release.zip' -Path (Join-Path $repoRoot 'verified/release.zip') -Sha256 $expectedArchiveHash -Description 'fixture release') -eq (Join-Path $repoRoot 'verified/release.zip')) 'Archive correspondant au hash officiel refuse.'
+        $wrongChecksumRejected = $false
+        try { $null = Get-VerifiedDownload -Uri 'https://example.invalid/release.zip' -Path (Join-Path $repoRoot 'verified/release.zip') -Sha256 ('0' * 64) -Description 'fixture release' }
+        catch { $wrongChecksumRejected = $_.Exception.Message -match 'SHA-256 invalide' }
+        Assert-Condition $wrongChecksumRejected 'Archive avec somme officielle divergente acceptee.'
         $runtimeRoot = Join-Path $repoRoot '.tools/runtime'
-        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.1.0' -SourcePath (Join-Path $repoRoot 'source-ruff.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64'
-        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64'
+        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.1.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.1.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64'
+        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.2.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64'
         $index = Get-Content (Join-Path $runtimeRoot 'index.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         $versions = @($index.platforms.'windows-x64'.tools | Where-Object name -eq 'ruff')
         $active = @($versions | Where-Object active)
         Assert-Condition ($versions.Count -eq 2 -and $active.Count -eq 1 -and $active[0].version -eq '1.2.0') 'Les versions runtime ou leur pointeur actif sont incohérents.'
         Assert-Condition ($active[0].sha256 -eq (Get-FileHash (Join-Path $runtimeRoot $active[0].path) -Algorithm SHA256).Hash.ToLowerInvariant()) 'L''empreinte de l''artefact runtime diffère.'
-        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64'
+        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.2.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64'
         $index = Get-Content (Join-Path $runtimeRoot 'index.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         $versions = @($index.platforms.'windows-x64'.tools | Where-Object name -eq 'ruff')
         $active = @($versions | Where-Object active)
         Assert-Condition ($versions.Count -eq 2 -and $active.Count -eq 1) 'La réinscription d''une version a créé un doublon.'
         Assert-Condition ($index.platforms.'windows-x64'.status -eq 'experimental') 'La plateforme a été déclarée qualifiée avant le bootstrap complet.'
         Update-ToolRuntimePlatformStatus -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -Status 'qualified'
+        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.1.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.1.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64'
+        $rollback = Resolve-CandidateTool -Name 'ruff' -Command 'ruff'
+        Assert-Condition ($rollback.status -eq 'available' -and $rollback.version -eq '1.1.0') 'Rollback vers une version runtime conservee impossible.'
+        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.2.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64'
+        $resolved = Resolve-CandidateTool -Name 'ruff' -Command 'ruff'
+        Assert-Condition ($resolved.status -eq 'available' -and $resolved.version -eq '1.2.0') 'Reactivation de la version runtime courante impossible.'
         Update-ToolRuntimePlatformStatus -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -Status 'experimental'
         $index = Get-Content (Join-Path $runtimeRoot 'index.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         Assert-Condition ($index.platforms.'windows-x64'.status -eq 'experimental') 'Une mise à jour n''a pas invalidé la qualification précédente.'

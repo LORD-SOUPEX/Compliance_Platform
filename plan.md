@@ -1386,6 +1386,10 @@ portables pour des usages volontaires variés.
   les contrôles et critères de qualification après changement.
 - [x] Automatiser la génération contrainte et la vérification non destructive du
   lock Windows x64 avec pip-tools isolé/épinglé, validation des pins et versions installées.
+- [x] Tester intégrité, somme de provenance, activation, conservation des versions
+  et rollback local du Tool Runtime; qualification native distante reste ouverte.
+- [x] Tester la résilience locale: outil absent, runtime altéré, catalogue invalide,
+  lancement/contrôle en erreur, timeout, scan partiel et conservation des rapports.
 - [x] Définir et valider une matrice distincte de qualification produit pour les
   six plateformes; garder targeted/experimental tant que les preuves manquent.
 - [x] Mesurer faux positifs, faux négatifs et ambiguïtés sur un corpus synthétique
