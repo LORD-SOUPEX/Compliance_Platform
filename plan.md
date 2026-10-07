@@ -1379,6 +1379,8 @@ portables pour des usages volontaires variés.
   consigner les résultats Quick/Full, les limites et le statut du runner distant.
 - [x] Inclure dans les rapports l'empreinte SHA-256 du catalogue réellement chargé,
   sans invalider les consommateurs des rapports v1 précédents.
+- [x] Documenter la mise à jour des pins Python, outils et binaires, ainsi que
+  les contrôles et critères de qualification après changement.
 - [ ] Mesurer qualité de détection, coût, temps d'exécution, couverture et utilité
   des rapports sans compter l'adoption comme une obligation.
 - [ ] Organiser les contributions, la qualification des contrôles et le support des

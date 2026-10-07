@@ -57,6 +57,14 @@ Le bootstrap recherche Python 3.11 existant ou extrait le runtime épinglé, pr�
 
 Les téléchargements de binaires vérifient le manifeste de sommes épinglé et l'archive. Un binaire déjà présent avec la version attendue est toutefois réindexé sans nouvelle comparaison avec l'archive officielle; la copie runtime est comparée à la source locale. PSScriptAnalyzer est épinglé, sans somme publiée dans le catalogue. Le verrou Python comporte 154 paquets pour Windows/Python 3.11, sans empreintes de roues; les environnements Node et hooks ont leurs propres pins.
 
+## Procédure de mise à jour
+
+Pour mettre à jour une dépendance Python, modifier sa version exacte dans `requirements-dev.txt`, le pin correspondant dans `requirements-dev.lock` et la version du manifeste `.config/tool-versions.yml`. Le bootstrap vérifie l'égalité des pins déclarés et le succès des commandes de version. Le verrou complet doit rester exact pour Python 3.11/Windows x64; aucune commande de régénération reproductible du verrou n'est encore livrée, donc ne pas produire un verrou avec des contraintes flottantes ni prétendre qu'il est reproductible sans noter l'outil et sa version.
+
+Pour un outil PowerShell ou binaire, modifier la version et les références immuables dans le manifeste. Vérifier la somme publiée depuis la source officielle avant de changer `checksum_asset_sha256`; ne jamais calculer une nouvelle somme depuis le fichier téléchargé puis la considérer comme preuve de provenance. Le bootstrap doit télécharger, contrôler, installer et confirmer la version avant que l'index local soit marqué `qualified`.
+
+Après toute mise à jour, exécuter bootstrap, Doctor, `scripts/test.ps1`, Quick puis Full selon la procédure de qualification ci-dessus. Examiner tous les nouveaux avis pip-audit; aucun Full en échec ne peut être requalifié par un Quick vert. Conserver les sorties et les versions source utilisées. Une nouvelle plateforme demande ses propres artefacts, sommes officielles et exécution complète sur cette plateforme; le manifeste Windows ne la qualifie pas.
+
 `-Force` peut recréer `.venv` et réinstaller les outils. `-Offline` nécessite des archives, roues et modules déjà disponibles, sans qualification hors ligne des hooks. `-SkipOptionalTools` peut omettre Terragrunt, alors que Doctor l'exige. Terraform est uniquement recherché dans le PATH; aucun téléchargement Terraform/OpenTofu n'est implémenté. Les relais Bash exigent `powershell.exe` et ne sont pas des installateurs Linux/macOS.
 
 Doctor vérifie encore `.tools/python` même si le bootstrap a choisi un Python existant. Il ne lit pas l'index runtime, ne valide pas le cache des clones de hooks et ne remplace pas un audit des dépendances. Les preuves et blocages restent dans [testing.md](testing.md).
