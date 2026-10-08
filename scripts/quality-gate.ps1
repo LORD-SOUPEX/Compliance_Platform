@@ -13,6 +13,9 @@ param(
     [ValidateSet('PowerShell', 'Bash', 'VSCode', 'GitLab')][string]$Adapter = 'PowerShell',
     [ValidateRange(1, 86400)][int]$ComplianceTimeoutSeconds = 1800,
     [ValidateRange(1024, 10485760)][int]$ComplianceMaxOutputBytes = 1048576,
+    [string[]]$ReportRedactionPattern = @(),
+    [ValidateNotNullOrEmpty()][string]$ReportRedactionReplacement = '[REDACTED]',
+    [ValidateRange(0, 3650)][int]$ReportRetentionDays = 0,
     [switch]$NoColor,
     [ValidateRange(1, 3600)][int]$TimeoutSeconds = 300
 )
@@ -43,7 +46,66 @@ $script:Files = @()
 $script:ScanErrors = New-Object System.Collections.Generic.List[object]
 $script:Technologies = $null
 $script:ProcessTimeoutSeconds = $TimeoutSeconds
+$script:ReportRedactionPatterns = @($ReportRedactionPattern | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+foreach ($pattern in $script:ReportRedactionPatterns) {
+    try { $null = [regex]::new($pattern) }
+    catch { throw "Motif de masquage regex invalide: $pattern" }
+}
 if ($NoColor) { $env:NO_COLOR = '1' }
+
+function Protect-QualityGateReportValue {
+    param([AllowNull()][object]$Value, [bool]$RedactText = $false)
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [string]) {
+        if (-not $RedactText) { return $Value }
+        $patternsVariable = Get-Variable -Name ReportRedactionPatterns -Scope Script -ErrorAction SilentlyContinue
+        $replacementVariable = Get-Variable -Name ReportRedactionReplacement -Scope Script -ErrorAction SilentlyContinue
+        $patterns = if ($patternsVariable) { @($patternsVariable.Value) } else { @() }
+        $replacement = if ($replacementVariable) { [string]$replacementVariable.Value } else { '[REDACTED]' }
+        $text = $Value
+        foreach ($pattern in $patterns) { $text = [regex]::Replace($text, $pattern, $replacement) }
+        return $text
+    }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $copy = [ordered]@{}
+        foreach ($key in $Value.Keys) {
+            $sensitive = $RedactText -or ([string]$key -in @('repository', 'source', 'stdout', 'stderr', 'message', 'reason', 'path', 'files', 'arguments'))
+            $copy[$key] = Protect-QualityGateReportValue -Value $Value[$key] -RedactText:$sensitive
+        }
+        return $copy
+    }
+    if ($Value -is [pscustomobject]) {
+        $copy = [ordered]@{}
+        foreach ($property in $Value.PSObject.Properties) {
+            $sensitive = $RedactText -or ($property.Name -in @('repository', 'source', 'stdout', 'stderr', 'message', 'reason', 'path', 'files', 'arguments'))
+            $copy[$property.Name] = Protect-QualityGateReportValue -Value $property.Value -RedactText:$sensitive
+        }
+        return [pscustomobject]$copy
+    }
+    if ($Value -is [System.Collections.IEnumerable]) {
+        $items = New-Object System.Collections.Generic.List[object]
+        foreach ($item in $Value) { $items.Add((Protect-QualityGateReportValue -Value $item -RedactText:$RedactText)) }
+        return ,$items.ToArray()
+    }
+    return $Value
+}
+
+function Remove-ExpiredComplianceReport {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param([Parameter(Mandatory = $true)][string]$ReportsDirectory, [ValidateRange(0, 3650)][int]$RetentionDays, [string]$CurrentReportPath)
+    if ($RetentionDays -le 0 -or -not (Test-Path -LiteralPath $ReportsDirectory -PathType Container)) { return }
+    $currentPath = if ($CurrentReportPath) { [IO.Path]::GetFullPath($CurrentReportPath) } else { $null }
+    $cutoff = [DateTime]::UtcNow.AddDays(-$RetentionDays)
+    foreach ($file in Get-ChildItem -LiteralPath $ReportsDirectory -Filter 'compliance-report*.json' -File) {
+        if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+        if ($currentPath -and [string]::Equals([IO.Path]::GetFullPath($file.FullName), $currentPath, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        if ($file.LastWriteTimeUtc -ge $cutoff) { continue }
+        if ($PSCmdlet.ShouldProcess($file.FullName, 'Supprimer un ancien rapport Compliance local')) {
+            try { Remove-Item -LiteralPath $file.FullName -Force -ErrorAction Stop }
+            catch { [Console]::Error.WriteLine("Retention Compliance: suppression impossible pour $($file.Name): $($_.Exception.Message)") }
+        }
+    }
+}
 
 function Add-Check {
     param(
@@ -52,6 +114,7 @@ function Add-Check {
         [Parameter(Mandatory = $true)][string]$Message,
         [long]$DurationMs = 0
     )
+    $Message = Protect-QualityGateReportValue -Value $Message -RedactText:$true
     $script:Counts[$Status]++
     $script:Results.Add([pscustomobject]@{ nom = $Name; statut = $Status; message = $Message; duree_ms = $DurationMs })
     Write-Information -InformationAction Continue "[$Status] $Message"
@@ -1100,7 +1163,7 @@ try {
                 $script:StageMetrics.compliance_ms = $complianceTimer.ElapsedMilliseconds
             }
             $platformQualificationStatus = Get-PlatformQualificationStatus -PlatformId (Get-ExecutionPlatform).id
-            $complianceReport = New-ComplianceReport -Discovery $discoveryResult -Matrix $discoveryResult.capability_matrix -Resolver $discoveryResult.tool_resolution -Plan $executionPlan -Results $executionResults -PlanOnly:($PlanOnly -and -not $preparationFailed) -SourceAdapter $Adapter -CatalogSha256 $script:ControlCatalog.content_sha256 -PlatformQualificationStatus $platformQualificationStatus -StageMetrics $script:StageMetrics
+            $complianceReport = New-ComplianceReport -Discovery $discoveryResult -Matrix $discoveryResult.capability_matrix -Resolver $discoveryResult.tool_resolution -Plan $executionPlan -Results $executionResults -PlanOnly:($PlanOnly -and -not $preparationFailed) -SourceAdapter $Adapter -CatalogSha256 $script:ControlCatalog.content_sha256 -PlatformQualificationStatus $platformQualificationStatus -StageMetrics $script:StageMetrics -RedactionPatterns $script:ReportRedactionPatterns -RedactionReplacement $ReportRedactionReplacement
             if ($preparationFailed) { $complianceReport.execution_status = 'error' }
             $complianceJson = $complianceReport | ConvertTo-Json -Depth 20
             $reportName = if ($ReportPath) { $ReportPath } else { 'compliance-report.json' }
@@ -1108,6 +1171,7 @@ try {
             $reportDirectory = Split-Path -Parent $compliancePath
             if (-not (Test-Path -LiteralPath $reportDirectory -PathType Container)) { New-Item -ItemType Directory -Path $reportDirectory -Force | Out-Null }
             [IO.File]::WriteAllText($compliancePath, $complianceJson, [Text.UTF8Encoding]::new($false))
+            Remove-ExpiredComplianceReport -ReportsDirectory (Join-Path $platformRoot 'reports') -RetentionDays $ReportRetentionDays -CurrentReportPath $compliancePath
             if ($HumanSummary) {
                 $displayVerdict = if ($PlanOnly) { 'PLAN' } else { $complianceReport.verdict }
                 [Console]::Error.WriteLine("Compliance ${displayVerdict}: $($complianceReport.summary.success) success, $($complianceReport.summary.fail) fail, $($complianceReport.summary.error) error, $($complianceReport.summary.skipped) skipped. Rapport: $compliancePath")
@@ -1118,7 +1182,8 @@ try {
             if ($complianceReport.verdict -eq 'FAIL') { exit 1 }
             exit 0
         }
-        $discoveryJson = $discoveryResult | ConvertTo-Json -Depth 12
+        $discoveryOutput = if ($script:ReportRedactionPatterns.Count -gt 0) { Protect-QualityGateReportValue -Value $discoveryResult } else { $discoveryResult }
+        $discoveryJson = $discoveryOutput | ConvertTo-Json -Depth 12
         if ($ReportPath) {
             $discoveryReportPath = if ([System.IO.Path]::IsPathRooted($ReportPath)) { $ReportPath } else { Join-Path (Join-Path $platformRoot 'reports') $ReportPath }
             $discoveryReportDirectory = Split-Path -Parent $discoveryReportPath
@@ -1171,10 +1236,11 @@ try {
         scan_errors = $script:Technologies.scan_errors
     }
     $platformQualificationStatus = Get-PlatformQualificationStatus -PlatformId (Get-ExecutionPlatform).id
-    $referenceReport = ConvertTo-ComplianceReportFromChecks -Checks $script:Results.ToArray() -RepositoryRoot $repoRoot -Discovery $legacyDiscovery -Matrix $script:Technologies.capability_matrix -Resolver $script:Technologies.tool_resolution -Mode $script:RequestedMode -CatalogSha256 $script:ControlCatalog.content_sha256 -PlatformQualificationStatus $platformQualificationStatus -StageMetrics $script:StageMetrics
+    $referenceReport = ConvertTo-ComplianceReportFromChecks -Checks $script:Results.ToArray() -RepositoryRoot $repoRoot -Discovery $legacyDiscovery -Matrix $script:Technologies.capability_matrix -Resolver $script:Technologies.tool_resolution -Mode $script:RequestedMode -CatalogSha256 $script:ControlCatalog.content_sha256 -PlatformQualificationStatus $platformQualificationStatus -StageMetrics $script:StageMetrics -RedactionPatterns $script:ReportRedactionPatterns -RedactionReplacement $ReportRedactionReplacement
     $referencePath = Join-Path (Join-Path $platformRoot 'reports') 'compliance-report.json'
     if (-not (Test-Path (Split-Path -Parent $referencePath) -PathType Container)) { New-Item -ItemType Directory -Path (Split-Path -Parent $referencePath) -Force | Out-Null }
     [IO.File]::WriteAllText($referencePath, ($referenceReport | ConvertTo-Json -Depth 20), [Text.UTF8Encoding]::new($false))
+    Remove-ExpiredComplianceReport -ReportsDirectory (Join-Path $platformRoot 'reports') -RetentionDays $ReportRetentionDays -CurrentReportPath $referencePath
     if ($ReportPath -or $Mode -eq 'Ci') {
         $relativeReport = if ($ReportPath) { $ReportPath } else { 'quality-report.json' }
         $reportPathResolved = if ([System.IO.Path]::IsPathRooted($relativeReport)) { $relativeReport } else { Join-Path (Join-Path $repoRoot 'reports') $relativeReport }
@@ -1195,6 +1261,7 @@ try {
             resume = $summary
             code_sortie = $exitCode
         }
+        if ($script:ReportRedactionPatterns.Count -gt 0) { $report = Protect-QualityGateReportValue -Value $report }
         $report | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $reportPathResolved -Encoding UTF8
         Write-Information -InformationAction Continue "[PASS] Rapport JSON créé : $reportPathResolved"
     }

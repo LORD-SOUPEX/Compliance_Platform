@@ -384,6 +384,39 @@ function Get-ComplianceVerdict {
     return [pscustomobject]@{ verdict = if ($summary.fail -gt 0 -or $summary.critical_errors -gt 0) { 'FAIL' } else { 'PASS' }; summary = $summary; reasons = @($reasons) }
 }
 
+function Protect-ComplianceReportValue {
+    param([AllowNull()][object]$Value, [bool]$RedactText, [string[]]$Patterns, [string]$Replacement)
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [string]) {
+        if (-not $RedactText) { return $Value }
+        $text = $Value
+        foreach ($pattern in $Patterns) { $text = [regex]::Replace($text, $pattern, $Replacement) }
+        return $text
+    }
+    if ($Value -is [System.Collections.IDictionary]) {
+        $copy = [ordered]@{}
+        foreach ($key in $Value.Keys) {
+            $protect = $RedactText -or ([string]$key -in @('repository', 'source', 'stdout', 'stderr', 'message', 'reason', 'path', 'files', 'arguments'))
+            $copy[$key] = Protect-ComplianceReportValue -Value $Value[$key] -RedactText:$protect -Patterns $Patterns -Replacement $Replacement
+        }
+        return $copy
+    }
+    if ($Value -is [pscustomobject]) {
+        $copy = [ordered]@{}
+        foreach ($property in $Value.PSObject.Properties) {
+            $protect = $RedactText -or ($property.Name -in @('repository', 'source', 'stdout', 'stderr', 'message', 'reason', 'path', 'files', 'arguments'))
+            $copy[$property.Name] = Protect-ComplianceReportValue -Value $property.Value -RedactText:$protect -Patterns $Patterns -Replacement $Replacement
+        }
+        return [pscustomobject]$copy
+    }
+    if ($Value -is [System.Collections.IEnumerable]) {
+        $items = New-Object System.Collections.Generic.List[object]
+        foreach ($item in $Value) { $items.Add((Protect-ComplianceReportValue -Value $item -RedactText:$RedactText -Patterns $Patterns -Replacement $Replacement)) }
+        return ,$items.ToArray()
+    }
+    return $Value
+}
+
 function ConvertTo-ComplianceReportFromChecks {
     [CmdletBinding()]
     param(
@@ -395,7 +428,9 @@ function ConvertTo-ComplianceReportFromChecks {
         [Parameter(Mandatory = $true)][string]$Mode,
         [string]$CatalogSha256 = $null,
         [string]$PlatformQualificationStatus = $null,
-        [pscustomobject]$StageMetrics
+        [pscustomobject]$StageMetrics,
+        [string[]]$RedactionPatterns = @(),
+        [string]$RedactionReplacement = '[REDACTED]'
     )
     $normalized = New-Object System.Collections.Generic.List[object]
     $controls = New-Object System.Collections.Generic.List[object]
@@ -467,7 +502,7 @@ function ConvertTo-ComplianceReportFromChecks {
         permissions = [pscustomobject]@{ network = $false; code_execution = $false }
         controls = @($controls.ToArray())
     }
-    return New-ComplianceReport -Discovery $Discovery -Matrix $Matrix -Resolver $Resolver -Plan $plan -Results @($normalized.ToArray()) -SourceMode $Mode -CatalogSha256 $CatalogSha256 -PlatformQualificationStatus $PlatformQualificationStatus -StageMetrics $StageMetrics
+    return New-ComplianceReport -Discovery $Discovery -Matrix $Matrix -Resolver $Resolver -Plan $plan -Results @($normalized.ToArray()) -SourceMode $Mode -CatalogSha256 $CatalogSha256 -PlatformQualificationStatus $PlatformQualificationStatus -StageMetrics $StageMetrics -RedactionPatterns $RedactionPatterns -RedactionReplacement $RedactionReplacement
 }
 
 function Test-ComplianceReport {
@@ -480,6 +515,7 @@ function Test-ComplianceReport {
     foreach ($field in @('run_id', 'source_mode', 'source_adapter', 'platform', 'catalog_schema_version', 'network_authorized', 'code_execution_authorized')) {
         if ($Report.metadata.PSObject.Properties.Name -notcontains $field) { throw "Metadata Compliance absente: $field" }
     }
+    if ($Report.metadata.PSObject.Properties.Name -contains 'redaction_applied' -and $Report.metadata.redaction_applied -isnot [bool]) { throw 'Indicateur de masquage invalide.' }
     if ($Report.metadata.PSObject.Properties.Name -contains 'catalog_sha256' -and $null -ne $Report.metadata.catalog_sha256 -and ($Report.metadata.catalog_sha256 -isnot [string] -or $Report.metadata.catalog_sha256 -notmatch '^[a-f0-9]{64}$')) { throw 'Empreinte Control Catalog invalide.' }
     if ($Report.metadata.PSObject.Properties.Name -contains 'platform_qualification_status' -and $null -ne $Report.metadata.platform_qualification_status -and $Report.metadata.platform_qualification_status -notin @('targeted', 'experimental', 'qualified')) { throw 'Statut de qualification plateforme invalide.' }
     if ($Report.PSObject.Properties.Name -contains 'metrics') {
@@ -532,7 +568,9 @@ function New-ComplianceReport {
         [ValidateSet('PowerShell', 'Bash', 'VSCode', 'GitLab', 'Legacy')][string]$SourceAdapter = 'PowerShell',
         [string]$CatalogSha256 = $null,
         [string]$PlatformQualificationStatus = $null,
-        [pscustomobject]$StageMetrics
+        [pscustomobject]$StageMetrics,
+        [string[]]$RedactionPatterns = @(),
+        [string]$RedactionReplacement = '[REDACTED]'
     )
     if (-not $PSCmdlet.ShouldProcess($Plan.repository, 'Construire le rapport Compliance en memoire')) { return }
     $reportingTimer = [Diagnostics.Stopwatch]::StartNew()
@@ -638,6 +676,7 @@ function New-ComplianceReport {
             catalog_schema_version = if ($catalogIds.Count -gt 0 -or $CatalogSha256) { 1 } else { $null }
             catalog_sha256 = if ([string]::IsNullOrWhiteSpace($CatalogSha256)) { $null } else { $CatalogSha256 }
             platform_qualification_status = if ([string]::IsNullOrWhiteSpace($PlatformQualificationStatus)) { $null } else { $PlatformQualificationStatus }
+            redaction_applied = ($RedactionPatterns.Count -gt 0)
             network_authorized = [bool]$permissions.network
             code_execution_authorized = [bool]$permissions.code_execution
         }
@@ -669,6 +708,9 @@ function New-ComplianceReport {
             reporting_ms = 0
         }
         advisory = $true
+    }
+    if ($RedactionPatterns.Count -gt 0) {
+        $report = Protect-ComplianceReportValue -Value $report -RedactText:$false -Patterns $RedactionPatterns -Replacement $RedactionReplacement
     }
     Test-ComplianceReport -Report $report | Out-Null
     $reportingTimer.Stop()

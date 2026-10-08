@@ -387,13 +387,15 @@ try {
         Assert-Condition $wrongChecksumRejected 'Archive avec somme officielle divergente acceptee.'
         $runtimeRoot = Join-Path $repoRoot '.tools/runtime'
         Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.1.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.1.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64'
-        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.2.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64'
+        $publishedToolHash = (Get-FileHash -LiteralPath (Join-Path $repoRoot 'source-ruff-1.2.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.2.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -SourceUri 'https://example.invalid/ruff/1.2.0.zip' -ChecksumUri 'https://example.invalid/ruff/checksums.txt' -ChecksumAssetSha256 $expectedArchiveHash -PublishedArtifactSha256 $publishedToolHash
         $index = Get-Content (Join-Path $runtimeRoot 'index.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         $versions = @($index.platforms.'windows-x64'.tools | Where-Object name -eq 'ruff')
         $active = @($versions | Where-Object active)
         Assert-Condition ($versions.Count -eq 2 -and $active.Count -eq 1 -and $active[0].version -eq '1.2.0') 'Les versions runtime ou leur pointeur actif sont incohérents.'
         Assert-Condition ($active[0].sha256 -eq (Get-FileHash (Join-Path $runtimeRoot $active[0].path) -Algorithm SHA256).Hash.ToLowerInvariant()) 'L''empreinte de l''artefact runtime diffère.'
-        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.2.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64'
+        Assert-Condition ($active[0].provenance.status -eq 'official_checksum_verified' -and $active[0].provenance.published_artifact_sha256 -eq $publishedToolHash) 'Provenance de l''artefact non conservee dans Runtime Index.'
+        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.2.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -SourceUri 'https://example.invalid/ruff/1.2.0.zip' -ChecksumUri 'https://example.invalid/ruff/checksums.txt' -ChecksumAssetSha256 $expectedArchiveHash -PublishedArtifactSha256 $publishedToolHash
         $index = Get-Content (Join-Path $runtimeRoot 'index.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         $versions = @($index.platforms.'windows-x64'.tools | Where-Object name -eq 'ruff')
         $active = @($versions | Where-Object active)
@@ -599,6 +601,20 @@ try {
         Assert-Condition ($reference.metadata.platform_qualification_status -eq 'experimental') 'Statut de qualification plateforme absent du rapport.'
         Assert-Condition (@('discovery_ms', 'resolver_ms', 'compliance_ms', 'reporting_ms' | Where-Object { $reference.metrics.PSObject.Properties.Name -notcontains $_ }).Count -eq 0) 'Métriques de durée absentes du rapport historique.'
         Assert-Condition (@($reference.metrics.PSObject.Properties | Where-Object { $_.Value -isnot [long] -and $_.Value -isnot [int] -or $_.Value -lt 0 }).Count -eq 0) 'Métriques historiques non entières ou négatives.'
+    }
+    Invoke-TestCase 'Masquage configurable et rétention Compliance ciblée' {
+        Copy-GateFixture
+        Write-Fixture 'app.ps1' "Write-Output 'ok'`n"
+        Write-Fixture 'reports/compliance-report-old.json' '{"old":true}'
+        Write-Fixture 'reports/quality-report-old.json' '{"old":true}'
+        (Get-Item (Join-Path $repoRoot 'reports/compliance-report-old.json')).LastWriteTimeUtc = [DateTime]::UtcNow.AddDays(-40)
+        (Get-Item (Join-Path $repoRoot 'reports/quality-report-old.json')).LastWriteTimeUtc = [DateTime]::UtcNow.AddDays(-40)
+        $fixtureGate = Join-Path $repoRoot 'scripts/quality-gate.ps1'
+        $output = & powershell -NoProfile -ExecutionPolicy Bypass -File $fixtureGate -Compliance -PlanOnly -RepositoryPath $repoRoot -ReportRedactionPattern 'fixture' -ReportRetentionDays 30 -NoColor
+        $exitCode = $LASTEXITCODE
+        $report = ($output -join "`n") | ConvertFrom-Json
+        Assert-Condition ($exitCode -eq 0 -and $report.metadata.redaction_applied -and $report.repository -notmatch 'fixture' -and $report.repository -match '\[REDACTED\]') 'Masquage configurable des chemins absent.'
+        Assert-Condition (-not (Test-Path (Join-Path $repoRoot 'reports/compliance-report-old.json')) -and (Test-Path (Join-Path $repoRoot 'reports/quality-report-old.json')) -and (Test-Path (Join-Path $repoRoot 'reports/compliance-report.json'))) 'Rétention a supprimé un rapport hors périmètre ou le rapport courant.'
     }
     Invoke-TestCase 'Fix normalise sans infrastructure' {
         Write-Fixture 'notes.txt' 'texte  '

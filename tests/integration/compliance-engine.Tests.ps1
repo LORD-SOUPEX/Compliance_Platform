@@ -47,12 +47,14 @@ function Invoke-ComplianceCase {
 }
 
 function Invoke-ComplianceFixture {
-    param([switch]$PlanOnly, [switch]$AllowCodeExecution, [switch]$HumanSummary)
+    param([switch]$PlanOnly, [switch]$AllowCodeExecution, [switch]$HumanSummary, [string[]]$RedactionPattern = @(), [int]$RetentionDays = 0)
     $reportPath = Join-Path $repoRoot 'reports/compliance-report.json'
     $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $gatePath, '-Compliance', '-RepositoryPath', $repoRoot, '-ReportPath', $reportPath, '-NoColor')
     if ($PlanOnly) { $arguments += '-PlanOnly' }
     if ($AllowCodeExecution) { $arguments += '-AllowCodeExecution' }
     if ($HumanSummary) { $arguments += '-HumanSummary' }
+    foreach ($pattern in $RedactionPattern) { $arguments += @('-ReportRedactionPattern', $pattern) }
+    if ($RetentionDays -gt 0) { $arguments += @('-ReportRetentionDays', [string]$RetentionDays) }
     $output = & $processHost @arguments
     $code = $LASTEXITCODE
     try { $report = ($output -join "`n") | ConvertFrom-Json -ErrorAction Stop }

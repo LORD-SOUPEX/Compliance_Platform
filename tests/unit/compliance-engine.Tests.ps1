@@ -120,6 +120,16 @@ Assert-Compliance ($roundTrip.verdict -eq 'PASS' -and $roundTrip.execution_resul
 Assert-Compliance ($roundTrip.metadata.catalog_sha256 -eq $catalog.content_sha256 -and $roundTrip.metadata.catalog_schema_version -eq 1) 'Traçabilite du catalogue absente du rapport.'
 Assert-Compliance ($roundTrip.metadata.platform_qualification_status -eq 'experimental') 'Statut plateforme absent du rapport.'
 Assert-Compliance (@('discovery_ms', 'resolver_ms', 'compliance_ms', 'reporting_ms' | Where-Object { $roundTrip.metrics.PSObject.Properties.Name -notcontains $_ }).Count -eq 0 -and @($roundTrip.metrics.PSObject.Properties | Where-Object { $_.Value -lt 0 }).Count -eq 0) 'Métriques de durée absentes ou négatives.'
+$redactionResult = $results[0] | ConvertTo-Json -Depth 12 | ConvertFrom-Json
+$redactionResult.stdout = 'token=fixture-secret'
+$redactionResult.stderr = 'credential=fixture-secret'
+$redactionReport = New-ComplianceReport -Discovery $discoveryReport -Matrix @() -Resolver @() -Plan $executionPlan -Results @($redactionResult) -RedactionPatterns @('fixture-secret')
+$redactionJson = $redactionReport | ConvertTo-Json -Depth 20 -Compress
+Assert-Compliance ($redactionReport.metadata.redaction_applied -and $redactionJson -notmatch 'fixture-secret' -and $redactionJson -match '\[REDACTED\]') 'Masquage configurable absent ou indicateur incoherent.'
+$invalidRedactionRejected = $false
+try { $null = New-ComplianceReport -Discovery $discoveryReport -Matrix @() -Resolver @() -Plan $executionPlan -Results $results -RedactionPatterns @('[') }
+catch { $invalidRedactionRejected = $true }
+Assert-Compliance $invalidRedactionRejected 'Motif de masquage regex invalide accepte.'
 $reportSchema = Get-Content -LiteralPath (Join-Path $platformRoot '.config/compliance-report.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 Assert-Compliance ($reportSchema.required -notcontains 'metrics' -and $reportSchema.properties.metrics.required.Count -eq 4) 'Métriques incompatibles avec les anciens rapports v1.'
 $legacyV1Report = $roundTrip | ConvertTo-Json -Depth 20 | ConvertFrom-Json

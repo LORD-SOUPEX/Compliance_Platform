@@ -1326,15 +1326,16 @@ compréhensible, avec un verdict consultatif `PASS` ou `FAIL`.
 - [x] Documenter confidentialité/rétention v1: stockage local, aucune publication
   distante/cleanup automatique, données potentiellement sensibles et suppression
   à la charge de l'utilisateur.
-- [ ] Ajouter masquage configurable et rétention/nettoyage automatiques; les flux
-  stdout/stderr sont bornés après buffering en mémoire.
+- [x] Ajouter le masquage configurable des champs textuels sensibles et la
+  rétention locale opt-in des anciens rapports `compliance-report*.json`; les flux
+  stdout/stderr restent bornés après buffering en mémoire.
 
 Réutilisation: rapports JSON actuels, statuts, logs et contrôles existants.
 
 Critères de sortie atteints pour Reporting v1: contrat versionné, métadonnées,
 findings/diagnostics/coverage, verdict explicable, sortie humaine et JSON de
-référence partagé aux modes; aucun effet sur Git. Masquage, limite mémoire avant
-buffering et cleanup automatique restent suivis en Phase 8.
+référence partagé aux modes; masquage et rétention locale ciblée testés. La limite
+mémoire avant buffering et les validations de partage restent suivies en Phase 8.
 
 ## Phase 7: Optional Integrations
 
