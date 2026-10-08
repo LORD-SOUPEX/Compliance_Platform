@@ -170,7 +170,8 @@ function Register-ToolRuntimeEntry {
         [string]$SourceUri,
         [string]$ChecksumUri,
         [string]$ChecksumAssetSha256,
-        [string]$PublishedArtifactSha256
+        [string]$PublishedArtifactSha256,
+        [string[]]$VersionArguments = @()
     )
     $runtimeIndexPath = Join-Path $RuntimeRoot 'index.json'
     if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) { throw "Binaire source absent pour le runtime : $SourcePath" }
@@ -215,6 +216,7 @@ function Register-ToolRuntimeEntry {
         name = $ToolName
         command = $ToolName
         version = $Version
+        version_arguments = @($VersionArguments)
         path = $relativeBinary
         sha256 = $runtimeHash
         provenance = [pscustomobject]@{
@@ -578,6 +580,7 @@ function Install-BinaryTool {
     $checksumAsset = Get-ManifestValue -Block $toolBlock -Name 'checksum_asset' -Indent 4
     $checksumAssetHash = Get-ManifestValue -Block $toolBlock -Name 'checksum_asset_sha256' -Indent 4
     $localRelativePath = Get-ManifestValue -Block $toolBlock -Name 'local_path' -Indent 4
+    $versionArgs = Get-ManifestValue -Block $toolBlock -Name 'version_args' -Indent 4
     $destination = Join-Path $repoRoot ($localRelativePath -replace '/', '\')
     $manifestCache = Get-CachePath "$ToolName-$version-$checksumAsset"
     $assetCache = Get-CachePath $asset
@@ -606,24 +609,22 @@ function Install-BinaryTool {
     $publishedArtifactHash = $assetMatch.Groups[1].Value.ToLowerInvariant()
     if ((Test-Path -LiteralPath $destination -PathType Leaf) -and -not $Force) {
         $expectedBinaryHash = (Get-FileHash -LiteralPath $verifiedBinaryPath -Algorithm SHA256).Hash.ToLowerInvariant()
-        $versionArgs = Get-ManifestValue -Block $toolBlock -Name 'version_args' -Indent 4
         $versionOutput = & $destination @($versionArgs -split ' ') 2>&1
         $existingHash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($LASTEXITCODE -eq 0 -and ($versionOutput -join ' ') -match [regex]::Escape($version) -and $existingHash -eq $expectedBinaryHash) {
             Remove-Item -LiteralPath $staging -Recurse -Force
-            Register-ToolRuntimeEntry -ToolName $ToolName -Version $version -SourcePath $destination -RuntimeRoot $runtimeRoot -PlatformId $script:RuntimePlatform -SourceUri "$baseUri/$asset" -ChecksumUri "$baseUri/$checksumAsset" -ChecksumAssetSha256 $checksumAssetHash -PublishedArtifactSha256 $publishedArtifactHash
+            Register-ToolRuntimeEntry -ToolName $ToolName -Version $version -SourcePath $destination -RuntimeRoot $runtimeRoot -PlatformId $script:RuntimePlatform -SourceUri "$baseUri/$asset" -ChecksumUri "$baseUri/$checksumAsset" -ChecksumAssetSha256 $checksumAssetHash -PublishedArtifactSha256 $publishedArtifactHash -VersionArguments ($versionArgs -split ' ')
             Write-Status PASS "$ToolName $version réutilisé après vérification de la somme officielle."
             return
         }
     }
     Copy-Item -LiteralPath $verifiedBinaryPath -Destination $destination -Force
     Remove-Item -LiteralPath $staging -Recurse -Force
-    $versionArgs = Get-ManifestValue -Block $toolBlock -Name 'version_args' -Indent 4
     $versionOutput = & $destination @($versionArgs -split ' ') 2>&1
     if ($LASTEXITCODE -ne 0 -or ($versionOutput -join ' ') -notmatch [regex]::Escape($version)) {
         throw "$ToolName n’a pas confirmé la version verrouillée $version."
     }
-    Register-ToolRuntimeEntry -ToolName $ToolName -Version $version -SourcePath $destination -RuntimeRoot $runtimeRoot -PlatformId $script:RuntimePlatform -SourceUri "$baseUri/$asset" -ChecksumUri "$baseUri/$checksumAsset" -ChecksumAssetSha256 $checksumAssetHash -PublishedArtifactSha256 $publishedArtifactHash
+    Register-ToolRuntimeEntry -ToolName $ToolName -Version $version -SourcePath $destination -RuntimeRoot $runtimeRoot -PlatformId $script:RuntimePlatform -SourceUri "$baseUri/$asset" -ChecksumUri "$baseUri/$checksumAsset" -ChecksumAssetSha256 $checksumAssetHash -PublishedArtifactSha256 $publishedArtifactHash -VersionArguments ($versionArgs -split ' ')
     Write-Status PASS "$ToolName $version installé et vérifié dans .tools/bin."
 }
 

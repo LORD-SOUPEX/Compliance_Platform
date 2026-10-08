@@ -198,24 +198,33 @@ try {
     foreach ($name in $requirementsPins.Keys) {
         if (-not $candidatePins.ContainsKey($name) -or $candidatePins[$name] -ne $requirementsPins[$name]) { throw "Generated lock does not preserve direct pin $name." }
     }
-    New-Item -ItemType Directory -Path $wheelStagePath -Force | Out-Null
-    $wheelReportArguments = @('-m', 'pip', 'install', '--quiet', '--dry-run', '--ignore-installed', '--no-deps', '--only-binary=:all:', '--index-url', 'https://pypi.org/simple', '--report', $wheelReportPath, '-r', $candidatePath)
-    $previousPreference = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        & $python @wheelReportArguments 2>&1 | Out-Null
-        $wheelReportExitCode = $LASTEXITCODE
-    } finally { $ErrorActionPreference = $previousPreference }
-    if ($wheelReportExitCode -ne 0) { throw "Unable to resolve official PyPI wheel provenance (exit=$wheelReportExitCode)." }
-    $wheelDownloadArguments = @('-m', 'pip', 'download', '--quiet', '--no-deps', '--only-binary=:all:', '--index-url', 'https://pypi.org/simple', '--dest', $wheelStagePath, '-r', $candidatePath)
-    $previousPreference = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        & $python @wheelDownloadArguments 2>&1 | Out-Null
-        $wheelDownloadExitCode = $LASTEXITCODE
-    } finally { $ErrorActionPreference = $previousPreference }
-    if ($wheelDownloadExitCode -ne 0) { throw "Unable to acquire official PyPI wheels (exit=$wheelDownloadExitCode)." }
-    Write-HashedPackageLock -RequirementsPath $candidatePath -ReportPath $wheelReportPath -WheelDirectory $wheelStagePath -OutputPath $hashCandidatePath
+    $wheelReportToUse = $wheelReportPath
+    $wheelSourceDirectory = $wheelStagePath
+    $currentLockHash = (Get-FileHash -LiteralPath $lockPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $cachedReportPath = Join-Path (Join-Path $repoRoot '.tools/cache') "python-wheel-provenance-$currentLockHash.json"
+    if ($Check -and (Test-Path -LiteralPath $cachedReportPath -PathType Leaf)) {
+        $wheelReportToUse = $cachedReportPath
+        $wheelSourceDirectory = $wheelCachePath
+    } else {
+        New-Item -ItemType Directory -Path $wheelStagePath -Force | Out-Null
+        $wheelReportArguments = @('-m', 'pip', 'install', '--quiet', '--dry-run', '--ignore-installed', '--no-deps', '--only-binary=:all:', '--index-url', 'https://pypi.org/simple', '--report', $wheelReportPath, '-r', $candidatePath)
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & $python @wheelReportArguments 2>&1 | Out-Null
+            $wheelReportExitCode = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $previousPreference }
+        if ($wheelReportExitCode -ne 0) { throw "Unable to resolve official PyPI wheel provenance (exit=$wheelReportExitCode)." }
+        $wheelDownloadArguments = @('-m', 'pip', 'download', '--quiet', '--no-deps', '--only-binary=:all:', '--index-url', 'https://pypi.org/simple', '--dest', $wheelStagePath, '-r', $candidatePath)
+        $previousPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & $python @wheelDownloadArguments 2>&1 | Out-Null
+            $wheelDownloadExitCode = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $previousPreference }
+        if ($wheelDownloadExitCode -ne 0) { throw "Unable to acquire official PyPI wheels (exit=$wheelDownloadExitCode)." }
+    }
+    Write-HashedPackageLock -RequirementsPath $candidatePath -ReportPath $wheelReportToUse -WheelDirectory $wheelSourceDirectory -OutputPath $hashCandidatePath
     Assert-PinMapsEqual -Expected $candidatePins -Actual (Get-PackagePinMap -Path $hashCandidatePath) -Description 'Hashed lock changed package pins'
     $candidateHashes = Get-PackageHashMap -Path $hashCandidatePath
     if ($Check) {
@@ -243,9 +252,9 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'pip check found incompatible dependencies in .tools/lock-venv.' }
         Write-Information -InformationAction Continue "[PASS] Lock consistent: $($lockPins.Count) project packages, $($requirementsPins.Count) project pins, $($lockToolPins.Count) lock-tool pins, pip-tools $($lockToolPins['pip-tools'])."
     } else {
-        foreach ($item in (Get-Content -LiteralPath $wheelReportPath -Raw -Encoding UTF8 | ConvertFrom-Json).install) {
+        foreach ($item in (Get-Content -LiteralPath $wheelReportToUse -Raw -Encoding UTF8 | ConvertFrom-Json).install) {
             $filename = [IO.Path]::GetFileName(([Uri]$item.download_info.url).AbsolutePath)
-            $sourceWheel = Join-Path $wheelStagePath $filename
+            $sourceWheel = Join-Path $wheelSourceDirectory $filename
             $cachedWheel = Join-Path $wheelCachePath $filename
             if (Test-Path -LiteralPath $cachedWheel -PathType Leaf) {
                 if ((Get-FileHash -LiteralPath $cachedWheel -Algorithm SHA256).Hash.ToLowerInvariant() -ne ([string]$item.download_info.archive_info.hashes.sha256).ToLowerInvariant()) { throw "Cached wheel hash mismatch: $filename" }
@@ -261,7 +270,7 @@ try {
         $runtimeReportPath = Join-Path (Join-Path $repoRoot '.tools/cache') "python-wheel-provenance-$finalLockHash.json"
         $temporaryRuntimeReport = "$runtimeReportPath.$([guid]::NewGuid().ToString('N')).tmp"
         try {
-            Copy-Item -LiteralPath $wheelReportPath -Destination $temporaryRuntimeReport
+            Copy-Item -LiteralPath $wheelReportToUse -Destination $temporaryRuntimeReport
             Move-Item -LiteralPath $temporaryRuntimeReport -Destination $runtimeReportPath -Force
         } finally { if (Test-Path -LiteralPath $temporaryRuntimeReport -PathType Leaf) { Remove-Item -LiteralPath $temporaryRuntimeReport -Force } }
         Write-Information -InformationAction Continue "[PASS] Hashed lock regenerated with $($candidatePins.Count) packages and $($candidateHashes.Count) PyPI wheel hashes; run bootstrap then scripts/update-lock.ps1 -Check."

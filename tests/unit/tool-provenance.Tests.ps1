@@ -69,8 +69,29 @@ try {
     if (Get-ToolArtifactProvenanceError -Record $toolRecord) { throw 'Valid binary provenance was rejected.' }
     $toolRecord.provenance.status = 'local_copy_hash_verified'
     if ((Get-ToolArtifactProvenanceError -Record $toolRecord) -notmatch 'absente ou non vérifiée') { throw 'Unverified binary provenance was accepted.' }
+
+    $gateTokens = $null
+    $gateErrors = $null
+    $gateAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $repoRoot 'scripts/quality-gate.ps1'), [ref]$gateTokens, [ref]$gateErrors)
+    foreach ($functionName in @('Get-ExecutionIntegrityError', 'Invoke-BoundedProcess', 'Test-ResolvedCommandExecution')) {
+        $definition = $gateAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $false)
+        . ([scriptblock]::Create($definition.Extent.Text))
+    }
+    $toolRoot = Join-Path $repoRoot '.tools/bin'
+    $pythonPath = Join-Path $repoRoot '.venv/Scripts/python.exe'
+    $pythonVersion = ((& $pythonPath --version) -join ' ').Split(' ')[1]
+    $probe = Test-ResolvedCommandExecution -Executable $pythonPath -ExpectedVersion $pythonVersion -WorkingDirectory $workspace
+    if ($probe.status -ne 'available' -or $probe.evidence.exit_code -ne 0 -or $probe.evidence.expected_version -ne $pythonVersion -or $probe.evidence.duration_ms -lt 0) { throw 'Native version probe did not record a successful execution.' }
+    $failedProbe = Test-ResolvedCommandExecution -Executable $pythonPath -Arguments @('-c', 'import sys; sys.exit(7)') -WorkingDirectory $workspace
+    if ($failedProbe.status -ne 'runtime_error' -or $failedProbe.evidence.exit_code -eq 0) { throw 'A non-zero command execution was accepted as available.' }
+    $timeoutProbe = Test-ResolvedCommandExecution -Executable $pythonPath -Arguments @('-c', 'import time; time.sleep(2)') -WorkingDirectory $workspace -TimeoutSeconds 1
+    if ($timeoutProbe.status -ne 'runtime_error' -or -not $timeoutProbe.evidence.timed_out) { throw 'A timed-out command was accepted as available.' }
+    $batchProbePath = Join-Path $workspace 'version-probe.cmd'
+    [IO.File]::WriteAllLines($batchProbePath, [string[]]@('@echo off', 'echo FixtureTool 3.4.5', 'exit /b 0'), [Text.Encoding]::ASCII)
+    $batchProbe = Test-ResolvedCommandExecution -Executable $batchProbePath -ExpectedVersion '3.4.5' -WorkingDirectory $workspace
+    if ($batchProbe.status -ne 'available' -or $batchProbe.evidence.exit_code -ne 0 -or $batchProbe.evidence.executable -ne $batchProbePath) { throw 'A Windows batch command was not qualified with evidence.' }
 } finally {
     if (Test-Path -LiteralPath $workspace) { Remove-Item -LiteralPath $workspace -Recurse -Force }
 }
 
-Write-Information -InformationAction Continue '[SUMMARY] Tool provenance unit PASS=6 FAIL=0'
+Write-Information -InformationAction Continue '[SUMMARY] Tool provenance unit PASS=10 FAIL=0'

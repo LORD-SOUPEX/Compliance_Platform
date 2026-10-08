@@ -339,6 +339,22 @@ try {
         $resolution = @(Resolve-CapabilityTool -CapabilityMatrix $matrix)[0]
         Assert-Condition ($resolution.status -eq 'ambiguous' -and $resolution.selected_tools.Count -eq 0) 'Un outil a été sélectionné malgré l''ambiguïté.'
     }
+    Invoke-TestCase 'Technologie absente n execute pas les commandes candidates' {
+        Write-Fixture '.venv/Scripts/ruff.exe' 'not an executable'
+        $probeSetting = Get-Variable -Name ProbeCandidateTools -Scope Script -ErrorAction SilentlyContinue
+        $previousProbeSetting = if ($probeSetting) { [bool]$probeSetting.Value } else { $null }
+        $script:ProbeCandidateTools = $true
+        try {
+            $discoveries = @([pscustomobject]@{ technology = 'python'; status = 'absent'; ambiguities = @() })
+            $matrix = @(Get-CapabilityMatrix -Discoveries $discoveries)[0]
+            $linting = $matrix.capabilities | Where-Object name -eq 'linting'
+            $ruff = $linting.candidate_tools | Where-Object command -eq 'ruff'
+            Assert-Condition ($linting.availability -eq 'not_applicable' -and $ruff.status -eq 'available') 'La technologie absente a lancé une sonde ou perdu son état de présence.'
+        } finally {
+            if ($null -eq $previousProbeSetting) { Remove-Variable -Name ProbeCandidateTools -Scope Script -ErrorAction SilentlyContinue }
+            else { $script:ProbeCandidateTools = $previousProbeSetting }
+        }
+    }
     Invoke-TestCase 'Tool Runtime résout la version active qualifiée' {
         $platform = Get-ExecutionPlatform
         $artifactRelativePath = "$($platform.id)/ruff/1.2.3/ruff.exe"
@@ -416,27 +432,27 @@ try {
         Assert-Condition $wrongChecksumRejected 'Archive avec somme officielle divergente acceptee.'
         $runtimeRoot = Join-Path $repoRoot '.tools/runtime'
         $publishedOldToolHash = (Get-FileHash -LiteralPath (Join-Path $repoRoot 'source-ruff-1.1.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
-        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.1.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.1.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -SourceUri 'https://github.com/example/ruff/releases/download/v1.1.0/ruff.zip' -ChecksumUri 'https://github.com/example/ruff/releases/download/v1.1.0/checksums.txt' -ChecksumAssetSha256 $expectedArchiveHash -PublishedArtifactSha256 $publishedOldToolHash
+        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.1.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.1.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -SourceUri 'https://github.com/example/ruff/releases/download/v1.1.0/ruff.zip' -ChecksumUri 'https://github.com/example/ruff/releases/download/v1.1.0/checksums.txt' -ChecksumAssetSha256 $expectedArchiveHash -PublishedArtifactSha256 $publishedOldToolHash -VersionArguments @('--version')
         $publishedToolHash = (Get-FileHash -LiteralPath (Join-Path $repoRoot 'source-ruff-1.2.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
-        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.2.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -SourceUri 'https://github.com/example/ruff/releases/download/v1.2.0/ruff.zip' -ChecksumUri 'https://github.com/example/ruff/releases/download/v1.2.0/checksums.txt' -ChecksumAssetSha256 $expectedArchiveHash -PublishedArtifactSha256 $publishedToolHash
+        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.2.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -SourceUri 'https://github.com/example/ruff/releases/download/v1.2.0/ruff.zip' -ChecksumUri 'https://github.com/example/ruff/releases/download/v1.2.0/checksums.txt' -ChecksumAssetSha256 $expectedArchiveHash -PublishedArtifactSha256 $publishedToolHash -VersionArguments @('--version')
         $index = Get-Content (Join-Path $runtimeRoot 'index.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         $versions = @($index.platforms.'windows-x64'.tools | Where-Object name -eq 'ruff')
         $active = @($versions | Where-Object active)
         Assert-Condition ($versions.Count -eq 2 -and $active.Count -eq 1 -and $active[0].version -eq '1.2.0') 'Les versions runtime ou leur pointeur actif sont incohérents.'
         Assert-Condition ($active[0].sha256 -eq (Get-FileHash (Join-Path $runtimeRoot $active[0].path) -Algorithm SHA256).Hash.ToLowerInvariant()) 'L''empreinte de l''artefact runtime diffère.'
         $provenanceTimestamp = [DateTimeOffset]::MinValue
-        Assert-Condition ($active[0].provenance.status -eq 'official_checksum_verified' -and $active[0].provenance.publisher -eq 'github.com/example/ruff' -and $active[0].provenance.published_artifact_sha256 -eq $publishedToolHash -and [DateTimeOffset]::TryParse($active[0].provenance.acquired_at, [ref]$provenanceTimestamp) -and $active[0].provenance.validation_method -eq 'official_checksum_manifest_and_runtime_copy_sha256') 'Provenance éditeur, date ou méthode absente du Runtime Index.'
-        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.2.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -SourceUri 'https://github.com/example/ruff/releases/download/v1.2.0/ruff.zip' -ChecksumUri 'https://github.com/example/ruff/releases/download/v1.2.0/checksums.txt' -ChecksumAssetSha256 $expectedArchiveHash -PublishedArtifactSha256 $publishedToolHash
+        Assert-Condition ($active[0].provenance.status -eq 'official_checksum_verified' -and $active[0].provenance.publisher -eq 'github.com/example/ruff' -and $active[0].provenance.published_artifact_sha256 -eq $publishedToolHash -and [DateTimeOffset]::TryParse($active[0].provenance.acquired_at, [ref]$provenanceTimestamp) -and $active[0].provenance.validation_method -eq 'official_checksum_manifest_and_runtime_copy_sha256' -and $active[0].version_arguments -contains '--version') 'Provenance éditeur ou arguments de qualification absents du Runtime Index.'
+        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.2.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -SourceUri 'https://github.com/example/ruff/releases/download/v1.2.0/ruff.zip' -ChecksumUri 'https://github.com/example/ruff/releases/download/v1.2.0/checksums.txt' -ChecksumAssetSha256 $expectedArchiveHash -PublishedArtifactSha256 $publishedToolHash -VersionArguments @('--version')
         $index = Get-Content (Join-Path $runtimeRoot 'index.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         $versions = @($index.platforms.'windows-x64'.tools | Where-Object name -eq 'ruff')
         $active = @($versions | Where-Object active)
         Assert-Condition ($versions.Count -eq 2 -and $active.Count -eq 1) 'La réinscription d''une version a créé un doublon.'
         Assert-Condition ($index.platforms.'windows-x64'.status -eq 'experimental') 'La plateforme a été déclarée qualifiée avant le bootstrap complet.'
         Update-ToolRuntimePlatformStatus -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -Status 'qualified'
-        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.1.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.1.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -SourceUri 'https://github.com/example/ruff/releases/download/v1.1.0/ruff.zip' -ChecksumUri 'https://github.com/example/ruff/releases/download/v1.1.0/checksums.txt' -ChecksumAssetSha256 $expectedArchiveHash -PublishedArtifactSha256 $publishedOldToolHash
+        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.1.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.1.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -SourceUri 'https://github.com/example/ruff/releases/download/v1.1.0/ruff.zip' -ChecksumUri 'https://github.com/example/ruff/releases/download/v1.1.0/checksums.txt' -ChecksumAssetSha256 $expectedArchiveHash -PublishedArtifactSha256 $publishedOldToolHash -VersionArguments @('--version')
         $rollback = Resolve-CandidateTool -Name 'ruff' -Command 'ruff'
         Assert-Condition ($rollback.status -eq 'available' -and $rollback.version -eq '1.1.0') 'Rollback vers une version runtime conservee impossible.'
-        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.2.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -SourceUri 'https://github.com/example/ruff/releases/download/v1.2.0/ruff.zip' -ChecksumUri 'https://github.com/example/ruff/releases/download/v1.2.0/checksums.txt' -ChecksumAssetSha256 $expectedArchiveHash -PublishedArtifactSha256 $publishedToolHash
+        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.2.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -SourceUri 'https://github.com/example/ruff/releases/download/v1.2.0/ruff.zip' -ChecksumUri 'https://github.com/example/ruff/releases/download/v1.2.0/checksums.txt' -ChecksumAssetSha256 $expectedArchiveHash -PublishedArtifactSha256 $publishedToolHash -VersionArguments @('--version')
         $resolved = Resolve-CandidateTool -Name 'ruff' -Command 'ruff'
         Assert-Condition ($resolved.status -eq 'available' -and $resolved.version -eq '1.2.0') 'Reactivation de la version runtime courante impossible.'
         Update-ToolRuntimePlatformStatus -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -Status 'experimental'
@@ -593,7 +609,7 @@ try {
         Assert-Condition ($linting.candidate_tools[0].name -eq 'PSScriptAnalyzer' -and $linting.candidate_tools[0].status -in @('available', 'not_installed') -and $linting.reasons.Count -gt 0) 'Candidat, disponibilité ou motif manquant.'
         $powerShellResolution = $result.tool_resolution | Where-Object technology -eq 'powershell'
         $resolvedAnalyzer = $powerShellResolution.selected_tools | Where-Object command -eq 'Invoke-ScriptAnalyzer'
-        Assert-Condition ($resolvedAnalyzer.version -eq '1.25.0' -and $resolvedAnalyzer.runtime_managed -and $resolvedAnalyzer.platform -eq 'windows-x64') 'Version/source runtime absentes de l outil resolu.'
+        Assert-Condition ($resolvedAnalyzer.version -eq '1.25.0' -and $resolvedAnalyzer.runtime_managed -and $resolvedAnalyzer.platform -eq 'windows-x64' -and $resolvedAnalyzer.execution_probe.exit_code -eq 0 -and $resolvedAnalyzer.execution_probe.expected_version -eq '1.25.0') 'Version/runtime ou preuve d’exécution absente de l’outil résolu.'
         Assert-Condition ($powerShellMatrix.platform.os -eq 'windows' -and $powerShellMatrix.platform.architecture -ne 'unknown') 'Plateforme OS + architecture absente.'
         $absentAnsible = $result.capability_matrix | Where-Object technology -eq 'ansible'
         Assert-Condition ($absentAnsible.technology_status -eq 'absent' -and $absentAnsible.required_capabilities.Count -eq 0 -and $absentAnsible.capabilities[0].availability -eq 'not_applicable') 'Une technologie absente est déclarée requise ou disponible.'

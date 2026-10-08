@@ -1190,8 +1190,9 @@ les capacités et outils réellement nécessaires à chaque repository analysé.
   plateforme non qualifiee et schema invalide, avec regression negative.
 - [x] Aligner Doctor, Bootstrap et Resolver sur le snapshot Python/modules, le lock,
   les hashes et les versions indexées.
-- [ ] Qualifier les commandes résolues en exécution native; disponibilité par
-  présence ou inventaire ne prouve pas le fonctionnement des contrôles.
+- [x] Qualifier les commandes résolues en exécution native; le Resolver exécute
+  une sonde bornée, vérifie la version lorsque connue et conserve une preuve.
+  La couverture native reste limitée aux plateformes exécutées localement.
 - [x] Gerer les alternatives explicites avec priorite du profil sans retirer
   d'outil complementaire ni modifier les controles executes; fixtures validees.
 - [x] Exposer compteurs de candidats, commandes retenues, reutilisations,

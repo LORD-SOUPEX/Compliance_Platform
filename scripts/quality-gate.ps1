@@ -47,6 +47,8 @@ $script:Files = @()
 $script:ScanErrors = New-Object System.Collections.Generic.List[object]
 $script:Technologies = $null
 $script:ProcessTimeoutSeconds = $TimeoutSeconds
+$script:ProbeCandidateTools = $true
+$script:CommandProbeCache = @{}
 $script:ReportRedactionPatterns = @($ReportRedactionPattern | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 foreach ($pattern in $script:ReportRedactionPatterns) {
     try { $null = [regex]::new($pattern) }
@@ -226,6 +228,60 @@ function Invoke-BoundedProcess {
         $result.execution_end = [DateTimeOffset]::UtcNow.ToString('o')
         $result.duration_ms = $timer.ElapsedMilliseconds
     }
+    return $result
+}
+
+function Test-ResolvedCommandExecution {
+    param(
+        [Parameter(Mandatory = $true)][string]$Executable,
+        [string[]]$Arguments = @('--version'),
+        [string]$ExpectedVersion,
+        [string]$WorkingDirectory = $repoRoot,
+        [ValidateRange(1, 30)][int]$TimeoutSeconds = 10
+    )
+    $evidenceArguments = @($Arguments)
+    $probeExecutable = $Executable
+    $probeArguments = @($Arguments)
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and [IO.Path]::GetExtension($Executable) -in @('.cmd', '.bat')) {
+        $escapedExecutable = $Executable.Replace("'", "''")
+        $quotedArguments = @($Arguments | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ' '
+        $probeScript = "& '$escapedExecutable' $quotedArguments; exit `$LASTEXITCODE"
+        $probeExecutable = Join-Path $PSHOME 'powershell.exe'
+        $probeArguments = @('-NoProfile', '-NonInteractive', '-Command', $probeScript)
+    }
+    $execution = Invoke-BoundedProcess -Executable $probeExecutable -Arguments $probeArguments -WorkingDirectory $WorkingDirectory -Timeout $TimeoutSeconds -MaxOutputBytes 65536
+    $output = @($execution.stdout, $execution.stderr) -join "`n"
+    $failureReason = if ($execution.error) { $execution.error }
+        elseif ($execution.exit_code -ne 0) { "La commande de qualification a retourné le code $($execution.exit_code)." }
+        elseif ($ExpectedVersion -and $output -notmatch [regex]::Escape($ExpectedVersion)) { "La sortie ne confirme pas la version $ExpectedVersion." }
+        else { $null }
+    return [pscustomobject]@{
+        status = if ($failureReason) { 'runtime_error' } else { 'available' }
+        reason = $failureReason
+        evidence = [pscustomobject]@{
+            executable = $Executable
+            arguments = $evidenceArguments
+            expected_version = $ExpectedVersion
+            exit_code = $execution.exit_code
+            duration_ms = $execution.duration_ms
+            timed_out = $execution.timed_out
+            observed_at = $execution.execution_end
+            version_output = ($output.Trim() -replace [regex]::Escape($repoRoot), '<platform>')
+        }
+    }
+}
+
+function Get-ResolverCommandProbe {
+    param([string]$Executable, [string[]]$Arguments, [string]$ExpectedVersion, [switch]$SkipExecutionProbe)
+    $probeSetting = Get-Variable -Name ProbeCandidateTools -Scope Script -ErrorAction SilentlyContinue
+    if ($SkipExecutionProbe -or -not $probeSetting -or -not $probeSetting.Value) { return [pscustomobject]@{ status = 'available'; reason = $null; evidence = $null } }
+    $cache = Get-Variable -Name CommandProbeCache -Scope Script -ErrorAction SilentlyContinue
+    if (-not $cache) { $script:CommandProbeCache = @{}; $cache = Get-Variable -Name CommandProbeCache -Scope Script }
+    $resolvedPath = if (Test-Path -LiteralPath $Executable -PathType Leaf) { [IO.Path]::GetFullPath($Executable) } else { $Executable }
+    $cacheKey = "$resolvedPath|$($Arguments -join [char]31)|$ExpectedVersion"
+    if ($cache.Value.ContainsKey($cacheKey)) { return $cache.Value[$cacheKey] }
+    $result = Test-ResolvedCommandExecution -Executable $resolvedPath -Arguments $Arguments -ExpectedVersion $ExpectedVersion -WorkingDirectory $repoRoot
+    $cache.Value[$cacheKey] = $result
     return $result
 }
 
@@ -599,7 +655,7 @@ function Get-ExecutionIntegrityError {
 }
 
 function Resolve-CandidateTool {
-    param([string]$Name, [string]$Command)
+    param([string]$Name, [string]$Command, [switch]$SkipExecutionProbe)
     $runtimeRoot = Split-Path -Parent (Split-Path -Parent $toolRoot)
     $platform = Get-ExecutionPlatform
     $runtimeIndex = Get-ToolRuntimeIndex
@@ -642,7 +698,12 @@ function Resolve-CandidateTool {
                 if ($integrityError) {
                     return [pscustomobject]@{ name = $Name; command = $Command; status = 'integrity_error'; source = $toolPath; version = $toolRecord.version; runtime_managed = $true; platform = $platform.id; reason = $integrityError }
                 }
-                return [pscustomobject]@{ name = $Name; command = $Command; status = 'available'; source = $toolPath; version = $toolRecord.version; runtime_managed = $true; platform = $platform.id; reason = 'Outil qualifié trouvé dans le Tool Runtime pour cette plateforme.' }
+                $versionArguments = @()
+                if ($toolRecord.PSObject.Properties.Name -contains 'version_arguments') { $versionArguments = @($toolRecord.version_arguments) }
+                if ($versionArguments.Count -eq 0) { $versionArguments = @('--version') }
+                $probe = Get-ResolverCommandProbe -Executable $toolPath -Arguments $versionArguments -ExpectedVersion $toolRecord.version -SkipExecutionProbe:$SkipExecutionProbe
+                if ($probe.status -ne 'available') { return [pscustomobject]@{ name = $Name; command = $Command; status = 'runtime_error'; source = $toolPath; version = $toolRecord.version; runtime_managed = $true; platform = $platform.id; reason = "Qualification d'execution impossible: $($probe.reason)"; execution_probe = $probe.evidence } }
+                return [pscustomobject]@{ name = $Name; command = $Command; status = 'available'; source = $toolPath; version = $toolRecord.version; runtime_managed = $true; platform = $platform.id; reason = 'Outil qualifié, provenance vérifiée et commande exécutée.'; execution_probe = $probe.evidence }
             }
         }
         $otherPlatformTool = $false
@@ -678,7 +739,9 @@ function Resolve-CandidateTool {
                 if (-not (Test-Path -LiteralPath $lockPath -PathType Leaf) -or (Get-FileHash -LiteralPath $lockPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $pythonRecord.dependency_lock_sha256) {
                     return [pscustomobject]@{ name = $Name; command = $Command; status = 'runtime_error'; source = $candidatePath; version = $packageRecords[0].version; runtime_managed = $true; platform = $platform.id; reason = 'Le lock Python ne correspond pas a l inventaire Runtime.' }
                 }
-                return [pscustomobject]@{ name = $Name; command = $Command; status = 'available'; source = $candidatePath; version = $packageRecords[0].version; runtime_managed = $true; platform = $platform.id; reason = "Version Python epinglee dans Tool Runtime: $packageName." }
+                $probe = Get-ResolverCommandProbe -Executable $candidatePath -Arguments @('--version') -ExpectedVersion $packageRecords[0].version -SkipExecutionProbe:$SkipExecutionProbe
+                if ($probe.status -ne 'available') { return [pscustomobject]@{ name = $Name; command = $Command; status = 'runtime_error'; source = $candidatePath; version = $packageRecords[0].version; runtime_managed = $true; platform = $platform.id; reason = "Qualification d'execution impossible: $($probe.reason)"; execution_probe = $probe.evidence } }
+                return [pscustomobject]@{ name = $Name; command = $Command; status = 'available'; source = $candidatePath; version = $packageRecords[0].version; runtime_managed = $true; platform = $platform.id; reason = "Version $($packageRecords[0].version) du package $packageName indexee et commande executee."; execution_probe = $probe.evidence }
             }
             if ($platformRecord -and $platformRecord.Value.status -eq 'qualified') {
                 return [pscustomobject]@{ name = $Name; command = $Command; status = 'runtime_error'; source = $candidatePath; version = $null; runtime_managed = $true; platform = $platform.id; reason = 'Inventaire Python absent du Runtime Index.' }
@@ -700,7 +763,13 @@ function Resolve-CandidateTool {
             if ($moduleIntegrityError) {
                 return [pscustomobject]@{ name = $Name; command = $Command; status = 'integrity_error'; source = (Join-Path $runtimeRoot $moduleRecord.path); version = $moduleRecord.version; runtime_managed = $true; platform = $platform.id; reason = $moduleIntegrityError }
             }
-            return [pscustomobject]@{ name = $Name; command = $Command; status = 'available'; source = (Join-Path (Join-Path $runtimeRoot $moduleRecord.path) 'PSScriptAnalyzer.psd1'); version = $moduleRecord.version; runtime_managed = $true; platform = $platform.id; reason = 'Module PSScriptAnalyzer indexe et integre.' }
+            $modulePath = [IO.Path]::GetFullPath((Join-Path $runtimeRoot $moduleRecord.path))
+            $moduleManifest = Join-Path $modulePath 'PSScriptAnalyzer.psd1'
+            $escapedModuleManifest = $moduleManifest.Replace("'", "''")
+            $probeScript = "Import-Module -Name '$escapedModuleManifest' -Force -ErrorAction Stop; Invoke-ScriptAnalyzer -ScriptDefinition 'Write-Output 1' -Severity Error | Out-Null; (Get-Module PSScriptAnalyzer).Version.ToString()"
+            $probe = Get-ResolverCommandProbe -Executable (Join-Path $PSHOME 'powershell.exe') -Arguments @('-NoProfile', '-NonInteractive', '-Command', $probeScript) -ExpectedVersion $moduleRecord.version -SkipExecutionProbe:$SkipExecutionProbe
+            if ($probe.status -ne 'available') { return [pscustomobject]@{ name = $Name; command = $Command; status = 'runtime_error'; source = (Join-Path $runtimeRoot $moduleRecord.path); version = $moduleRecord.version; runtime_managed = $true; platform = $platform.id; reason = "Qualification d'execution impossible: $($probe.reason)"; execution_probe = $probe.evidence } }
+            return [pscustomobject]@{ name = $Name; command = $Command; status = 'available'; source = (Join-Path (Join-Path $runtimeRoot $moduleRecord.path) 'PSScriptAnalyzer.psd1'); version = $moduleRecord.version; runtime_managed = $true; platform = $platform.id; reason = 'Module PSScriptAnalyzer indexe, integre et execute.'; execution_probe = $probe.evidence }
         }
         if ($platformRecord -and $platformRecord.Value.status -eq 'qualified') {
             return [pscustomobject]@{ name = $Name; command = $Command; status = 'runtime_error'; source = $null; version = $null; runtime_managed = $true; platform = $platform.id; reason = 'Inventaire des modules PowerShell absent du Runtime Index.' }
@@ -714,7 +783,10 @@ function Resolve-CandidateTool {
     $commandInfo = Get-Command -Name $Command -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($commandInfo) {
         $source = if ($commandInfo.Source) { $commandInfo.Source } else { $commandInfo.Name }
-        return [pscustomobject]@{ name = $Name; command = $Command; status = 'available'; source = $source; version = $null; runtime_managed = $false; platform = $platform.id; reason = "Commande resolue dans le PATH ou l'environnement PowerShell courant." }
+        $probeArguments = if ($Command -in @('terraform', 'tofu', 'opentofu')) { @('version') } else { @('--version') }
+        $probe = Get-ResolverCommandProbe -Executable $source -Arguments $probeArguments -ExpectedVersion $null -SkipExecutionProbe:$SkipExecutionProbe
+        if ($probe.status -ne 'available') { return [pscustomobject]@{ name = $Name; command = $Command; status = 'runtime_error'; source = $source; version = $null; runtime_managed = $false; platform = $platform.id; reason = "Qualification d'execution impossible: $($probe.reason)"; execution_probe = $probe.evidence } }
+        return [pscustomobject]@{ name = $Name; command = $Command; status = 'available'; source = $source; version = $null; runtime_managed = $false; platform = $platform.id; reason = 'Commande du PATH résolue et exécutée.'; execution_probe = $probe.evidence }
     }
     $relativeCandidates = @(
         ".tools\bin\$Command.exe",
@@ -745,13 +817,18 @@ function Get-CapabilityMatrix {
             $capabilities = foreach ($capability in $capabilityProfile) {
                 $selectionPolicy = if ($capability.PSObject.Properties.Name -contains 'selection_policy') { $capability.selection_policy } else { 'all' }
                 if ($selectionPolicy -notin @('all', 'alternative')) { throw 'Politique de selection de capacite invalide.' }
-                $toolStates = @($capability.tools | ForEach-Object {
-                    $tool = Resolve-CandidateTool -Name $_.name -Command $_.command
+                $toolStateList = New-Object System.Collections.Generic.List[object]
+                $alternativeSatisfied = $false
+                foreach ($toolDefinition in $capability.tools) {
+                    $skipProbe = $discovery.status -ne 'detected' -or ($selectionPolicy -eq 'alternative' -and $alternativeSatisfied)
+                    $tool = Resolve-CandidateTool -Name $toolDefinition.name -Command $toolDefinition.command -SkipExecutionProbe:$skipProbe
                     foreach ($property in @('catalog_id', 'severity', 'side_effect_level', 'permissions', 'timeout_seconds', 'cost', 'parameters', 'dependencies', 'limitations', 'platform_support')) {
-                        if ($_.PSObject.Properties.Name -contains $property) { $tool | Add-Member -MemberType NoteProperty -Name $property -Value $_.$property -Force }
+                        if ($toolDefinition.PSObject.Properties.Name -contains $property) { $tool | Add-Member -MemberType NoteProperty -Name $property -Value $toolDefinition.$property -Force }
                     }
-                    $tool
-                })
+                    $toolStateList.Add($tool)
+                    if ($selectionPolicy -eq 'alternative' -and $tool.status -eq 'available') { $alternativeSatisfied = $true }
+                }
+                $toolStates = @($toolStateList.ToArray())
             $availableTools = @($toolStates | Where-Object status -eq 'available')
             $availability = if ($discovery.status -eq 'ambiguous') { 'ambiguous' }
                 elseif ($discovery.status -eq 'absent') { 'not_applicable' }
@@ -828,6 +905,7 @@ function Resolve-CapabilityTool {
                             version = $candidateVersion
                             runtime_managed = $candidateRuntimeManaged
                             platform = $candidatePlatform
+                            execution_probe = if ($candidate.PSObject.Properties.Name -contains 'execution_probe') { $candidate.execution_probe } else { $null }
                             capabilities = New-Object System.Collections.Generic.List[string]
                         }
                     }
@@ -851,6 +929,7 @@ function Resolve-CapabilityTool {
                 version = $_.version
                 runtime_managed = $_.runtime_managed
                 platform = $_.platform
+                execution_probe = $_.execution_probe
                 capabilities = @($_.capabilities.ToArray())
             }
         })
