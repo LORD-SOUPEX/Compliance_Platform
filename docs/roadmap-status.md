@@ -4,12 +4,12 @@ Synthèse de [la roadmap existante dans plan.md](../plan.md#roadmap), mise à jo
 
 | Phase/composant | Statut | Preuve et reste principal |
 | --- | --- | --- |
-| Stabilisation du socle | PHASE EN COURS | 46 historiques, 27 Compliance unitaires, 11 adaptateur, 5 reproductibilité, 13 intégrations Compliance, 4 intégrations adaptateur, 6 catalogue et 4 matrice plateforme; Quick vert, Full bloqué par pip-audit. |
+| Stabilisation du socle | PHASE EN COURS | 48 scénarios Quality Gate, 27 Compliance unitaires, 11 adaptateur, 5 reproductibilité, 13 intégrations Compliance, 4 intégrations adaptateur, 6 catalogue et 4 matrice plateforme; Quick vert, Full bloqué par pip-audit. |
 | Discovery Engine | PHASE EN COURS | Corpus synthétique de 10 technologies: 0 faux positif/négatif et 0 ambiguïté inattendue; corpus réel, overrides et layouts complexes restent ouverts. |
 | Tool Bootstrap & Tool Resolver | PHASE EN COURS | Runtime Index inclut Python/packages et PSScriptAnalyzer, consommés par Doctor/Resolver; provenance éditeur, commandes réelles et plateformes restent ouvertes. |
 | Compliance Engine | PHASE TERMINÉE | Critères v1: DAG, budgets, exécution, résultats, findings/verdict et parité fixtures; sandbox et consommateurs réels suivent en Phase 8. |
 | Control Catalog | PHASE TERMINÉE | Catalogue JSON/Schema v1, 28 contrôles, objectifs/limites; Matrix et Plan consomment les métadonnées. Qualification réelle suivie en Phase 8. |
-| Reporting Engine | PHASE TERMINÉE | Schéma/validateurs v1, métriques Discovery/Resolver/Compliance/Reporting et rapport de référence pour les modes historiques; masquage/nettoyage avancés en Phase 8. |
+| Reporting Engine | PHASE TERMINÉE | Schéma/validateurs v1, métriques Discovery/Resolver/Compliance/Reporting, rapport de référence, masquage configurable et rétention locale ciblée, avec tests opt-in. |
 | Policy Engine | PHASE NON COMMENCÉE | YAML descriptif, non autoritaire à l'exécution. |
 | Optional Integrations | PHASE EN COURS | Contrats testés en fixtures; restent runner GitLab distant, consumer repos autorisés et contextes UI/CI réels. |
 | Industrialisation | PHASE EN COURS | Matrice, lock, corpus synthétique, métriques et critères de support définis; mesures réelles, qualification native et responsables de support restent ouverts. |
