@@ -291,7 +291,8 @@ function Invoke-External {
         [string]$Executable,
         [string[]]$Arguments = @(),
         [switch]$Required,
-        [switch]$Optional
+        [switch]$Optional,
+        [ValidateRange(0, 3600)][int]$TimeoutSeconds = 0
     )
     $resolved = if (Test-Path $Executable -PathType Leaf) { $Executable } else {
         $command = Get-Command $Executable -ErrorAction SilentlyContinue
@@ -302,7 +303,8 @@ function Invoke-External {
         Add-Check $status $Name "Outil absent : $Executable"
         return $false
     }
-    $execution = Invoke-BoundedProcess -Executable $resolved -Arguments $Arguments -WorkingDirectory $repoRoot -Timeout $script:ProcessTimeoutSeconds
+    $processTimeout = if ($TimeoutSeconds -gt 0) { $TimeoutSeconds } else { $script:ProcessTimeoutSeconds }
+    $execution = Invoke-BoundedProcess -Executable $resolved -Arguments $Arguments -WorkingDirectory $repoRoot -Timeout $processTimeout
     if ($execution.stdout) { Write-Information -InformationAction Continue $execution.stdout.TrimEnd() }
     if ($execution.stderr) { Write-Information -InformationAction Continue $execution.stderr.TrimEnd() }
     if ($execution.error) {
@@ -1306,7 +1308,7 @@ try {
     Invoke-ContainerCheck
     Invoke-ShellCheck
     if ((Test-Category 'Tests') -and ($script:RunFull -or $Category -eq 'Tests')) {
-        Invoke-External -Name 'Tests du socle et Python' -Executable 'powershell' -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'test.ps1'), '-NoColor') -Required | Out-Null
+        Invoke-External -Name 'Tests du socle et Python' -Executable 'powershell' -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'test.ps1'), '-NoColor') -Required -TimeoutSeconds ([Math]::Max(420, $script:ProcessTimeoutSeconds)) | Out-Null
     }
 
     $summary = [pscustomobject]@{ PASS = $script:Counts.PASS; FAIL = $script:Counts.FAIL; WARN = $script:Counts.WARN; SKIP = $script:Counts.SKIP; ERROR = $script:Counts.ERROR }

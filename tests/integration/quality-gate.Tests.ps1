@@ -661,11 +661,8 @@ try {
     }
     Invoke-TestCase 'Délai externe bloque' {
         Write-Fixture 'scripts/sleep.ps1' 'Start-Sleep -Seconds 5'
-        $script:ProcessTimeoutSeconds = 1
-        try {
-            $result = Invoke-External -Name 'Délai' -Executable $processHost -Arguments @('-NoProfile', '-File', (Join-Path $repoRoot 'scripts/sleep.ps1')) -Required
-            Assert-Condition (-not $result -and $script:Counts.ERROR -eq 1) 'Délai non appliqué.'
-        } finally { $script:ProcessTimeoutSeconds = 10 }
+        $result = Invoke-External -Name 'Délai' -Executable $processHost -Arguments @('-NoProfile', '-File', (Join-Path $repoRoot 'scripts/sleep.ps1')) -Required -TimeoutSeconds 1
+        Assert-Condition (-not $result -and $script:Counts.ERROR -eq 1) 'Délai non appliqué.'
     }
     Invoke-TestCase 'Rapport Ci et code cohérents' {
         Write-Fixture 'run.sh' "#!/usr/bin/env bash`nexit 0`n"
