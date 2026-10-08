@@ -93,6 +93,8 @@ function Get-DoctorRuntimePlatform {
         if ($platform.python.PSObject.Properties.Name -notcontains $field) { throw "Inventaire Python Runtime incomplet: $field" }
     }
     if ($platform.python.packages -isnot [array]) { throw 'Inventaire packages Python invalide.' }
+    $inventoryError = Get-RuntimePythonInventoryError -Platform $platform
+    if ($inventoryError) { throw $inventoryError }
     return $platform
 }
 

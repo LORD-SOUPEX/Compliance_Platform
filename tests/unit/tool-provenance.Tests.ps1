@@ -90,8 +90,16 @@ try {
     [IO.File]::WriteAllLines($batchProbePath, [string[]]@('@echo off', 'echo FixtureTool 3.4.5', 'exit /b 0'), [Text.Encoding]::ASCII)
     $batchProbe = Test-ResolvedCommandExecution -Executable $batchProbePath -ExpectedVersion '3.4.5' -WorkingDirectory $workspace
     if ($batchProbe.status -ne 'available' -or $batchProbe.evidence.exit_code -ne 0 -or $batchProbe.evidence.executable -ne $batchProbePath) { throw 'A Windows batch command was not qualified with evidence.' }
+
+    $matchingPackages = @([pscustomobject]@{ name = 'PIP_tools'; version = '7.6.2' }, [pscustomobject]@{ name = 'ruff'; version = '0.16.10' })
+    $packageSnapshot = [pscustomobject]@{ python = [pscustomobject]@{ packages = @($matchingPackages) }; python_packages = @($matchingPackages) }
+    if (Get-RuntimePythonInventoryError -Platform $packageSnapshot) { throw 'A consistent Python Runtime Snapshot was rejected.' }
+    $packageSnapshot.python_packages[1].version = '0.16.9'
+    if ((Get-RuntimePythonInventoryError -Platform $packageSnapshot) -notmatch 'divergents') { throw 'Divergent Python Runtime Snapshot views were accepted.' }
+    $packageSnapshot.python_packages = @($matchingPackages + $matchingPackages[0])
+    if ((Get-RuntimePythonInventoryError -Platform $packageSnapshot) -notmatch 'dupliqué') { throw 'Duplicate Python Runtime Snapshot entry was accepted.' }
 } finally {
     if (Test-Path -LiteralPath $workspace) { Remove-Item -LiteralPath $workspace -Recurse -Force }
 }
 
-Write-Information -InformationAction Continue '[SUMMARY] Tool provenance unit PASS=10 FAIL=0'
+Write-Information -InformationAction Continue '[SUMMARY] Tool provenance unit PASS=13 FAIL=0'

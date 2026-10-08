@@ -1190,6 +1190,9 @@ les capacités et outils réellement nécessaires à chaque repository analysé.
   plateforme non qualifiee et schema invalide, avec regression negative.
 - [x] Aligner Doctor, Bootstrap et Resolver sur le snapshot Python/modules, le lock,
   les hashes et les versions indexées.
+- [x] Centraliser la validation de cohérence entre `python.packages` et
+  `python_packages`; Bootstrap valide avant écriture, Doctor et Resolver refusent
+  un snapshot divergent ou contenant des doublons.
 - [x] Qualifier les commandes résolues en exécution native; le Resolver exécute
   une sonde bornée, vérifie la version lorsque connue et conserve une preuve.
   La couverture native reste limitée aux plateformes exécutées localement.
@@ -1197,8 +1200,9 @@ les capacités et outils réellement nécessaires à chaque repository analysé.
   d'outil complementaire ni modifier les controles executes; fixtures validees.
 - [x] Exposer compteurs de candidats, commandes retenues, reutilisations,
   capacites non resolues et duree de selection par technologie, avec assertions.
-- [ ] Qualifier le cout total incluant scan, hash et probes, sur corpus reel;
-  les compteurs du resolver seul ne prouvent pas des invocations evitees par le gate.
+- [ ] BLOQUÉE: qualifier le coût total incluant scan, hash et probes sur un corpus
+  de dépôts consommateurs réels autorisés; aucun corpus autorisé n'est disponible.
+  Les métriques locales/synthétiques ne prouvent pas les invocations évitées par le gate.
 
 Critères de sortie proposés: 37 tests verts; matrice et résolution sérialisées;
 versions d'outils binaires vérifiées; `windows-x64` reste expérimental tant que le

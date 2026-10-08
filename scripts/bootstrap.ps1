@@ -445,6 +445,8 @@ function Register-ToolRuntimeInventory {
         dependency_lock_sha256 = (Get-FileHash -LiteralPath $RequirementsLockPath -Algorithm SHA256).Hash.ToLowerInvariant()
         packages = $packageRecords
     }
+    $inventoryError = Get-RuntimePythonInventoryError -Platform ([pscustomobject]@{ python = $pythonRecord; python_packages = $packageRecords })
+    if ($inventoryError) { throw "Runtime Snapshot Python invalide: $inventoryError" }
     $moduleRecord = [pscustomobject]@{
         name = $ModuleName
         version = $ModuleVersion

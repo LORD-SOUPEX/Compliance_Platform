@@ -728,6 +728,10 @@ function Resolve-CandidateTool {
                     return [pscustomobject]@{ name = $Name; command = $Command; status = 'incompatible'; source = $candidatePath; version = $null; runtime_managed = $true; platform = $platform.id; reason = 'Environnement Python present dans un runtime non qualifie.' }
                 }
                 $packageName = Get-IndexedPythonPackageName -Command $Command
+                $inventoryError = Get-RuntimePythonInventoryError -Platform $platformRecord.Value
+                if ($inventoryError) {
+                    return [pscustomobject]@{ name = $Name; command = $Command; status = 'runtime_error'; source = $candidatePath; version = $null; runtime_managed = $true; platform = $platform.id; reason = $inventoryError }
+                }
                 $packageRecords = @($platformRecord.Value.python_packages | Where-Object name -eq $packageName)
                 $pythonRecord = $platformRecord.Value.python
                 if ($packageRecords.Count -ne 1 -or -not $pythonRecord) {

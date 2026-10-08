@@ -502,8 +502,22 @@ try {
         $platformData = $index.platforms.'windows-x64'
         $indexedPipRecord = @($platformData.python.packages | Where-Object name -eq 'pip')
         Assert-Condition ($platformData.python.version -eq $pythonInfo.version -and $indexedPipRecord.Count -eq 1 -and $indexedPipRecord[0].version -eq $pipVersion -and $indexedPipRecord[0].provenance.registry -eq 'PyPI' -and $indexedPipRecord[0].provenance.source_url -match '^https://files\.pythonhosted\.org/' -and $indexedPipRecord[0].provenance.artifact_sha256 -match '^[a-f0-9]{64}$' -and $indexedPipRecord[0].provenance.validation_method -eq 'pip_download_sha256_verified_against_official_index') 'Inventaire Python ou provenance de roue divergent du lock.'
+        $nestedPipRecord = @($platformData.python.packages | Where-Object name -eq 'pip')[0]
+        $nestedPipVersion = $nestedPipRecord.version
+        $nestedPipRecord.version = '0.0.0'
+        $inventoryMismatch = Get-RuntimePythonInventoryError -Platform $platformData
+        Assert-Condition ($inventoryMismatch -match 'divergents') "La fixture n’a pas créé deux vues Python divergentes."
+        Write-Fixture '.tools/runtime/index.json' ($index | ConvertTo-Json -Depth 16)
+        $nestedPipRecord.version = $nestedPipVersion
+        Write-Fixture '.tools/runtime/index.json' ($index | ConvertTo-Json -Depth 16)
         Assert-Condition ($platformData.powershell_modules[0].version -eq '1.25.0' -and $platformData.powershell_modules[0].tree_sha256 -eq (Get-DirectorySha256 -Path $moduleRoot)) 'Inventaire module PowerShell divergent de son arbre.'
         Write-Fixture '.venv/Scripts/pip.exe' 'pip shim fixture'
+        $nestedPipRecord.version = '0.0.0'
+        Write-Fixture '.tools/runtime/index.json' ($index | ConvertTo-Json -Depth 16)
+        $mismatchedPip = Resolve-CandidateTool -Name 'pip' -Command 'pip'
+        Assert-Condition ($mismatchedPip.status -eq 'runtime_error') "Resolver accepte deux vues divergentes du Runtime Snapshot Python: $($mismatchedPip | ConvertTo-Json -Compress -Depth 5)"
+        $nestedPipRecord.version = $nestedPipVersion
+        Write-Fixture '.tools/runtime/index.json' ($index | ConvertTo-Json -Depth 16)
         $indexedPip = Resolve-CandidateTool -Name 'pip' -Command 'pip'
         Assert-Condition ($indexedPip.status -eq 'available' -and $indexedPip.version -eq $pipVersion) 'Resolver ne consomme pas la version Python indexee.'
         $pipWheelRelativePath = $indexedPipRecord[0].provenance.artifact_path
@@ -544,6 +558,15 @@ try {
         Write-Fixture '.tools/runtime/index.json' ($index | ConvertTo-Json -Depth 8)
         $runtime = Get-DoctorRuntimePlatform -IndexPath $indexPath -PlatformId 'windows-x64'
         Assert-Condition ($runtime.python.version -eq '3.11.9' -and $runtime.python_packages[0].name -eq 'pip' -and $runtime.powershell_modules[0].version -eq '1.25.0') 'Inventaire Runtime Index non restitue par Doctor.'
+        $divergentIndex = Get-Content -LiteralPath $indexPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $divergentIndex.platforms.'windows-x64'.python.packages[0].version = '0.0.0'
+        Write-Fixture '.tools/runtime/index.json' ($divergentIndex | ConvertTo-Json -Depth 8)
+        $divergentRejected = $false
+        try { $null = Get-DoctorRuntimePlatform -IndexPath $indexPath -PlatformId 'windows-x64' }
+        catch { $divergentRejected = $_.Exception.Message -match 'divergents' }
+        Assert-Condition $divergentRejected 'Doctor accepte deux vues divergentes du Runtime Snapshot Python.'
+        $divergentIndex.platforms.'windows-x64'.python.packages[0].version = '26.2.1'
+        Write-Fixture '.tools/runtime/index.json' ($divergentIndex | ConvertTo-Json -Depth 8)
         $index.schema_version = 9
         Write-Fixture '.tools/runtime/index.json' ($index | ConvertTo-Json -Depth 8)
         $rejected = $false

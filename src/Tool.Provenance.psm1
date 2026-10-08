@@ -38,4 +38,27 @@ function Get-PythonWheelProvenanceError {
     if ($actualHash -ne $provenance.artifact_sha256) { return 'SHA-256 de la roue acquise divergent.' }
 }
 
-Export-ModuleMember -Function Get-ToolArtifactProvenanceError, Get-PythonWheelProvenanceError
+function Get-RuntimePythonInventoryError {
+    param([Parameter(Mandatory = $true)][pscustomobject]$Platform)
+    if (-not $Platform.python -or $Platform.python.packages -isnot [array] -or $Platform.python_packages -isnot [array]) { return 'Snapshot Python absent ou mal formé.' }
+    $inventories = @(@($Platform.python.packages), @($Platform.python_packages))
+    $maps = New-Object System.Collections.Generic.List[hashtable]
+    foreach ($inventory in $inventories) {
+        $packages = @{}
+        foreach ($record in $inventory) {
+            $name = [regex]::Replace([string]$record.name, '[-_.]+', '-').ToLowerInvariant()
+            if ([string]::IsNullOrWhiteSpace($name) -or [string]::IsNullOrWhiteSpace([string]$record.version)) { return 'Entrée package Python incomplète.' }
+            if ($packages.ContainsKey($name)) { return "Package Python dupliqué dans le snapshot: $name" }
+            $packages[$name] = [string]$record.version
+        }
+        $maps.Add($packages)
+    }
+    $names = @($maps[0].Keys + $maps[1].Keys | Sort-Object -Unique)
+    foreach ($name in $names) {
+        if (-not $maps[0].ContainsKey($name) -or -not $maps[1].ContainsKey($name) -or $maps[0][$name] -ne $maps[1][$name]) {
+            return "Inventaires python.packages/python_packages divergents: $name"
+        }
+    }
+}
+
+Export-ModuleMember -Function Get-ToolArtifactProvenanceError, Get-PythonWheelProvenanceError, Get-RuntimePythonInventoryError
