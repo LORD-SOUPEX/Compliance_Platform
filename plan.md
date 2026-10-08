@@ -236,7 +236,7 @@ non exécuté sur le contenu à cause de son cache invalide.
 | --- | --- | --- |
 | Discovery Engine | CLI externe, JSON v1, 13 technologies, preuves, racines, ambiguïtés et corpus synthétique étiqueté | Partiel: corpus réel, overrides, exclusion configurable, limites de lecture et racines mixtes non qualifiés |
 | Tool Bootstrap | Installation locale épinglée, vérification des téléchargements binaires, copie/indexation multiversion | Partiel: poste neuf/runner et autres plateformes non qualifiés |
-| Tool Runtime | Index v1, version active, chemin relatif, SHA-256 enregistré et statuts | Runtime d'installation Windows x64 qualifié; qualification produit expérimentale, paquets/modules hors index |
+| Tool Runtime | Index v1, binaires actifs, Python/packages verrouillés, PSScriptAnalyzer, hashes et statuts | Snapshot Windows x64 consommé par Doctor/Resolver; provenance roues et qualifications natives restantes ouvertes |
 | Capability Matrix | Capacités et candidats par technologie, disponibilités et motifs OS + architecture | Profils du catalogue; disponibilité fondée sur présence, alternatives et exécution native non qualifiées |
 | Tool Resolver | Sélection des candidats disponibles, déduplication par commande au sein d'une technologie, refus des ambiguïtés | Partiel: sélection descriptive de tous les candidats disponibles, sans pilotage Quick/Full ni déduplication globale |
 | Compliance Engine | Execution Plan v1, DAG, budgets, executeur borne, resultats, findings et verdict | Phase 4 v1 terminee; sandbox et qualification consommateurs suivis en Phase 8 |
@@ -1175,19 +1175,21 @@ les capacités et outils réellement nécessaires à chaque repository analysé.
 - [x] Corriger le cache/install pre-commit et terminer le bootstrap Windows x64;
   le marqueur `qualified` est atteint en fin d'installation. La qualification
   sur poste neuf et la securite du runtime restent distinctes et ouvertes.
-- [ ] Gérer les versions des dépendances Python et modules PowerShell dans le
-  même index versionné du runtime.
+- [x] Indexer le Python de base, le hash du venv, les 154 versions installées,
+  le hash du lock et PSScriptAnalyzer avec hash de manifeste/arbre; Bootstrap,
+  Doctor et Resolver consomment le même snapshot.
 - [ ] Qualifier les binaires Windows ARM64, Linux x64/ARM64 et macOS x64/ARM64.
 - [x] Vérifier les sommes des téléchargements binaires, comparer la copie runtime
   à sa source et interrompre le bootstrap sur erreur d'installation.
-- [ ] Completer la provenance des binaires reutilises et qualifier l'integrite
-  des modules/paquets et les garanties de gestion d'echec par artefact.
+- [ ] Compléter la provenance externe des binaires préinstallés et des roues Python;
+  les hashes locaux et snapshots ne prouvent pas à eux seuls leur origine éditeur.
 - [x] Recalculer SHA-256 a la resolution et avant execution des binaires indexes,
   y compris les copies historiques; refuser empreinte absente, alteration,
   plateforme non qualifiee et schema invalide, avec regression negative.
-- [ ] Distinguer présence de commande et exécution réellement supportée, résoudre
-  les divergences Doctor/bootstrap sur Python et Terragrunt et qualifier les
-  commandes natives au-dela du refus Ansible/Molecule Windows maintenant teste.
+- [x] Aligner Doctor, Bootstrap et Resolver sur le snapshot Python/modules, le lock,
+  les hashes et les versions indexées.
+- [ ] Qualifier les commandes résolues en exécution native; disponibilité par
+  présence ou inventaire ne prouve pas le fonctionnement des contrôles.
 - [x] Gerer les alternatives explicites avec priorite du profil sans retirer
   d'outil complementaire ni modifier les controles executes; fixtures validees.
 - [x] Exposer compteurs de candidats, commandes retenues, reutilisations,

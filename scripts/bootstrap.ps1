@@ -221,6 +221,112 @@ function Register-ToolRuntimeEntry {
     Write-Status PASS "$ToolName $Version enregistré et vérifié dans Tool Runtime ($PlatformId)."
 }
 
+function Get-DirectorySha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { throw "Repertoire runtime absent: $Path" }
+    $root = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    $entries = New-Object System.Collections.Generic.List[string]
+    foreach ($file in Get-ChildItem -LiteralPath $Path -File -Recurse | Sort-Object FullName) {
+        $relativePath = $file.FullName.Substring($root.Length).Replace('\', '/')
+        $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        $entries.Add("$relativePath $hash`n")
+    }
+    if ($entries.Count -eq 0) { throw "Repertoire runtime vide: $Path" }
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($entries -join ''))
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($algorithm.ComputeHash($bytes)).Replace('-', '').ToLowerInvariant() }
+    finally { $algorithm.Dispose() }
+}
+
+function Register-ToolRuntimeInventory {
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory = $true)][string]$RuntimeRoot,
+        [Parameter(Mandatory = $true)][string]$PlatformId,
+        [Parameter(Mandatory = $true)][string]$PythonExecutable,
+        [Parameter(Mandatory = $true)][string]$PythonVersion,
+        [Parameter(Mandatory = $true)][string]$PythonSource,
+        [Parameter(Mandatory = $true)][string]$VenvPython,
+        [Parameter(Mandatory = $true)][string]$RequirementsLockPath,
+        [Parameter(Mandatory = $true)][string]$ModuleName,
+        [Parameter(Mandatory = $true)][string]$ModuleVersion,
+        [Parameter(Mandatory = $true)][string]$ModulePath,
+        [Parameter(Mandatory = $true)][string]$ModuleRelativePath,
+        [Parameter(Mandatory = $true)][string]$ModuleSource
+    )
+    $lockedPackages = @{}
+    foreach ($line in Get-Content -LiteralPath $RequirementsLockPath -Encoding UTF8) {
+        $match = [regex]::Match($line.Trim(), '^(?<name>[A-Za-z0-9][A-Za-z0-9._-]*)==(?<version>[A-Za-z0-9][A-Za-z0-9.!+_-]*)$')
+        if (-not $match.Success) { continue }
+        $name = [regex]::Replace($match.Groups['name'].Value, '[-_.]+', '-').ToLowerInvariant()
+        if ($lockedPackages.ContainsKey($name)) { throw "Package duplique dans le lock Python: $name" }
+        $lockedPackages[$name] = $match.Groups['version'].Value
+    }
+    if ($lockedPackages.Count -eq 0) { throw 'Aucun package epingle dans le lock Python.' }
+
+    $installedOutput = & $VenvPython -m pip list --format=json
+    if ($LASTEXITCODE -ne 0) { throw 'Impossible de lire les packages Python installes.' }
+    $installedPackages = ConvertFrom-Json -InputObject ($installedOutput -join "`n")
+    $installedVersions = @{}
+    foreach ($package in $installedPackages) {
+        $name = [regex]::Replace([string]$package.name, '[-_.]+', '-').ToLowerInvariant()
+        $installedVersions[$name] = [string]$package.version
+    }
+    $packageRecords = @($lockedPackages.Keys | Sort-Object | ForEach-Object {
+        $name = $_
+        if (-not $installedVersions.ContainsKey($name) -or $installedVersions[$name] -ne $lockedPackages[$name]) {
+            throw "Version Python installee divergente du lock: $name"
+        }
+        [pscustomobject]@{ name = $name; version = $lockedPackages[$name] }
+    })
+    $moduleManifest = Join-Path $ModulePath "$ModuleName.psd1"
+    if (-not (Test-Path -LiteralPath $moduleManifest -PathType Leaf)) { throw "Manifeste PowerShell absent: $moduleManifest" }
+
+    $indexPath = Join-Path $RuntimeRoot 'index.json'
+    if (-not (Test-Path -LiteralPath $indexPath -PathType Leaf)) { throw 'Index Runtime absent pendant l enregistrement des dependances.' }
+    $index = Get-Content -LiteralPath $indexPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+    if ($index.schema_version -ne 1 -or -not $index.platforms) { throw 'Schema index Tool Runtime invalide.' }
+    $platformProperty = $index.platforms.PSObject.Properties[$PlatformId]
+    if (-not $platformProperty) { throw "Plateforme runtime absente de l index: $PlatformId" }
+    $pythonExecutableFullPath = [IO.Path]::GetFullPath($PythonExecutable)
+    $venvPythonFullPath = [IO.Path]::GetFullPath($VenvPython)
+    $pythonRecord = [pscustomobject]@{
+        version = $PythonVersion
+        source = $PythonSource
+        executable = $pythonExecutableFullPath
+        executable_sha256 = (Get-FileHash -LiteralPath $pythonExecutableFullPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        environment = '.venv'
+        environment_executable_sha256 = (Get-FileHash -LiteralPath $venvPythonFullPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        dependency_lock = 'requirements-dev.lock'
+        dependency_lock_sha256 = (Get-FileHash -LiteralPath $RequirementsLockPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        packages = $packageRecords
+    }
+    $moduleRecord = [pscustomobject]@{
+        name = $ModuleName
+        version = $ModuleVersion
+        path = $ModuleRelativePath.Replace('\', '/')
+        source = $ModuleSource
+        manifest_sha256 = (Get-FileHash -LiteralPath $moduleManifest -Algorithm SHA256).Hash.ToLowerInvariant()
+        tree_sha256 = Get-DirectorySha256 -Path $ModulePath
+    }
+    if ($PSCmdlet.ShouldProcess($indexPath, 'Enregistrer Python, packages et modules PowerShell')) {
+        $platformData = $platformProperty.Value
+        $platformData | Add-Member -MemberType NoteProperty -Name python -Value $pythonRecord -Force
+        $platformData | Add-Member -MemberType NoteProperty -Name python_packages -Value $packageRecords -Force
+        $platformData | Add-Member -MemberType NoteProperty -Name powershell_modules -Value @($moduleRecord) -Force
+        $temporaryIndex = Join-Path $RuntimeRoot ("runtime-inventory.$([guid]::NewGuid().ToString('N')).tmp")
+        $backupIndex = Join-Path $RuntimeRoot ("runtime-inventory.$([guid]::NewGuid().ToString('N')).bak")
+        try {
+            $index | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $temporaryIndex -Encoding UTF8
+            [IO.File]::Replace($temporaryIndex, $indexPath, $backupIndex)
+        } finally {
+            if (Test-Path -LiteralPath $temporaryIndex -PathType Leaf) { Remove-Item -LiteralPath $temporaryIndex -Force }
+            if (Test-Path -LiteralPath $backupIndex -PathType Leaf) { Remove-Item -LiteralPath $backupIndex -Force }
+        }
+    }
+    Write-Status PASS "Python $PythonVersion ($($packageRecords.Count) packages) et module $ModuleName $ModuleVersion enregistres dans Tool Runtime."
+}
+
 function Update-ToolRuntimePlatformStatus {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
@@ -380,18 +486,18 @@ function Install-PSScriptAnalyzer {
     $version = Get-ManifestValue -Block $toolBlock -Name 'version' -Indent 4
     $modulePath = Join-Path $moduleRoot "PSScriptAnalyzer\$version"
     $moduleManifest = Join-Path $modulePath 'PSScriptAnalyzer.psd1'
-    if ((Test-Path $moduleManifest -PathType Leaf) -and -not $Force) {
-        $env:PSModulePath = "$moduleRoot;$env:PSModulePath"
-        Import-Module $moduleManifest -Force -ErrorAction Stop
-        Write-Status PASS "PSScriptAnalyzer $version disponible localement."
-        return
-    }
-
-    if ($Offline) { throw "Mode hors ligne : installez d’abord PSScriptAnalyzer $version avec une connexion autorisée." }
-    Save-Module -Name PSScriptAnalyzer -RequiredVersion $version -Repository PSGallery -Path $moduleRoot -Force -ErrorAction Stop
     $env:PSModulePath = "$moduleRoot;$env:PSModulePath"
-    Import-Module $moduleManifest -Force -ErrorAction Stop
-    if ((Get-Module PSScriptAnalyzer).Version.ToString() -ne $version) { throw 'Version PSScriptAnalyzer importée différente du verrou.' }
+    if (-not (Test-Path -LiteralPath $moduleManifest -PathType Leaf) -or $Force) {
+        if ($Offline) { throw "Mode hors ligne : installez d'abord PSScriptAnalyzer $version avec une connexion autorisee." }
+        Save-Module -Name PSScriptAnalyzer -RequiredVersion $version -Repository PSGallery -Path $moduleRoot -Force -ErrorAction Stop
+    }
+    if (-not (Test-Path -LiteralPath $moduleManifest -PathType Leaf)) { throw "Manifeste PSScriptAnalyzer absent apres installation: $moduleManifest" }
+    $moduleData = Import-PowerShellDataFile -Path $moduleManifest
+    if ([string]$moduleData.ModuleVersion -ne $version) { throw "Version PSScriptAnalyzer differente du verrou: $($moduleData.ModuleVersion)" }
+    $availableModule = Get-Module -ListAvailable -Name PSScriptAnalyzer | Where-Object {
+        $_.Version.ToString() -eq $version -and [IO.Path]::GetFullPath($_.ModuleBase) -eq [IO.Path]::GetFullPath($modulePath)
+    } | Select-Object -First 1
+    if (-not $availableModule) { throw 'PSScriptAnalyzer local est absent du PSModulePath.' }
     Write-Status PASS "PSScriptAnalyzer $version enregistré dans .tools/powershell-modules."
 }
 
@@ -518,7 +624,15 @@ try {
         $lockCheck = Join-Path $repoRoot 'scripts/update-lock.ps1'
         Invoke-CheckedCommand -FilePath (Join-Path $PSHOME 'powershell.exe') -Arguments @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $lockCheck, '-Check') -Description 'validation du lock Python'
     }
-    Write-Status INFO "PSScriptAnalyzer : $((Get-Module PSScriptAnalyzer).Version)"
+    $powershellBlock = Get-ManifestBlock -Text $script:Manifest -Name 'powershell'
+    $analyzerBlock = Get-ToolBlock -Section $powershellBlock -Name 'psscriptanalyzer'
+    $analyzerVersion = Get-ManifestValue -Block $analyzerBlock -Name 'version' -Indent 4
+    $analyzerSource = Get-ManifestValue -Block $analyzerBlock -Name 'source' -Indent 4
+    $analyzerRelativePath = ".tools/powershell-modules/PSScriptAnalyzer/$analyzerVersion"
+    $analyzerModule = Get-Module -ListAvailable -Name PSScriptAnalyzer | Where-Object { $_.Version.ToString() -eq $analyzerVersion } | Select-Object -First 1
+    if (-not $analyzerModule) { throw 'PSScriptAnalyzer local absent apres validation.' }
+    Write-Status INFO "PSScriptAnalyzer : $($analyzerModule.Version)"
+    Register-ToolRuntimeInventory -RuntimeRoot $runtimeRoot -PlatformId $script:RuntimePlatform -PythonExecutable $pythonRuntime.Details.executable -PythonVersion $pythonRuntime.Details.version -PythonSource $pythonRuntime.Details.executable -VenvPython $venvPython -RequirementsLockPath $dependencyLock -ModuleName 'PSScriptAnalyzer' -ModuleVersion $analyzerVersion -ModulePath (Join-Path $moduleRoot "PSScriptAnalyzer\$analyzerVersion") -ModuleRelativePath $analyzerRelativePath -ModuleSource $analyzerSource
     Update-ToolRuntimePlatformStatus -RuntimeRoot $runtimeRoot -PlatformId $script:RuntimePlatform -Status 'qualified'
     Write-Status PASS 'Bootstrap local terminé; PATH système et installations globales inchangés.'
     exit 0

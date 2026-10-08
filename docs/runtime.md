@@ -18,9 +18,11 @@ L'index conserve pour chaque outil son nom, commande, version, chemin relatif, e
 
 Il recalcule maintenant SHA-256 a la resolution; une empreinte absente/invalide ou differente produit `integrity_error`. L'executeur verifie aussi les binaires sous `.tools/runtime` et leurs copies `.tools/bin` avant demarrage, et refuse index absent/invalide, plateforme non qualifiee ou outil non actif. Les outils hors de ces emplacements restent hors de cette garantie. La commande de version n'est pas encore reexecutee a chaque resolution.
 
-## Outils hors index
+## Packages et modules indexés
 
-Python et les paquets verrouillés restent dans `.venv`; PSScriptAnalyzer reste dans `.tools/powershell-modules`. Le resolver les recherche dans ces emplacements et les marque comme gérés par la plateforme, mais le bootstrap ne les enregistre pas encore dans l'index central. Certains outils peuvent aussi être trouvés dans le `PATH`; ces résultats ne sont pas gérés par le runtime.
+L'entrée `windows-x64` contient le Python de base sélectionné, le hash de son exécutable, le hash du `python.exe` de `.venv`, le hash de `requirements-dev.lock` et les 154 noms/versions vérifiés à l'installation. PSScriptAnalyzer contient version, source déclarée, chemin relatif, hash du manifeste et hash déterministe de son arbre. Doctor compare ces snapshots au poste; Resolver vérifie le lock et l'arbre avant de déclarer ces capacités disponibles. Les packages Python ne sont pas copiés individuellement dans `.tools/runtime` et leurs roues n'ont pas de hash indexé: provenance éditeur, wheel hashes et inventaire par plateforme restent incomplets.
+
+Certains outils trouvés uniquement dans le `PATH` ne sont pas gérés par le Runtime Index et restent `runtime_managed: false`.
 
 ## État de qualification
 

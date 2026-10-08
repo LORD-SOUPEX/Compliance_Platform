@@ -467,6 +467,43 @@ function Get-ArtifactIntegrityError {
     } catch { return "Verification d integrite impossible: $($_.Exception.Message)" }
 }
 
+function Get-ToolRuntimeDirectorySha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return $null }
+    $root = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    $entries = New-Object System.Collections.Generic.List[string]
+    foreach ($file in Get-ChildItem -LiteralPath $Path -File -Recurse | Sort-Object FullName) {
+        $relativePath = $file.FullName.Substring($root.Length).Replace('\', '/')
+        $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        $entries.Add("$relativePath $hash`n")
+    }
+    if ($entries.Count -eq 0) { return $null }
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($entries -join ''))
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($algorithm.ComputeHash($bytes)).Replace('-', '').ToLowerInvariant() }
+    finally { $algorithm.Dispose() }
+}
+
+function Get-IndexedPythonPackageName {
+    param([Parameter(Mandatory = $true)][string]$Command)
+    $distribution = if ($Command -eq 'ansible') { 'ansible-core' } else { $Command }
+    return [regex]::Replace($distribution, '[-_.]+', '-').ToLowerInvariant()
+}
+
+function Get-IndexedModuleIntegrityError {
+    param([string]$PlatformRoot, [pscustomobject]$Record)
+    if ([string]::IsNullOrWhiteSpace($Record.path) -or [IO.Path]::IsPathRooted($Record.path)) { return 'Chemin du module PowerShell non relatif.' }
+    $modulePath = [IO.Path]::GetFullPath((Join-Path $PlatformRoot $Record.path))
+    $platformPrefix = [IO.Path]::GetFullPath($PlatformRoot).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    if (-not $modulePath.StartsWith($platformPrefix, [StringComparison]::OrdinalIgnoreCase)) { return 'Chemin du module PowerShell sortant de la plateforme.' }
+    $manifestPath = Join-Path $modulePath "$($Record.name).psd1"
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return 'Manifeste du module PowerShell absent.' }
+    $manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($manifestHash -ne $Record.manifest_sha256) { return 'Manifeste du module PowerShell altere.' }
+    $treeHash = Get-ToolRuntimeDirectorySha256 -Path $modulePath
+    if (-not $treeHash -or $treeHash -ne $Record.tree_sha256) { return 'Arbre du module PowerShell altere.' }
+}
+
 function Get-ExecutionIntegrityError {
     param([string]$ArtifactPath)
     $artifactFullPath = [IO.Path]::GetFullPath($ArtifactPath)
@@ -502,6 +539,10 @@ function Resolve-CandidateTool {
     $runtimeRoot = Split-Path -Parent (Split-Path -Parent $toolRoot)
     $platform = Get-ExecutionPlatform
     $runtimeIndex = Get-ToolRuntimeIndex
+    $platformRecord = $null
+    if ($runtimeIndex -and $runtimeIndex.PSObject.Properties.Name -notcontains 'error') {
+        $platformRecord = $runtimeIndex.data.platforms.PSObject.Properties[$platform.id]
+    }
     if ($runtimeIndex -and $runtimeIndex.PSObject.Properties.Name -contains 'error') {
         return [pscustomobject]@{ name = $Name; command = $Command; status = 'runtime_error'; source = $null; version = $null; runtime_managed = $true; platform = $platform.id; reason = "Index Tool Runtime invalide: $($runtimeIndex.error)" }
     }
@@ -551,10 +592,47 @@ function Resolve-CandidateTool {
     )
     foreach ($candidatePath in $venvCandidates) {
         if (Test-Path -LiteralPath $candidatePath -PathType Leaf) {
+            if ($platformRecord -and $platformRecord.Value.PSObject.Properties.Name -contains 'python_packages') {
+                if ($platformRecord.Value.status -ne 'qualified') {
+                    return [pscustomobject]@{ name = $Name; command = $Command; status = 'incompatible'; source = $candidatePath; version = $null; runtime_managed = $true; platform = $platform.id; reason = 'Environnement Python present dans un runtime non qualifie.' }
+                }
+                $packageName = Get-IndexedPythonPackageName -Command $Command
+                $packageRecords = @($platformRecord.Value.python_packages | Where-Object name -eq $packageName)
+                $pythonRecord = $platformRecord.Value.python
+                if ($packageRecords.Count -ne 1 -or -not $pythonRecord) {
+                    return [pscustomobject]@{ name = $Name; command = $Command; status = 'runtime_error'; source = $candidatePath; version = $null; runtime_managed = $true; platform = $platform.id; reason = "Package absent ou duplique dans l'inventaire Python: $packageName." }
+                }
+                $lockPath = Join-Path $runtimeRoot 'requirements-dev.lock'
+                if (-not (Test-Path -LiteralPath $lockPath -PathType Leaf) -or (Get-FileHash -LiteralPath $lockPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $pythonRecord.dependency_lock_sha256) {
+                    return [pscustomobject]@{ name = $Name; command = $Command; status = 'runtime_error'; source = $candidatePath; version = $packageRecords[0].version; runtime_managed = $true; platform = $platform.id; reason = 'Le lock Python ne correspond pas a l inventaire Runtime.' }
+                }
+                return [pscustomobject]@{ name = $Name; command = $Command; status = 'available'; source = $candidatePath; version = $packageRecords[0].version; runtime_managed = $true; platform = $platform.id; reason = "Version Python epinglee dans Tool Runtime: $packageName." }
+            }
+            if ($platformRecord -and $platformRecord.Value.status -eq 'qualified') {
+                return [pscustomobject]@{ name = $Name; command = $Command; status = 'runtime_error'; source = $candidatePath; version = $null; runtime_managed = $true; platform = $platform.id; reason = 'Inventaire Python absent du Runtime Index.' }
+            }
             return [pscustomobject]@{ name = $Name; command = $Command; status = 'available'; source = $candidatePath; version = $null; runtime_managed = $true; platform = $platform.id; reason = "Outil trouve dans l'environnement Python gere par Compliance_Platform." }
         }
     }
     if ($Command -eq 'Invoke-ScriptAnalyzer') {
+        if ($platformRecord -and $platformRecord.Value.PSObject.Properties.Name -contains 'powershell_modules') {
+            if ($platformRecord.Value.status -ne 'qualified') {
+                return [pscustomobject]@{ name = $Name; command = $Command; status = 'incompatible'; source = $null; version = $null; runtime_managed = $true; platform = $platform.id; reason = 'Modules PowerShell presents dans un runtime non qualifie.' }
+            }
+            $moduleRecords = @($platformRecord.Value.powershell_modules | Where-Object name -eq 'PSScriptAnalyzer')
+            if ($moduleRecords.Count -ne 1) {
+                return [pscustomobject]@{ name = $Name; command = $Command; status = 'runtime_error'; source = $null; version = $null; runtime_managed = $true; platform = $platform.id; reason = 'PSScriptAnalyzer absent ou duplique dans le Runtime Index.' }
+            }
+            $moduleRecord = $moduleRecords[0]
+            $moduleIntegrityError = Get-IndexedModuleIntegrityError -PlatformRoot $runtimeRoot -Record $moduleRecord
+            if ($moduleIntegrityError) {
+                return [pscustomobject]@{ name = $Name; command = $Command; status = 'integrity_error'; source = (Join-Path $runtimeRoot $moduleRecord.path); version = $moduleRecord.version; runtime_managed = $true; platform = $platform.id; reason = $moduleIntegrityError }
+            }
+            return [pscustomobject]@{ name = $Name; command = $Command; status = 'available'; source = (Join-Path (Join-Path $runtimeRoot $moduleRecord.path) 'PSScriptAnalyzer.psd1'); version = $moduleRecord.version; runtime_managed = $true; platform = $platform.id; reason = 'Module PSScriptAnalyzer indexe et integre.' }
+        }
+        if ($platformRecord -and $platformRecord.Value.status -eq 'qualified') {
+            return [pscustomobject]@{ name = $Name; command = $Command; status = 'runtime_error'; source = $null; version = $null; runtime_managed = $true; platform = $platform.id; reason = 'Inventaire des modules PowerShell absent du Runtime Index.' }
+        }
         $moduleRoot = Join-Path $runtimeRoot '.tools\powershell-modules\PSScriptAnalyzer'
         $moduleManifest = Get-ChildItem -LiteralPath $moduleRoot -Filter 'PSScriptAnalyzer.psd1' -File -Recurse -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1
         if ($moduleManifest) {
@@ -668,10 +746,16 @@ function Resolve-CapabilityTool {
                 foreach ($candidate in $availableCandidates) {
                     $selectedAssignments++
                     if (-not $selectedByCommand.ContainsKey($candidate.command)) {
+                        $candidateVersion = if ($candidate.PSObject.Properties.Name -contains 'version') { $candidate.version } else { $null }
+                        $candidateRuntimeManaged = if ($candidate.PSObject.Properties.Name -contains 'runtime_managed') { [bool]$candidate.runtime_managed } else { $false }
+                        $candidatePlatform = if ($candidate.PSObject.Properties.Name -contains 'platform') { $candidate.platform } else { $technology.platform }
                         $selectedByCommand[$candidate.command] = [pscustomobject]@{
                             name = $candidate.name
                             command = $candidate.command
                             source = $candidate.source
+                            version = $candidateVersion
+                            runtime_managed = $candidateRuntimeManaged
+                            platform = $candidatePlatform
                             capabilities = New-Object System.Collections.Generic.List[string]
                         }
                     }
@@ -692,6 +776,9 @@ function Resolve-CapabilityTool {
                 name = $_.name
                 command = $_.command
                 source = $_.source
+                version = $_.version
+                runtime_managed = $_.runtime_managed
+                platform = $_.platform
                 capabilities = @($_.capabilities.ToArray())
             }
         })

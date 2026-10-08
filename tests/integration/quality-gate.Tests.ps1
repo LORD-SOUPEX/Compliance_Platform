@@ -367,8 +367,15 @@ try {
         $bootstrapTokens = $null
         $bootstrapErrors = $null
         $bootstrapAst = [Management.Automation.Language.Parser]::ParseFile($bootstrapPath, [ref]$bootstrapTokens, [ref]$bootstrapErrors)
-        $runtimeFunctions = @($bootstrapAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -in @('Register-ToolRuntimeEntry', 'Update-ToolRuntimePlatformStatus', 'Get-VerifiedDownload', 'Write-Status') }, $false))
+        $runtimeFunctions = @($bootstrapAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -in @('Register-ToolRuntimeEntry', 'Register-ToolRuntimeInventory', 'Get-DirectorySha256', 'Update-ToolRuntimePlatformStatus', 'Get-VerifiedDownload', 'Get-ManifestBlock', 'Get-ToolBlock', 'Get-ManifestValue', 'Install-PSScriptAnalyzer', 'Write-Status') }, $false))
         foreach ($definition in $runtimeFunctions) { . ([scriptblock]::Create($definition.Extent.Text)) }
+        $script:Manifest = [IO.File]::ReadAllText((Join-Path $originalRoot '.config/tool-versions.yml'), [Text.Encoding]::UTF8)
+        $moduleRoot = Join-Path $originalRoot '.tools/powershell-modules'
+        $script:Force = $false
+        Install-PSScriptAnalyzer
+        Install-PSScriptAnalyzer
+        $availableAnalyzer = Get-Module -ListAvailable -Name PSScriptAnalyzer | Where-Object { $_.Version.ToString() -eq '1.25.0' -and [IO.Path]::GetFullPath($_.ModuleBase) -eq [IO.Path]::GetFullPath((Join-Path $moduleRoot 'PSScriptAnalyzer/1.25.0')) } | Select-Object -First 1
+        Assert-Condition ($null -ne $availableAnalyzer) 'Validation idempotente de PSScriptAnalyzer local en echec.'
         Write-Fixture 'source-ruff-1.1.exe' 'locked-binary-old'
         Write-Fixture 'source-ruff-1.2.exe' 'locked-binary-new'
         Write-Fixture 'verified/release.zip' 'published-archive'
@@ -403,8 +410,60 @@ try {
         $index = Get-Content (Join-Path $runtimeRoot 'index.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         Assert-Condition ($index.platforms.'windows-x64'.status -eq 'experimental') 'Une mise à jour n''a pas invalidé la qualification précédente.'
         Update-ToolRuntimePlatformStatus -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -Status 'qualified'
+        $python = Join-Path $originalRoot '.venv/Scripts/python.exe'
+        $pythonInfo = ConvertFrom-Json -InputObject ((& $python -c "import json,sys; print(json.dumps({'version':sys.version.split()[0]}))") -join "`n")
+        $pipList = ConvertFrom-Json -InputObject ((& $python -m pip list --format=json) -join "`n")
+        $pipVersion = [string](@($pipList | Where-Object name -eq 'pip')[0].version)
+        Copy-Item (Join-Path $originalRoot 'requirements-dev.lock') (Join-Path $repoRoot 'requirements-dev.lock')
+        $moduleRoot = Join-Path $repoRoot '.tools/powershell-modules/PSScriptAnalyzer/1.25.0'
+        Write-Fixture '.tools/powershell-modules/PSScriptAnalyzer/1.25.0/PSScriptAnalyzer.psd1' "@{ ModuleVersion = '1.25.0' }`n"
+        Write-Fixture '.tools/powershell-modules/PSScriptAnalyzer/1.25.0/PSScriptAnalyzer.psm1' "function Invoke-ScriptAnalyzer {}`n"
+        Register-ToolRuntimeInventory -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -PythonExecutable $python -PythonVersion $pythonInfo.version -PythonSource $python -VenvPython $python -RequirementsLockPath (Join-Path $repoRoot 'requirements-dev.lock') -ModuleName 'PSScriptAnalyzer' -ModuleVersion '1.25.0' -ModulePath $moduleRoot -ModuleRelativePath '.tools/powershell-modules/PSScriptAnalyzer/1.25.0' -ModuleSource 'fixture://psgallery/PSScriptAnalyzer/1.25.0'
+        $index = Get-Content (Join-Path $runtimeRoot 'index.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $platformData = $index.platforms.'windows-x64'
+        $indexedPipRecord = @($platformData.python.packages | Where-Object name -eq 'pip')
+        Assert-Condition ($platformData.python.version -eq $pythonInfo.version -and $indexedPipRecord.Count -eq 1 -and $indexedPipRecord[0].version -eq $pipVersion) 'Inventaire Python divergent du lock.'
+        Assert-Condition ($platformData.powershell_modules[0].version -eq '1.25.0' -and $platformData.powershell_modules[0].tree_sha256 -eq (Get-DirectorySha256 -Path $moduleRoot)) 'Inventaire module PowerShell divergent de son arbre.'
+        Write-Fixture '.venv/Scripts/pip.exe' 'pip shim fixture'
+        $indexedPip = Resolve-CandidateTool -Name 'pip' -Command 'pip'
+        Assert-Condition ($indexedPip.status -eq 'available' -and $indexedPip.version -eq $pipVersion) 'Resolver ne consomme pas la version Python indexee.'
+        $lockText = [IO.File]::ReadAllText((Join-Path $repoRoot 'requirements-dev.lock'), [Text.Encoding]::UTF8)
+        Write-Fixture 'requirements-dev.lock' ($lockText + "`n# runtime lock tampered`n")
+        Assert-Condition ((Resolve-CandidateTool -Name 'pip' -Command 'pip').status -eq 'runtime_error') 'Lock Python modifie accepte par Resolver.'
+        Copy-Item (Join-Path $originalRoot 'requirements-dev.lock') (Join-Path $repoRoot 'requirements-dev.lock') -Force
+        $indexedAnalyzer = Resolve-CandidateTool -Name 'PSScriptAnalyzer' -Command 'Invoke-ScriptAnalyzer'
+        Assert-Condition ($indexedAnalyzer.status -eq 'available' -and $indexedAnalyzer.version -eq '1.25.0') 'Resolver ne consomme pas le module PowerShell indexe.'
+        Write-Fixture '.tools/powershell-modules/PSScriptAnalyzer/1.25.0/PSScriptAnalyzer.psm1' 'tampered module'
+        Assert-Condition ((Resolve-CandidateTool -Name 'PSScriptAnalyzer' -Command 'Invoke-ScriptAnalyzer').status -eq 'integrity_error') 'Module PowerShell modifie accepte.'
+        Write-Fixture '.tools/powershell-modules/PSScriptAnalyzer/1.25.0/PSScriptAnalyzer.psm1' "function Invoke-ScriptAnalyzer {}`n"
+        Write-Fixture 'requirements-lock-fixture.txt' 'pip==0.0.0'
+        $inventoryMismatchRejected = $false
+        try { Register-ToolRuntimeInventory -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -PythonExecutable $python -PythonVersion $pythonInfo.version -PythonSource $python -VenvPython $python -RequirementsLockPath (Join-Path $repoRoot 'requirements-lock-fixture.txt') -ModuleName 'PSScriptAnalyzer' -ModuleVersion '1.25.0' -ModulePath $moduleRoot -ModuleRelativePath '.tools/powershell-modules/PSScriptAnalyzer/1.25.0' -ModuleSource 'fixture://psgallery/PSScriptAnalyzer/1.25.0' }
+        catch { $inventoryMismatchRejected = $_.Exception.Message -match 'Version Python installee divergente' }
+        Assert-Condition $inventoryMismatchRejected 'Version Python divergente acceptee dans Runtime Index.'
         $resolved = Resolve-CandidateTool -Name 'ruff' -Command 'ruff'
         Assert-Condition ($resolved.runtime_managed -and $resolved.version -eq '1.2.0' -and $resolved.status -eq 'available') 'Le Resolver n''utilise pas la version runtime active.'
+    }
+    Invoke-TestCase 'Doctor lit l inventaire Python et modules du Runtime Index' {
+        $doctorPath = Join-Path $originalRoot 'scripts/doctor.ps1'
+        $doctorTokens = $null
+        $doctorErrors = $null
+        $doctorAst = [Management.Automation.Language.Parser]::ParseFile($doctorPath, [ref]$doctorTokens, [ref]$doctorErrors)
+        $definition = $doctorAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-DoctorRuntimePlatform' }, $false)
+        if (-not $definition) { throw 'Doctor Runtime Index function is absent.' }
+        . ([scriptblock]::Create($definition.Extent.Text))
+        $indexPath = Join-Path $repoRoot '.tools/runtime/index.json'
+        $python = [pscustomobject]@{ version = '3.11.9'; source = 'fixture-python'; executable = 'python.exe'; executable_sha256 = ('a' * 64); environment = '.venv'; environment_executable_sha256 = ('b' * 64); dependency_lock = 'requirements-dev.lock'; dependency_lock_sha256 = ('c' * 64); packages = @([pscustomobject]@{ name = 'pip'; version = '26.2.1' }) }
+        $platform = [pscustomobject]@{ status = 'qualified'; tools = @(); python = $python; python_packages = @($python.packages); powershell_modules = @([pscustomobject]@{ name = 'PSScriptAnalyzer'; version = '1.25.0'; path = '.tools/powershell-modules/PSScriptAnalyzer/1.25.0'; source = 'fixture'; manifest_sha256 = ('d' * 64); tree_sha256 = ('e' * 64) }) }
+        $index = [pscustomobject]@{ schema_version = 1; platforms = [pscustomobject]@{ 'windows-x64' = $platform } }
+        Write-Fixture '.tools/runtime/index.json' ($index | ConvertTo-Json -Depth 8)
+        $runtime = Get-DoctorRuntimePlatform -IndexPath $indexPath -PlatformId 'windows-x64'
+        Assert-Condition ($runtime.python.version -eq '3.11.9' -and $runtime.python_packages[0].name -eq 'pip' -and $runtime.powershell_modules[0].version -eq '1.25.0') 'Inventaire Runtime Index non restitue par Doctor.'
+        $index.schema_version = 9
+        Write-Fixture '.tools/runtime/index.json' ($index | ConvertTo-Json -Depth 8)
+        $rejected = $false
+        try { $null = Get-DoctorRuntimePlatform -IndexPath $indexPath -PlatformId 'windows-x64' } catch { $rejected = $_.Exception.Message -match 'schema invalide' }
+        Assert-Condition $rejected 'Doctor accepte un Runtime Index de schema inconnu.'
     }
     Invoke-TestCase 'Cache pre-commit deplace reconstruit sans toucher aux outils' {
         $bootstrapTokens = $null
@@ -463,6 +522,9 @@ try {
         $linting = $powerShellMatrix.capabilities | Where-Object name -eq 'linting'
         Assert-Condition ($powerShellMatrix.technology_status -eq 'detected' -and $powerShellMatrix.required_capabilities -contains 'linting') 'Capacité PowerShell requise absente de la matrice.'
         Assert-Condition ($linting.candidate_tools[0].name -eq 'PSScriptAnalyzer' -and $linting.candidate_tools[0].status -in @('available', 'not_installed') -and $linting.reasons.Count -gt 0) 'Candidat, disponibilité ou motif manquant.'
+        $powerShellResolution = $result.tool_resolution | Where-Object technology -eq 'powershell'
+        $resolvedAnalyzer = $powerShellResolution.selected_tools | Where-Object command -eq 'Invoke-ScriptAnalyzer'
+        Assert-Condition ($resolvedAnalyzer.version -eq '1.25.0' -and $resolvedAnalyzer.runtime_managed -and $resolvedAnalyzer.platform -eq 'windows-x64') 'Version/source runtime absentes de l outil resolu.'
         Assert-Condition ($powerShellMatrix.platform.os -eq 'windows' -and $powerShellMatrix.platform.architecture -ne 'unknown') 'Plateforme OS + architecture absente.'
         $absentAnsible = $result.capability_matrix | Where-Object technology -eq 'ansible'
         Assert-Condition ($absentAnsible.technology_status -eq 'absent' -and $absentAnsible.required_capabilities.Count -eq 0 -and $absentAnsible.capabilities[0].availability -eq 'not_applicable') 'Une technologie absente est déclarée requise ou disponible.'
