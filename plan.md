@@ -1181,8 +1181,10 @@ les capacités et outils réellement nécessaires à chaque repository analysé.
 - [ ] Qualifier les binaires Windows ARM64, Linux x64/ARM64 et macOS x64/ARM64.
 - [x] Vérifier les sommes des téléchargements binaires, comparer la copie runtime
   à sa source et interrompre le bootstrap sur erreur d'installation.
-- [ ] Compléter la provenance externe des binaires préinstallés et des roues Python;
-  les hashes locaux et snapshots ne prouvent pas à eux seuls leur origine éditeur.
+- [x] Compléter la provenance externe des binaires préinstallés et des roues Python;
+  le Runtime Index conserve éditeur/source, versions, URLs, hashes, dates et
+  méthode de validation; la provenance historique d'installation de `.venv`
+  reste distincte des roues acquises et vérifiées.
 - [x] Recalculer SHA-256 a la resolution et avant execution des binaires indexes,
   y compris les copies historiques; refuser empreinte absente, alteration,
   plateforme non qualifiee et schema invalide, avec regression negative.

@@ -27,6 +27,7 @@ Import-Module (Join-Path $platformRoot 'src/Control.Catalog.psm1') -Force -Error
 $script:ControlCatalog = Import-ControlCatalog -Path (Join-Path $platformRoot '.config/control-catalog.json')
 Import-Module (Join-Path $platformRoot 'src/Platform.Support.psm1') -Force -ErrorAction Stop
 $script:PlatformSupportMatrix = Import-PlatformSupportMatrix -Path (Join-Path $platformRoot '.config/platform-support.json')
+Import-Module (Join-Path $platformRoot 'src/Tool.Provenance.psm1') -Force -ErrorAction Stop
 if ([string]::IsNullOrWhiteSpace($RepositoryPath)) {
     $repoRoot = $platformRoot
 } else {
@@ -622,6 +623,10 @@ function Resolve-CandidateTool {
                 if ($platformData.status -ne 'qualified' -or $toolRecord.status -ne 'qualified') {
                     return [pscustomobject]@{ name = $Name; command = $Command; status = 'incompatible'; source = $null; version = $toolRecord.version; runtime_managed = $true; platform = $platform.id; reason = "La plateforme ou l'outil n'est pas qualifie: $($platformData.status)/$($toolRecord.status)." }
                 }
+                $provenanceError = Get-ToolArtifactProvenanceError -Record $toolRecord
+                if ($provenanceError) {
+                    return [pscustomobject]@{ name = $Name; command = $Command; status = 'integrity_error'; source = $null; version = $toolRecord.version; runtime_managed = $true; platform = $platform.id; reason = $provenanceError }
+                }
                 if ([string]::IsNullOrWhiteSpace($toolRecord.path) -or [IO.Path]::IsPathRooted($toolRecord.path)) {
                     return [pscustomobject]@{ name = $Name; command = $Command; status = 'runtime_error'; source = $null; version = $toolRecord.version; runtime_managed = $true; platform = $platform.id; reason = "Le chemin de l'artefact runtime doit être relatif." }
                 }
@@ -664,6 +669,10 @@ function Resolve-CandidateTool {
                 $pythonRecord = $platformRecord.Value.python
                 if ($packageRecords.Count -ne 1 -or -not $pythonRecord) {
                     return [pscustomobject]@{ name = $Name; command = $Command; status = 'runtime_error'; source = $candidatePath; version = $null; runtime_managed = $true; platform = $platform.id; reason = "Package absent ou duplique dans l'inventaire Python: $packageName." }
+                }
+                $provenanceError = Get-PythonWheelProvenanceError -Record $packageRecords[0] -RepositoryRoot $runtimeRoot
+                if ($provenanceError) {
+                    return [pscustomobject]@{ name = $Name; command = $Command; status = 'integrity_error'; source = $candidatePath; version = $packageRecords[0].version; runtime_managed = $true; platform = $platform.id; reason = $provenanceError }
                 }
                 $lockPath = Join-Path $runtimeRoot 'requirements-dev.lock'
                 if (-not (Test-Path -LiteralPath $lockPath -PathType Leaf) -or (Get-FileHash -LiteralPath $lockPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $pythonRecord.dependency_lock_sha256) {

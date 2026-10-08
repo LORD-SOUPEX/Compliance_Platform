@@ -12,6 +12,7 @@ $toolsRoot = Join-Path $repoRoot '.tools'
 $runtimeIndexPath = Join-Path $toolsRoot 'runtime\index.json'
 $venvRoot = Join-Path $repoRoot '.venv'
 $venvPython = Join-Path $venvRoot 'Scripts\python.exe'
+Import-Module (Join-Path $repoRoot 'src/Tool.Provenance.psm1') -Force -ErrorAction Stop
 $script:Counts = @{ PASS = 0; FAIL = 0; WARN = 0; SKIP = 0; ERROR = 0 }
 $script:Results = New-Object System.Collections.Generic.List[object]
 if ($NoColor) { $env:NO_COLOR = '1' }
@@ -163,6 +164,9 @@ try {
         })
         if ($inventoryErrors.Count -eq 0) { Add-Status PASS 'Runtime Python packages' "$($runtimePlatform.python_packages.Count) versions conformes à l'index." }
         else { Add-Status FAIL 'Runtime Python packages' "Versions divergentes: $(($inventoryErrors | ForEach-Object { $_.name }) -join ', ')." }
+        $wheelProvenanceErrors = @($runtimePlatform.python_packages | Where-Object { Get-PythonWheelProvenanceError -Record $_ -RepositoryRoot $repoRoot })
+        if ($wheelProvenanceErrors.Count -eq 0) { Add-Status PASS 'Provenance des roues Python' "$($runtimePlatform.python_packages.Count) roues PyPI acquises et vérifiées." }
+        else { Add-Status ERROR 'Provenance des roues Python' "Provenance absente ou invalide: $(($wheelProvenanceErrors | ForEach-Object name) -join ', ')." }
     }
     $scriptsDirectory = Join-Path $venvRoot 'Scripts'
     foreach ($line in $requirements) {
@@ -236,10 +240,11 @@ try {
             $runtimeArtifact = Join-Path (Join-Path $toolsRoot 'runtime') $record.path
             $runtimeHash = if (Test-Path -LiteralPath $runtimeArtifact -PathType Leaf) { (Get-FileHash -LiteralPath $runtimeArtifact -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
             $copyHash = if (Test-Path -LiteralPath $path -PathType Leaf) { (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
-            $integrityValid = $record.status -eq 'qualified' -and $record.version -eq $tool.Version -and $runtimeHash -eq $record.sha256 -and $copyHash -eq $record.sha256
+            $provenanceError = Get-ToolArtifactProvenanceError -Record $record
+            $integrityValid = $record.status -eq 'qualified' -and $record.version -eq $tool.Version -and $runtimeHash -eq $record.sha256 -and $copyHash -eq $record.sha256 -and -not $provenanceError
         }
-        if ($output -and $output -match [regex]::Escape($tool.Version) -and $integrityValid) { Add-Status PASS $tool.Name "Version $($tool.Version) et empreinte runtime confirmees." }
-        else { Add-Status ERROR $tool.Name "Binaire absent, version, activation ou empreinte Runtime Index invalide (attendu $($tool.Version))." }
+        if ($output -and $output -match [regex]::Escape($tool.Version) -and $integrityValid) { Add-Status PASS $tool.Name "Version, provenance et empreinte runtime confirmees." }
+        else { Add-Status ERROR $tool.Name "Binaire absent, version, provenance, activation ou empreinte Runtime Index invalide (attendu $($tool.Version))." }
     }
 
     $files = Get-ProjectFile

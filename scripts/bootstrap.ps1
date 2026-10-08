@@ -21,6 +21,7 @@ $venvPython = Join-Path $venvRoot 'Scripts\python.exe'
 $requirementsPath = Join-Path $repoRoot 'requirements-dev.txt'
 $dependencyLock = Join-Path $repoRoot 'requirements-dev.lock'
 $manifestPath = Join-Path $repoRoot '.config\tool-versions.yml'
+Import-Module (Join-Path $repoRoot 'src/Tool.Provenance.psm1') -Force -ErrorAction Stop
 if ($NoColor) { $env:NO_COLOR = '1' }
 
 function Write-Status {
@@ -165,7 +166,11 @@ function Register-ToolRuntimeEntry {
         [Parameter(Mandatory = $true)][string]$Version,
         [Parameter(Mandatory = $true)][string]$SourcePath,
         [Parameter(Mandatory = $true)][string]$RuntimeRoot,
-        [Parameter(Mandatory = $true)][string]$PlatformId
+        [Parameter(Mandatory = $true)][string]$PlatformId,
+        [string]$SourceUri,
+        [string]$ChecksumUri,
+        [string]$ChecksumAssetSha256,
+        [string]$PublishedArtifactSha256
     )
     $runtimeIndexPath = Join-Path $RuntimeRoot 'index.json'
     if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) { throw "Binaire source absent pour le runtime : $SourcePath" }
@@ -199,12 +204,32 @@ function Register-ToolRuntimeEntry {
     }
     $runtimePrefix = $RuntimeRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     $relativeBinary = $runtimeBinary.Substring($runtimePrefix.Length).Replace('\', '/')
+    $verifiedAt = [DateTimeOffset]::UtcNow.ToString('o')
+    $publisher = $null
+    if ($SourceUri) {
+        $sourceUriValue = [Uri]$SourceUri
+        $sourceParts = @($sourceUriValue.AbsolutePath.Trim('/') -split '/')
+        $publisher = if ($sourceUriValue.Host -eq 'github.com' -and $sourceParts.Count -ge 2) { "$($sourceUriValue.Host)/$($sourceParts[0])/$($sourceParts[1])" } else { $sourceUriValue.Host }
+    }
     $runtimeTool = [pscustomobject]@{
         name = $ToolName
         command = $ToolName
         version = $Version
         path = $relativeBinary
         sha256 = $runtimeHash
+        provenance = [pscustomobject]@{
+            status = if ($SourceUri -and $ChecksumUri -and $ChecksumAssetSha256 -and $PublishedArtifactSha256) { 'official_checksum_verified' } else { 'local_copy_hash_verified' }
+            publisher = $publisher
+            source_uri = $SourceUri
+            checksum_uri = $ChecksumUri
+            checksum_asset_sha256 = $ChecksumAssetSha256
+            published_artifact_sha256 = $PublishedArtifactSha256
+            runtime_artifact_sha256 = $runtimeHash
+            source_version = $Version
+            acquired_at = $verifiedAt
+            verified_at = $verifiedAt
+            validation_method = if ($SourceUri -and $ChecksumUri -and $ChecksumAssetSha256 -and $PublishedArtifactSha256) { 'official_checksum_manifest_and_runtime_copy_sha256' } else { 'local_source_and_runtime_copy_sha256' }
+        }
         status = 'qualified'
         active = $true
     }
@@ -238,6 +263,118 @@ function Get-DirectorySha256 {
     finally { $algorithm.Dispose() }
 }
 
+function Get-PythonWheelProvenanceRecord {
+    param(
+        [Parameter(Mandatory = $true)][string]$ReportPath,
+        [Parameter(Mandatory = $true)][string]$WheelDirectory,
+        [Parameter(Mandatory = $true)][hashtable]$LockedPackages,
+        [Parameter(Mandatory = $true)][hashtable]$InstalledVersions
+    )
+    $report = Get-Content -LiteralPath $ReportPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+    $records = @{}
+    foreach ($item in @($report.install)) {
+        $name = [regex]::Replace([string]$item.metadata.name, '[-_.]+', '-').ToLowerInvariant()
+        $version = [string]$item.metadata.version
+        if (-not $LockedPackages.ContainsKey($name) -or $LockedPackages[$name] -ne $version -or -not $InstalledVersions.ContainsKey($name) -or $InstalledVersions[$name] -ne $version) {
+            throw "Provenance de roue divergente du lock ou du runtime installé: $name $version"
+        }
+        if ($records.ContainsKey($name)) { throw "Provenance de roue dupliquée: $name" }
+        $sourceUri = [Uri]$item.download_info.url
+        if ($sourceUri.Scheme -ne 'https' -or $sourceUri.Host -ne 'files.pythonhosted.org') { throw "Origine de roue hors de PyPI officiel: $($item.download_info.url)" }
+        $artifactName = [IO.Path]::GetFileName($sourceUri.AbsolutePath)
+        if ([IO.Path]::GetExtension($artifactName) -ne '.whl') { throw "L'artefact Python n'est pas une roue: $artifactName" }
+        $expectedHash = [string]$item.download_info.archive_info.hashes.sha256
+        if ($expectedHash -notmatch '^[a-fA-F0-9]{64}$') { throw "SHA-256 PyPI absent ou invalide: $name" }
+        $artifactPath = Join-Path $WheelDirectory $artifactName
+        if (-not (Test-Path -LiteralPath $artifactPath -PathType Leaf)) { throw "Roue PyPI acquise absente: $artifactName" }
+        $actualHash = (Get-FileHash -LiteralPath $artifactPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actualHash -ne $expectedHash.ToLowerInvariant()) { throw "SHA-256 de roue divergent du rapport PyPI: $name" }
+        $author = [string]$item.metadata.author
+        $records[$name] = [pscustomobject]@{
+            name = $name
+            version = $version
+            provenance = [pscustomobject]@{
+                registry = 'PyPI'
+                publisher = 'PyPI'
+                project_author = $author
+                source_version = $version
+                source_url = $item.download_info.url
+                project_url = "https://pypi.org/project/$name/$version/"
+                artifact_filename = $artifactName
+                artifact_path = ".tools/cache/wheels/$artifactName"
+                artifact_sha256 = $actualHash
+                acquired_at = (Get-Item -LiteralPath $artifactPath).LastWriteTimeUtc.ToString('o')
+                verified_at = [DateTimeOffset]::UtcNow.ToString('o')
+                validation_method = 'pip_download_sha256_verified_against_official_index'
+            }
+        }
+    }
+    if ($records.Count -ne $LockedPackages.Count) { throw "Rapport pip incomplet: $($records.Count)/$($LockedPackages.Count) roues." }
+    foreach ($name in $LockedPackages.Keys) {
+        if (-not $records.ContainsKey($name)) { throw "Roue absente du rapport PyPI: $name" }
+    }
+    return @($records.Keys | Sort-Object | ForEach-Object { $records[$_] })
+}
+
+function Get-PythonWheelInventory {
+    param(
+        [Parameter(Mandatory = $true)][string]$VenvPython,
+        [Parameter(Mandatory = $true)][string]$RequirementsLockPath,
+        [Parameter(Mandatory = $true)][hashtable]$LockedPackages,
+        [Parameter(Mandatory = $true)][hashtable]$InstalledVersions,
+        [Parameter(Mandatory = $true)][string]$RuntimeRoot,
+        [switch]$Offline
+    )
+    $toolsDirectory = Split-Path -Parent $RuntimeRoot
+    $repositoryRoot = Split-Path -Parent $toolsDirectory
+    $cacheDirectory = Join-Path $toolsDirectory 'cache'
+    $wheelDirectory = Join-Path $cacheDirectory 'wheels'
+    New-Item -ItemType Directory -Path $wheelDirectory -Force | Out-Null
+    $lockHash = (Get-FileHash -LiteralPath $RequirementsLockPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $cachedReportPath = Join-Path $cacheDirectory "python-wheel-provenance-$lockHash.json"
+    if (Test-Path -LiteralPath $cachedReportPath -PathType Leaf) {
+        return Get-PythonWheelProvenanceRecord -ReportPath $cachedReportPath -WheelDirectory $wheelDirectory -LockedPackages $LockedPackages -InstalledVersions $InstalledVersions
+    }
+    if ($Offline) { throw 'Mode hors ligne : provenance des roues Python absente du cache local.' }
+
+    $temporaryReportPath = Join-Path $cacheDirectory ("python-wheel-report.$([guid]::NewGuid().ToString('N')).json")
+    $stagingDirectory = Join-Path $cacheDirectory ("python-wheels-staging.$([guid]::NewGuid().ToString('N'))")
+    New-Item -ItemType Directory -Path $stagingDirectory -Force | Out-Null
+    try {
+        Invoke-CheckedCommand -FilePath $VenvPython -Arguments @('-m', 'pip', 'install', '--quiet', '--dry-run', '--ignore-installed', '--no-deps', '--only-binary=:all:', '--index-url', 'https://pypi.org/simple', '--report', $temporaryReportPath, '-r', $RequirementsLockPath) -Description 'résolution de provenance des roues PyPI'
+        Invoke-CheckedCommand -FilePath $VenvPython -Arguments @('-m', 'pip', 'download', '--quiet', '--no-deps', '--only-binary=:all:', '--index-url', 'https://pypi.org/simple', '--dest', $stagingDirectory, '-r', $RequirementsLockPath) -Description 'acquisition des roues PyPI vérifiées'
+        $null = Get-PythonWheelProvenanceRecord -ReportPath $temporaryReportPath -WheelDirectory $stagingDirectory -LockedPackages $LockedPackages -InstalledVersions $InstalledVersions
+        foreach ($item in Get-Content -LiteralPath $temporaryReportPath -Raw -Encoding UTF8 | ConvertFrom-Json | ForEach-Object install) {
+            $artifactName = [IO.Path]::GetFileName(([Uri]$item.download_info.url).AbsolutePath)
+            $stagedArtifact = Join-Path $stagingDirectory $artifactName
+            $cachedArtifact = Join-Path $wheelDirectory $artifactName
+            if (Test-Path -LiteralPath $cachedArtifact -PathType Leaf) {
+                $cachedHash = (Get-FileHash -LiteralPath $cachedArtifact -Algorithm SHA256).Hash.ToLowerInvariant()
+                if ($cachedHash -ne ([string]$item.download_info.archive_info.hashes.sha256).ToLowerInvariant()) { throw "Roue déjà en cache altérée: $artifactName" }
+                Remove-Item -LiteralPath $stagedArtifact -Force
+            } else {
+                Move-Item -LiteralPath $stagedArtifact -Destination $cachedArtifact
+            }
+        }
+        $temporaryCachedReport = "$cachedReportPath.$([guid]::NewGuid().ToString('N')).tmp"
+        try {
+            Copy-Item -LiteralPath $temporaryReportPath -Destination $temporaryCachedReport
+            Move-Item -LiteralPath $temporaryCachedReport -Destination $cachedReportPath -Force
+        } finally {
+            if (Test-Path -LiteralPath $temporaryCachedReport -PathType Leaf) { Remove-Item -LiteralPath $temporaryCachedReport -Force }
+        }
+    } finally {
+        if (Test-Path -LiteralPath $temporaryReportPath -PathType Leaf) { Remove-Item -LiteralPath $temporaryReportPath -Force }
+        if (Test-Path -LiteralPath $stagingDirectory -PathType Container) { Remove-Item -LiteralPath $stagingDirectory -Recurse -Force }
+    }
+    $records = Get-PythonWheelProvenanceRecord -ReportPath $cachedReportPath -WheelDirectory $wheelDirectory -LockedPackages $LockedPackages -InstalledVersions $InstalledVersions
+    foreach ($record in $records) {
+        $provenanceError = Get-PythonWheelProvenanceError -Record $record -RepositoryRoot $repositoryRoot
+        if ($provenanceError) { throw "Provenance de roue invalide pour $($record.name): $provenanceError" }
+    }
+    return $records
+}
+
 function Register-ToolRuntimeInventory {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
@@ -252,11 +389,13 @@ function Register-ToolRuntimeInventory {
         [Parameter(Mandatory = $true)][string]$ModuleVersion,
         [Parameter(Mandatory = $true)][string]$ModulePath,
         [Parameter(Mandatory = $true)][string]$ModuleRelativePath,
-        [Parameter(Mandatory = $true)][string]$ModuleSource
+        [Parameter(Mandatory = $true)][string]$ModuleSource,
+        [switch]$Offline
     )
     $lockedPackages = @{}
     foreach ($line in Get-Content -LiteralPath $RequirementsLockPath -Encoding UTF8) {
-        $match = [regex]::Match($line.Trim(), '^(?<name>[A-Za-z0-9][A-Za-z0-9._-]*)==(?<version>[A-Za-z0-9][A-Za-z0-9.!+_-]*)$')
+        $value = $line.Trim().TrimEnd('\').Trim()
+        $match = [regex]::Match($value, '^(?<name>[A-Za-z0-9][A-Za-z0-9._-]*)==(?<version>[A-Za-z0-9][A-Za-z0-9.!+_-]*)$')
         if (-not $match.Success) { continue }
         $name = [regex]::Replace($match.Groups['name'].Value, '[-_.]+', '-').ToLowerInvariant()
         if ($lockedPackages.ContainsKey($name)) { throw "Package duplique dans le lock Python: $name" }
@@ -288,6 +427,9 @@ function Register-ToolRuntimeInventory {
     if ($index.schema_version -ne 1 -or -not $index.platforms) { throw 'Schema index Tool Runtime invalide.' }
     $platformProperty = $index.platforms.PSObject.Properties[$PlatformId]
     if (-not $platformProperty) { throw "Plateforme runtime absente de l index: $PlatformId" }
+    $shouldRegister = $PSCmdlet.ShouldProcess($indexPath, 'Enregistrer Python, packages et modules PowerShell')
+    if (-not $shouldRegister) { return }
+    $packageRecords = Get-PythonWheelInventory -VenvPython $VenvPython -RequirementsLockPath $RequirementsLockPath -LockedPackages $lockedPackages -InstalledVersions $installedVersions -RuntimeRoot $RuntimeRoot -Offline:$Offline
     $pythonExecutableFullPath = [IO.Path]::GetFullPath($PythonExecutable)
     $venvPythonFullPath = [IO.Path]::GetFullPath($VenvPython)
     $pythonRecord = [pscustomobject]@{
@@ -309,7 +451,7 @@ function Register-ToolRuntimeInventory {
         manifest_sha256 = (Get-FileHash -LiteralPath $moduleManifest -Algorithm SHA256).Hash.ToLowerInvariant()
         tree_sha256 = Get-DirectorySha256 -Path $ModulePath
     }
-    if ($PSCmdlet.ShouldProcess($indexPath, 'Enregistrer Python, packages et modules PowerShell')) {
+    if ($shouldRegister) {
         $platformData = $platformProperty.Value
         $platformData | Add-Member -MemberType NoteProperty -Name python -Value $pythonRecord -Force
         $platformData | Add-Member -MemberType NoteProperty -Name python_packages -Value $packageRecords -Force
@@ -440,16 +582,6 @@ function Install-BinaryTool {
     $manifestCache = Get-CachePath "$ToolName-$version-$checksumAsset"
     $assetCache = Get-CachePath $asset
 
-    if ((Test-Path $destination -PathType Leaf) -and -not $Force) {
-        $versionArgs = Get-ManifestValue -Block $toolBlock -Name 'version_args' -Indent 4
-        $versionOutput = & $destination @($versionArgs -split ' ') 2>&1
-        if ($LASTEXITCODE -eq 0 -and ($versionOutput -join ' ') -match [regex]::Escape($version)) {
-            Register-ToolRuntimeEntry -ToolName $ToolName -Version $version -SourcePath $destination -RuntimeRoot $runtimeRoot -PlatformId $script:RuntimePlatform
-            Write-Status PASS "$ToolName $version déjà présent dans .tools/bin."
-            return
-        }
-    }
-
     $null = Get-VerifiedDownload -Uri "$baseUri/$checksumAsset" -Path $manifestCache -Sha256 $checksumAssetHash -Description "manifeste SHA-256 de $ToolName $version"
     $manifestText = [System.IO.File]::ReadAllText($manifestCache, [System.Text.Encoding]::UTF8)
     $assetPattern = '(?m)^([A-Fa-f0-9]{64})\s+\*?' + [regex]::Escape($asset) + '\s*$'
@@ -466,17 +598,32 @@ function Install-BinaryTool {
         $toolFileName = Split-Path -Leaf $destination
         $extracted = Get-ChildItem -Path $staging -Filter $toolFileName -File -Recurse | Select-Object -First 1
         if (-not $extracted) { throw "Binaire attendu absent de l’archive $asset : $toolFileName" }
-        Copy-Item -LiteralPath $extracted.FullName -Destination $destination -Force
+        $verifiedBinaryPath = $extracted.FullName
     } else {
-        Copy-Item -LiteralPath $assetCache -Destination $destination -Force
+        $verifiedBinaryPath = $assetCache
     }
+
+    $publishedArtifactHash = $assetMatch.Groups[1].Value.ToLowerInvariant()
+    if ((Test-Path -LiteralPath $destination -PathType Leaf) -and -not $Force) {
+        $expectedBinaryHash = (Get-FileHash -LiteralPath $verifiedBinaryPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $versionArgs = Get-ManifestValue -Block $toolBlock -Name 'version_args' -Indent 4
+        $versionOutput = & $destination @($versionArgs -split ' ') 2>&1
+        $existingHash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($LASTEXITCODE -eq 0 -and ($versionOutput -join ' ') -match [regex]::Escape($version) -and $existingHash -eq $expectedBinaryHash) {
+            Remove-Item -LiteralPath $staging -Recurse -Force
+            Register-ToolRuntimeEntry -ToolName $ToolName -Version $version -SourcePath $destination -RuntimeRoot $runtimeRoot -PlatformId $script:RuntimePlatform -SourceUri "$baseUri/$asset" -ChecksumUri "$baseUri/$checksumAsset" -ChecksumAssetSha256 $checksumAssetHash -PublishedArtifactSha256 $publishedArtifactHash
+            Write-Status PASS "$ToolName $version réutilisé après vérification de la somme officielle."
+            return
+        }
+    }
+    Copy-Item -LiteralPath $verifiedBinaryPath -Destination $destination -Force
     Remove-Item -LiteralPath $staging -Recurse -Force
     $versionArgs = Get-ManifestValue -Block $toolBlock -Name 'version_args' -Indent 4
     $versionOutput = & $destination @($versionArgs -split ' ') 2>&1
     if ($LASTEXITCODE -ne 0 -or ($versionOutput -join ' ') -notmatch [regex]::Escape($version)) {
         throw "$ToolName n’a pas confirmé la version verrouillée $version."
     }
-    Register-ToolRuntimeEntry -ToolName $ToolName -Version $version -SourcePath $destination -RuntimeRoot $runtimeRoot -PlatformId $script:RuntimePlatform
+    Register-ToolRuntimeEntry -ToolName $ToolName -Version $version -SourcePath $destination -RuntimeRoot $runtimeRoot -PlatformId $script:RuntimePlatform -SourceUri "$baseUri/$asset" -ChecksumUri "$baseUri/$checksumAsset" -ChecksumAssetSha256 $checksumAssetHash -PublishedArtifactSha256 $publishedArtifactHash
     Write-Status PASS "$ToolName $version installé et vérifié dans .tools/bin."
 }
 
@@ -541,11 +688,7 @@ try {
         $package = $pin.Groups[1].Value -replace '_', '-'
         if ($requirementsLines -notcontains "$package==$($pin.Groups[2].Value)") { throw "Pin de version incohérent pour $package." }
     }
-    $pipVersion = Get-ManifestValue -Block $pythonPackageBlock -Name 'version' -Indent 4
-    $pipArguments = @('-m', 'pip', 'install', '--upgrade', "pip==$pipVersion", '-c', $dependencyLock)
-    if ($Offline) { $pipArguments += @('--no-index', '--find-links', (Join-Path $cacheRoot 'wheels')) }
-    Invoke-CheckedCommand -FilePath $venvPython -Arguments $pipArguments -Description 'mise à niveau verrouillée de pip'
-    $installArguments = @('-m', 'pip', 'install', '-r', $requirementsPath, '-c', $dependencyLock)
+    $installArguments = @('-m', 'pip', 'install', '--require-hashes', '-r', $dependencyLock)
     if ($Force) { $installArguments += '--force-reinstall' }
     if ($Offline) {
         $wheelhouse = Join-Path $cacheRoot 'wheels'
@@ -632,7 +775,7 @@ try {
     $analyzerModule = Get-Module -ListAvailable -Name PSScriptAnalyzer | Where-Object { $_.Version.ToString() -eq $analyzerVersion } | Select-Object -First 1
     if (-not $analyzerModule) { throw 'PSScriptAnalyzer local absent apres validation.' }
     Write-Status INFO "PSScriptAnalyzer : $($analyzerModule.Version)"
-    Register-ToolRuntimeInventory -RuntimeRoot $runtimeRoot -PlatformId $script:RuntimePlatform -PythonExecutable $pythonRuntime.Details.executable -PythonVersion $pythonRuntime.Details.version -PythonSource $pythonRuntime.Details.executable -VenvPython $venvPython -RequirementsLockPath $dependencyLock -ModuleName 'PSScriptAnalyzer' -ModuleVersion $analyzerVersion -ModulePath (Join-Path $moduleRoot "PSScriptAnalyzer\$analyzerVersion") -ModuleRelativePath $analyzerRelativePath -ModuleSource $analyzerSource
+    Register-ToolRuntimeInventory -RuntimeRoot $runtimeRoot -PlatformId $script:RuntimePlatform -PythonExecutable $pythonRuntime.Details.executable -PythonVersion $pythonRuntime.Details.version -PythonSource $pythonRuntime.Details.executable -VenvPython $venvPython -RequirementsLockPath $dependencyLock -ModuleName 'PSScriptAnalyzer' -ModuleVersion $analyzerVersion -ModulePath (Join-Path $moduleRoot "PSScriptAnalyzer\$analyzerVersion") -ModuleRelativePath $analyzerRelativePath -ModuleSource $analyzerSource -Offline:$Offline
     Update-ToolRuntimePlatformStatus -RuntimeRoot $runtimeRoot -PlatformId $script:RuntimePlatform -Status 'qualified'
     Write-Status PASS 'Bootstrap local terminé; PATH système et installations globales inchangés.'
     exit 0

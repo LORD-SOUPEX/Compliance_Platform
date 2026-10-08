@@ -7,6 +7,7 @@ $originalRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $catalogModule = Join-Path $originalRoot 'src/Control.Catalog.psm1'
 Import-Module $catalogModule -Force
 Import-Module (Join-Path $originalRoot 'src/Compliance.Engine.psm1') -Force
+Import-Module (Join-Path $originalRoot 'src/Tool.Provenance.psm1') -Force
 $script:ControlCatalog = Import-ControlCatalog -Path (Join-Path $originalRoot '.config/control-catalog.json')
 $gatePath = Join-Path $originalRoot 'scripts/quality-gate.ps1'
 $tokens = $null
@@ -32,6 +33,24 @@ function Assert-Condition {
     if (-not $Condition) { throw $Message }
 }
 
+function New-FixtureToolProvenance {
+    param([string]$Version, [string]$ArtifactSha256)
+    $timestamp = [DateTimeOffset]::UtcNow.ToString('o')
+    return [pscustomobject]@{
+        status = 'official_checksum_verified'
+        publisher = 'fixture.invalid/tool'
+        source_uri = "https://fixture.invalid/tool/$Version.zip"
+        checksum_uri = 'https://fixture.invalid/tool/checksums.txt'
+        checksum_asset_sha256 = 'b' * 64
+        published_artifact_sha256 = $ArtifactSha256
+        runtime_artifact_sha256 = $ArtifactSha256
+        source_version = $Version
+        acquired_at = $timestamp
+        verified_at = $timestamp
+        validation_method = 'official_checksum_manifest_and_runtime_copy_sha256'
+    }
+}
+
 function Write-Fixture {
     param([string]$RelativePath, [string]$Content)
     $destination = Join-Path $repoRoot $RelativePath
@@ -45,6 +64,7 @@ function Copy-GateFixture {
     Copy-Item (Join-Path $originalRoot 'src/Control.Catalog.psm1') (Join-Path $repoRoot 'src/Control.Catalog.psm1')
     Copy-Item (Join-Path $originalRoot 'src/Platform.Support.psm1') (Join-Path $repoRoot 'src/Platform.Support.psm1')
     Copy-Item (Join-Path $originalRoot 'src/Compliance.Engine.psm1') (Join-Path $repoRoot 'src/Compliance.Engine.psm1')
+    Copy-Item (Join-Path $originalRoot 'src/Tool.Provenance.psm1') (Join-Path $repoRoot 'src/Tool.Provenance.psm1')
     Copy-Item (Join-Path $originalRoot '.config/control-catalog.json') (Join-Path $repoRoot '.config/control-catalog.json')
     Copy-Item (Join-Path $originalRoot '.config/platform-support.json') (Join-Path $repoRoot '.config/platform-support.json')
     Copy-Item (Join-Path $originalRoot 'scripts/check-emoji.ps1') (Join-Path $repoRoot 'scripts/check-emoji.ps1')
@@ -324,6 +344,7 @@ try {
         $artifactRelativePath = "$($platform.id)/ruff/1.2.3/ruff.exe"
         $artifactFixturePath = ".tools/runtime/$artifactRelativePath"
         Write-Fixture $artifactFixturePath 'runtime-fixture'
+        $artifactHash = (Get-FileHash (Join-Path $repoRoot $artifactFixturePath) -Algorithm SHA256).Hash.ToLowerInvariant()
         $manifest = [pscustomobject]@{
             schema_version = 1
             platforms = [pscustomobject]@{
@@ -331,7 +352,7 @@ try {
                     status = 'qualified'
                     tools = @(
                         [pscustomobject]@{ name = 'ruff'; command = 'ruff'; version = '1.1.0'; path = ".tools/runtime/$($platform.id)/ruff/1.1.0/ruff.exe"; status = 'qualified'; active = $false },
-                        [pscustomobject]@{ name = 'ruff'; command = 'ruff'; version = '1.2.3'; path = $artifactRelativePath; sha256 = (Get-FileHash (Join-Path $repoRoot $artifactFixturePath) -Algorithm SHA256).Hash; status = 'qualified'; active = $true }
+                        [pscustomobject]@{ name = 'ruff'; command = 'ruff'; version = '1.2.3'; path = $artifactRelativePath; sha256 = $artifactHash; provenance = (New-FixtureToolProvenance -Version '1.2.3' -ArtifactSha256 $artifactHash); status = 'qualified'; active = $true }
                     )
                 }
             }
@@ -340,12 +361,20 @@ try {
         $tool = Resolve-CandidateTool -Name 'ruff' -Command 'ruff'
         Assert-Condition ($tool.status -eq 'available' -and $tool.runtime_managed -and $tool.version -eq '1.2.3' -and $tool.platform -eq $platform.id) ("Version active du runtime non résolue: $($tool | ConvertTo-Json -Compress -Depth 5)")
         Assert-Condition ($tool.source -eq (Join-Path $repoRoot $artifactFixturePath)) 'Chemin artefact runtime incorrect.'
+        $activeRecord = @($manifest.platforms.PSObject.Properties[$platform.id].Value.tools | Where-Object active)[0]
+        $publisher = $activeRecord.provenance.publisher
+        $activeRecord.provenance.publisher = $null
+        Write-Fixture '.tools/runtime/index.json' ($manifest | ConvertTo-Json -Depth 8)
+        Assert-Condition ((Resolve-CandidateTool -Name 'ruff' -Command 'ruff').status -eq 'integrity_error') 'Outil disponible malgré provenance éditeur absente.'
+        $activeRecord.provenance.publisher = $publisher
+        Write-Fixture '.tools/runtime/index.json' ($manifest | ConvertTo-Json -Depth 8)
     }
     Invoke-TestCase 'Integrite runtime et copie historique verifiee avant usage' {
         $platform = Get-ExecutionPlatform
         $artifactRelativePath = "$($platform.id)/ruff/1.2.3/ruff.exe"
         Write-Fixture ".tools/runtime/$artifactRelativePath" 'runtime-original'
-        $record = [pscustomobject]@{ name = 'ruff'; command = 'ruff'; version = '1.2.3'; path = $artifactRelativePath; sha256 = (Get-FileHash (Join-Path $repoRoot ".tools/runtime/$artifactRelativePath") -Algorithm SHA256).Hash; status = 'qualified'; active = $true }
+        $artifactHash = (Get-FileHash (Join-Path $repoRoot ".tools/runtime/$artifactRelativePath") -Algorithm SHA256).Hash.ToLowerInvariant()
+        $record = [pscustomobject]@{ name = 'ruff'; command = 'ruff'; version = '1.2.3'; path = $artifactRelativePath; sha256 = $artifactHash; provenance = (New-FixtureToolProvenance -Version '1.2.3' -ArtifactSha256 $artifactHash); status = 'qualified'; active = $true }
         $manifest = [pscustomobject]@{ schema_version = 1; platforms = [pscustomobject]@{ $platform.id = [pscustomobject]@{ status = 'qualified'; tools = @($record) } } }
         Write-Fixture '.tools/runtime/index.json' ($manifest | ConvertTo-Json -Depth 8)
         Assert-Condition ((Resolve-CandidateTool -Name 'ruff' -Command 'ruff').status -eq 'available') 'Artefact intact refuse.'
@@ -367,7 +396,7 @@ try {
         $bootstrapTokens = $null
         $bootstrapErrors = $null
         $bootstrapAst = [Management.Automation.Language.Parser]::ParseFile($bootstrapPath, [ref]$bootstrapTokens, [ref]$bootstrapErrors)
-        $runtimeFunctions = @($bootstrapAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -in @('Register-ToolRuntimeEntry', 'Register-ToolRuntimeInventory', 'Get-DirectorySha256', 'Update-ToolRuntimePlatformStatus', 'Get-VerifiedDownload', 'Get-ManifestBlock', 'Get-ToolBlock', 'Get-ManifestValue', 'Install-PSScriptAnalyzer', 'Write-Status') }, $false))
+        $runtimeFunctions = @($bootstrapAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -in @('Register-ToolRuntimeEntry', 'Register-ToolRuntimeInventory', 'Get-DirectorySha256', 'Get-PythonWheelProvenanceRecord', 'Get-PythonWheelInventory', 'Update-ToolRuntimePlatformStatus', 'Get-VerifiedDownload', 'Get-ManifestBlock', 'Get-ToolBlock', 'Get-ManifestValue', 'Install-PSScriptAnalyzer', 'Write-Status') }, $false))
         foreach ($definition in $runtimeFunctions) { . ([scriptblock]::Create($definition.Extent.Text)) }
         $script:Manifest = [IO.File]::ReadAllText((Join-Path $originalRoot '.config/tool-versions.yml'), [Text.Encoding]::UTF8)
         $moduleRoot = Join-Path $originalRoot '.tools/powershell-modules'
@@ -386,26 +415,28 @@ try {
         catch { $wrongChecksumRejected = $_.Exception.Message -match 'SHA-256 invalide' }
         Assert-Condition $wrongChecksumRejected 'Archive avec somme officielle divergente acceptee.'
         $runtimeRoot = Join-Path $repoRoot '.tools/runtime'
-        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.1.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.1.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64'
+        $publishedOldToolHash = (Get-FileHash -LiteralPath (Join-Path $repoRoot 'source-ruff-1.1.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.1.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.1.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -SourceUri 'https://github.com/example/ruff/releases/download/v1.1.0/ruff.zip' -ChecksumUri 'https://github.com/example/ruff/releases/download/v1.1.0/checksums.txt' -ChecksumAssetSha256 $expectedArchiveHash -PublishedArtifactSha256 $publishedOldToolHash
         $publishedToolHash = (Get-FileHash -LiteralPath (Join-Path $repoRoot 'source-ruff-1.2.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
-        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.2.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -SourceUri 'https://example.invalid/ruff/1.2.0.zip' -ChecksumUri 'https://example.invalid/ruff/checksums.txt' -ChecksumAssetSha256 $expectedArchiveHash -PublishedArtifactSha256 $publishedToolHash
+        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.2.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -SourceUri 'https://github.com/example/ruff/releases/download/v1.2.0/ruff.zip' -ChecksumUri 'https://github.com/example/ruff/releases/download/v1.2.0/checksums.txt' -ChecksumAssetSha256 $expectedArchiveHash -PublishedArtifactSha256 $publishedToolHash
         $index = Get-Content (Join-Path $runtimeRoot 'index.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         $versions = @($index.platforms.'windows-x64'.tools | Where-Object name -eq 'ruff')
         $active = @($versions | Where-Object active)
         Assert-Condition ($versions.Count -eq 2 -and $active.Count -eq 1 -and $active[0].version -eq '1.2.0') 'Les versions runtime ou leur pointeur actif sont incohérents.'
         Assert-Condition ($active[0].sha256 -eq (Get-FileHash (Join-Path $runtimeRoot $active[0].path) -Algorithm SHA256).Hash.ToLowerInvariant()) 'L''empreinte de l''artefact runtime diffère.'
-        Assert-Condition ($active[0].provenance.status -eq 'official_checksum_verified' -and $active[0].provenance.published_artifact_sha256 -eq $publishedToolHash) 'Provenance de l''artefact non conservee dans Runtime Index.'
-        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.2.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -SourceUri 'https://example.invalid/ruff/1.2.0.zip' -ChecksumUri 'https://example.invalid/ruff/checksums.txt' -ChecksumAssetSha256 $expectedArchiveHash -PublishedArtifactSha256 $publishedToolHash
+        $provenanceTimestamp = [DateTimeOffset]::MinValue
+        Assert-Condition ($active[0].provenance.status -eq 'official_checksum_verified' -and $active[0].provenance.publisher -eq 'github.com/example/ruff' -and $active[0].provenance.published_artifact_sha256 -eq $publishedToolHash -and [DateTimeOffset]::TryParse($active[0].provenance.acquired_at, [ref]$provenanceTimestamp) -and $active[0].provenance.validation_method -eq 'official_checksum_manifest_and_runtime_copy_sha256') 'Provenance éditeur, date ou méthode absente du Runtime Index.'
+        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.2.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -SourceUri 'https://github.com/example/ruff/releases/download/v1.2.0/ruff.zip' -ChecksumUri 'https://github.com/example/ruff/releases/download/v1.2.0/checksums.txt' -ChecksumAssetSha256 $expectedArchiveHash -PublishedArtifactSha256 $publishedToolHash
         $index = Get-Content (Join-Path $runtimeRoot 'index.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         $versions = @($index.platforms.'windows-x64'.tools | Where-Object name -eq 'ruff')
         $active = @($versions | Where-Object active)
         Assert-Condition ($versions.Count -eq 2 -and $active.Count -eq 1) 'La réinscription d''une version a créé un doublon.'
         Assert-Condition ($index.platforms.'windows-x64'.status -eq 'experimental') 'La plateforme a été déclarée qualifiée avant le bootstrap complet.'
         Update-ToolRuntimePlatformStatus -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -Status 'qualified'
-        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.1.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.1.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64'
+        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.1.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.1.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -SourceUri 'https://github.com/example/ruff/releases/download/v1.1.0/ruff.zip' -ChecksumUri 'https://github.com/example/ruff/releases/download/v1.1.0/checksums.txt' -ChecksumAssetSha256 $expectedArchiveHash -PublishedArtifactSha256 $publishedOldToolHash
         $rollback = Resolve-CandidateTool -Name 'ruff' -Command 'ruff'
         Assert-Condition ($rollback.status -eq 'available' -and $rollback.version -eq '1.1.0') 'Rollback vers une version runtime conservee impossible.'
-        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.2.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64'
+        Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath (Join-Path $repoRoot 'source-ruff-1.2.exe') -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -SourceUri 'https://github.com/example/ruff/releases/download/v1.2.0/ruff.zip' -ChecksumUri 'https://github.com/example/ruff/releases/download/v1.2.0/checksums.txt' -ChecksumAssetSha256 $expectedArchiveHash -PublishedArtifactSha256 $publishedToolHash
         $resolved = Resolve-CandidateTool -Name 'ruff' -Command 'ruff'
         Assert-Condition ($resolved.status -eq 'available' -and $resolved.version -eq '1.2.0') 'Reactivation de la version runtime courante impossible.'
         Update-ToolRuntimePlatformStatus -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -Status 'experimental'
@@ -417,18 +448,54 @@ try {
         $pipList = ConvertFrom-Json -InputObject ((& $python -m pip list --format=json) -join "`n")
         $pipVersion = [string](@($pipList | Where-Object name -eq 'pip')[0].version)
         Copy-Item (Join-Path $originalRoot 'requirements-dev.lock') (Join-Path $repoRoot 'requirements-dev.lock')
+        $wheelDirectory = Join-Path $repoRoot '.tools/cache/wheels'
+        $pipReportRecords = New-Object System.Collections.Generic.List[object]
+        foreach ($line in Get-Content -LiteralPath (Join-Path $repoRoot 'requirements-dev.lock') -Encoding UTF8) {
+            $value = $line.Trim().TrimEnd('\').Trim()
+            $pin = [regex]::Match($value, '^(?<name>[A-Za-z0-9][A-Za-z0-9._-]+)==(?<version>[A-Za-z0-9][A-Za-z0-9.!+_-]*)$')
+            if (-not $pin.Success) { continue }
+            $packageName = [regex]::Replace($pin.Groups['name'].Value, '[-_.]+', '-').ToLowerInvariant()
+            $packageVersion = $pin.Groups['version'].Value
+            $wheelName = "$packageName-$packageVersion-py3-none-any.whl"
+            $wheelPath = Join-Path $wheelDirectory $wheelName
+            Write-Fixture (".tools/cache/wheels/$wheelName") "$packageName==$packageVersion"
+            $wheelHash = (Get-FileHash -LiteralPath $wheelPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            $pipReportRecords.Add([pscustomobject]@{
+                metadata = [pscustomobject]@{ name = $packageName; version = $packageVersion; author = "$packageName fixture publisher" }
+                download_info = [pscustomobject]@{ url = "https://files.pythonhosted.org/packages/$wheelName"; archive_info = [pscustomobject]@{ hashes = [pscustomobject]@{ sha256 = $wheelHash } } }
+            })
+        }
+        $lockHash = (Get-FileHash -LiteralPath (Join-Path $repoRoot 'requirements-dev.lock') -Algorithm SHA256).Hash.ToLowerInvariant()
+        Write-Fixture ".tools/cache/python-wheel-provenance-$lockHash.json" ([pscustomobject]@{ install = $pipReportRecords.ToArray() } | ConvertTo-Json -Depth 10)
         $moduleRoot = Join-Path $repoRoot '.tools/powershell-modules/PSScriptAnalyzer/1.25.0'
         Write-Fixture '.tools/powershell-modules/PSScriptAnalyzer/1.25.0/PSScriptAnalyzer.psd1' "@{ ModuleVersion = '1.25.0' }`n"
         Write-Fixture '.tools/powershell-modules/PSScriptAnalyzer/1.25.0/PSScriptAnalyzer.psm1' "function Invoke-ScriptAnalyzer {}`n"
+        $whatIfLockPath = Join-Path $repoRoot 'requirements-whatif.lock'
+        [IO.File]::WriteAllText($whatIfLockPath, ([IO.File]::ReadAllText((Join-Path $repoRoot 'requirements-dev.lock'), [Text.Encoding]::UTF8) + "`n# WhatIf fixture`n"), [Text.UTF8Encoding]::new($false))
+        $whatIfLockHash = (Get-FileHash -LiteralPath $whatIfLockPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $indexBeforeWhatIf = (Get-FileHash -LiteralPath (Join-Path $runtimeRoot 'index.json') -Algorithm SHA256).Hash
+        $null = Register-ToolRuntimeInventory -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -PythonExecutable $python -PythonVersion $pythonInfo.version -PythonSource $python -VenvPython $python -RequirementsLockPath $whatIfLockPath -ModuleName 'PSScriptAnalyzer' -ModuleVersion '1.25.0' -ModulePath $moduleRoot -ModuleRelativePath '.tools/powershell-modules/PSScriptAnalyzer/1.25.0' -ModuleSource 'fixture://psgallery/PSScriptAnalyzer/1.25.0' -WhatIf
+        $indexAfterWhatIf = (Get-FileHash -LiteralPath (Join-Path $runtimeRoot 'index.json') -Algorithm SHA256).Hash
+        Assert-Condition ($indexBeforeWhatIf -eq $indexAfterWhatIf -and -not (Test-Path (Join-Path $repoRoot ".tools/cache/python-wheel-provenance-$whatIfLockHash.json"))) "WhatIf a modifié l’index ou acquis les roues."
+        $offlineRejected = $false
+        try { $null = Register-ToolRuntimeInventory -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -PythonExecutable $python -PythonVersion $pythonInfo.version -PythonSource $python -VenvPython $python -RequirementsLockPath $whatIfLockPath -ModuleName 'PSScriptAnalyzer' -ModuleVersion '1.25.0' -ModulePath $moduleRoot -ModuleRelativePath '.tools/powershell-modules/PSScriptAnalyzer/1.25.0' -ModuleSource 'fixture://psgallery/PSScriptAnalyzer/1.25.0' -Offline }
+        catch { $offlineRejected = $_.Exception.Message -match 'Mode hors ligne' }
+        Assert-Condition $offlineRejected 'Offline a tenté ou accepté une acquisition de roues absente du cache.'
         Register-ToolRuntimeInventory -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -PythonExecutable $python -PythonVersion $pythonInfo.version -PythonSource $python -VenvPython $python -RequirementsLockPath (Join-Path $repoRoot 'requirements-dev.lock') -ModuleName 'PSScriptAnalyzer' -ModuleVersion '1.25.0' -ModulePath $moduleRoot -ModuleRelativePath '.tools/powershell-modules/PSScriptAnalyzer/1.25.0' -ModuleSource 'fixture://psgallery/PSScriptAnalyzer/1.25.0'
         $index = Get-Content (Join-Path $runtimeRoot 'index.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         $platformData = $index.platforms.'windows-x64'
         $indexedPipRecord = @($platformData.python.packages | Where-Object name -eq 'pip')
-        Assert-Condition ($platformData.python.version -eq $pythonInfo.version -and $indexedPipRecord.Count -eq 1 -and $indexedPipRecord[0].version -eq $pipVersion) 'Inventaire Python divergent du lock.'
+        Assert-Condition ($platformData.python.version -eq $pythonInfo.version -and $indexedPipRecord.Count -eq 1 -and $indexedPipRecord[0].version -eq $pipVersion -and $indexedPipRecord[0].provenance.registry -eq 'PyPI' -and $indexedPipRecord[0].provenance.source_url -match '^https://files\.pythonhosted\.org/' -and $indexedPipRecord[0].provenance.artifact_sha256 -match '^[a-f0-9]{64}$' -and $indexedPipRecord[0].provenance.validation_method -eq 'pip_download_sha256_verified_against_official_index') 'Inventaire Python ou provenance de roue divergent du lock.'
         Assert-Condition ($platformData.powershell_modules[0].version -eq '1.25.0' -and $platformData.powershell_modules[0].tree_sha256 -eq (Get-DirectorySha256 -Path $moduleRoot)) 'Inventaire module PowerShell divergent de son arbre.'
         Write-Fixture '.venv/Scripts/pip.exe' 'pip shim fixture'
         $indexedPip = Resolve-CandidateTool -Name 'pip' -Command 'pip'
         Assert-Condition ($indexedPip.status -eq 'available' -and $indexedPip.version -eq $pipVersion) 'Resolver ne consomme pas la version Python indexee.'
+        $pipWheelRelativePath = $indexedPipRecord[0].provenance.artifact_path
+        $pipWheelPath = Join-Path $repoRoot $pipWheelRelativePath
+        $pipWheelContent = [IO.File]::ReadAllText($pipWheelPath, [Text.Encoding]::UTF8)
+        Write-Fixture $pipWheelRelativePath 'tampered wheel'
+        Assert-Condition ((Resolve-CandidateTool -Name 'pip' -Command 'pip').status -eq 'integrity_error') 'Roue Python alteree reste disponible dans Resolver.'
+        Write-Fixture $pipWheelRelativePath $pipWheelContent
         $lockText = [IO.File]::ReadAllText((Join-Path $repoRoot 'requirements-dev.lock'), [Text.Encoding]::UTF8)
         Write-Fixture 'requirements-dev.lock' ($lockText + "`n# runtime lock tampered`n")
         Assert-Condition ((Resolve-CandidateTool -Name 'pip' -Command 'pip').status -eq 'runtime_error') 'Lock Python modifie accepte par Resolver.'
