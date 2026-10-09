@@ -294,15 +294,6 @@ function Register-ToolRuntimeEntry {
     )
     $runtimeIndexPath = Join-Path $RuntimeRoot 'index.json'
     if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) { throw "Binaire source absent pour le runtime : $SourcePath" }
-    $toolDirectory = Join-Path (Join-Path $RuntimeRoot $PlatformId) (Join-Path $ToolName $Version)
-    New-Item -ItemType Directory -Path $toolDirectory -Force | Out-Null
-    $binaryName = Split-Path -Leaf $SourcePath
-    $runtimeBinary = Join-Path $toolDirectory $binaryName
-    Copy-Item -LiteralPath $SourcePath -Destination $runtimeBinary -Force
-    $sourceHash = (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $runtimeHash = (Get-FileHash -LiteralPath $runtimeBinary -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($sourceHash -ne $runtimeHash) { throw "L'intégrité du binaire copié dans le Tool Runtime est invalide : $ToolName $Version" }
-
     $index = if (Test-Path -LiteralPath $runtimeIndexPath -PathType Leaf) {
         try { Get-Content -LiteralPath $runtimeIndexPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop }
         catch { throw "Index Tool Runtime invalide : $($_.Exception.Message)" }
@@ -318,6 +309,16 @@ function Register-ToolRuntimeEntry {
         $platformData = $platformProperty.Value
         if ($platformData.status -notin @('qualified', 'experimental', 'targeted')) { throw "Statut plateforme Tool Runtime invalide : $PlatformId" }
     }
+
+    $toolDirectory = Join-Path (Join-Path $RuntimeRoot $PlatformId) (Join-Path $ToolName $Version)
+    New-Item -ItemType Directory -Path $toolDirectory -Force | Out-Null
+    $binaryName = Split-Path -Leaf $SourcePath
+    $runtimeBinary = Join-Path $toolDirectory $binaryName
+    Copy-Item -LiteralPath $SourcePath -Destination $runtimeBinary -Force
+    $sourceHash = (Get-FileHash -LiteralPath $SourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $runtimeHash = (Get-FileHash -LiteralPath $runtimeBinary -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($sourceHash -ne $runtimeHash) { throw "L'intégrité du binaire copié dans le Tool Runtime est invalide : $ToolName $Version" }
+
     $retainedTools = @($platformData.tools | Where-Object { $_.name -ne $ToolName -or $_.version -ne $Version })
     foreach ($installedTool in $retainedTools) {
         if ($installedTool.name -eq $ToolName) { $installedTool.active = $false }

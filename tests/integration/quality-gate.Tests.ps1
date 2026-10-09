@@ -471,6 +471,20 @@ try {
         $index = Get-Content (Join-Path $runtimeRoot 'index.json') -Raw -Encoding UTF8 | ConvertFrom-Json
         Assert-Condition ($index.platforms.'windows-x64'.status -eq 'experimental') 'Une mise à jour n''a pas invalidé la qualification précédente.'
         Update-ToolRuntimePlatformStatus -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -Status 'qualified'
+        $sourcePath = Join-Path $repoRoot 'source-ruff-1.2.exe'
+        $runtimeArtifactPath = Join-Path $runtimeRoot 'windows-x64/ruff/1.2.0/source-ruff-1.2.exe'
+        $runtimeArtifactBeforeCorruption = [IO.File]::ReadAllText($runtimeArtifactPath, [Text.Encoding]::UTF8)
+        $validIndexText = [IO.File]::ReadAllText((Join-Path $runtimeRoot 'index.json'), [Text.Encoding]::UTF8)
+        Write-Fixture 'source-ruff-1.2.exe' 'different-source'
+        Write-Fixture '.tools/runtime/index.json' '{invalid'
+        $corruptIndexRejected = $false
+        try { Register-ToolRuntimeEntry -ToolName 'ruff' -Version '1.2.0' -SourcePath $sourcePath -RuntimeRoot $runtimeRoot -PlatformId 'windows-x64' -SourceUri 'https://github.com/example/ruff/releases/download/v1.2.0/ruff.zip' -ChecksumUri 'https://github.com/example/ruff/releases/download/v1.2.0/checksums.txt' -ChecksumAssetSha256 $expectedArchiveHash -PublishedArtifactSha256 $publishedToolHash -VersionArguments @('--version') }
+        catch { $corruptIndexRejected = $_.Exception.Message -match 'Index Tool Runtime invalide' }
+        $runtimeArtifactAfterCorruption = [IO.File]::ReadAllText($runtimeArtifactPath, [Text.Encoding]::UTF8)
+        $corruptIndexText = [IO.File]::ReadAllText((Join-Path $runtimeRoot 'index.json'), [Text.Encoding]::UTF8)
+        Write-Fixture 'source-ruff-1.2.exe' 'locked-binary-new'
+        Write-Fixture '.tools/runtime/index.json' $validIndexText
+        Assert-Condition ($corruptIndexRejected -and $runtimeArtifactAfterCorruption -eq $runtimeArtifactBeforeCorruption -and $corruptIndexText -eq '{invalid') 'Index runtime corrompu a modifie l artefact ou son contenu.'
         $python = Join-Path $originalRoot '.venv/Scripts/python.exe'
         $pythonInfo = ConvertFrom-Json -InputObject ((& $python -c "import json,sys; print(json.dumps({'version':sys.version.split()[0]}))") -join "`n")
         $pipList = ConvertFrom-Json -InputObject ((& $python -m pip list --format=json) -join "`n")
