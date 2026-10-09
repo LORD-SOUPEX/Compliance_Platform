@@ -410,7 +410,8 @@ function Get-PythonWheelProvenanceRecord {
         if (-not (Test-Path -LiteralPath $artifactPath -PathType Leaf)) { throw "Roue PyPI acquise absente: $artifactName" }
         $actualHash = (Get-FileHash -LiteralPath $artifactPath -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($actualHash -ne $expectedHash.ToLowerInvariant()) { throw "SHA-256 de roue divergent du rapport PyPI: $name" }
-        $author = [string]$item.metadata.author
+        $authorProperty = $item.metadata.PSObject.Properties['author']
+        $author = if ($authorProperty) { [string]$authorProperty.Value } else { $null }
         $records[$name] = [pscustomobject]@{
             name = $name
             version = $version
