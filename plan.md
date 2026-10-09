@@ -1093,8 +1093,10 @@ capacités d'analyse et les usages volontaires de la plateforme.
   de dépendances, des hooks et du diagnostic.
 - [x] Examiner les divergences entre catalogues, scripts et Doctor, y compris les
   notions d'outils facultatifs et de Python déjà fourni par le poste.
-- [ ] Définir la qualification sur poste neuf et runner, ainsi que les scénarios
-  réseau, hors ligne et d'échec; préparer les preuves attendues.
+- [ ] BLOQUÉE pour exécution: qualifier sur poste neuf et runner, puis vérifier
+  les scénarios réseau/hors ligne/échec; aucune machine vierge ni aucun runner
+  réel n'est disponible. La procédure locale et les preuves attendues sont
+  documentées, mais ne remplacent pas cette exécution externe.
 - [x] Préserver et étendre les tests du socle: `scripts/test.ps1` exécute
   actuellement 44 scenarios avec 44 PASS; les 37 scenarios d'origine sont conserves.
 - [x] Recréer l'environnement Python local et vérifier les lanceurs Python/TOML.
