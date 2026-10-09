@@ -50,7 +50,7 @@ La CLI retourne 0 sur PASS ou plan seul valide, 1 sur verdict FAIL et 2 sur scan
 
 ## Preuves et limites
 
-27 tests unitaires Compliance, 6 tests Control Catalog, 13 intégrations Compliance, 4 intégrations adaptateur et 45 scénarios historiques passent. Les tests couvrent le DAG, budgets, schémas, rapports, permissions, parité et audits externes PowerShell/Python/Markdown.
+27 tests unitaires Compliance, 6 tests Control Catalog, 13 intégrations Compliance, 4 intégrations adaptateur et 49 scénarios Quality Gate historiques passent. Les tests couvrent le DAG, budgets, schémas, rapports, permissions, parité et audits externes PowerShell/Python/Markdown. Ces comptes décrivent les validations locales du 9 octobre 2026; Full garde son finding pip-audit distinct.
 
 Le DAG catalogue est trié topologiquement; cycles et références absentes sont refusés. Un prérequis non réussi bloque les contrôles dépendants requis. Le moteur applique deadline globale, maximum de contrôles et plafond de sortie conservée par flux. Le résumé humain optionnel s'écrit sur stderr sans polluer stdout JSON.
 

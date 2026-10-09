@@ -90,4 +90,4 @@ Après toute mise à jour, exécuter bootstrap, Doctor, `scripts/test.ps1`, Quic
 
 `-Force` peut recréer `.venv` et réinstaller les outils. `-Offline` nécessite des archives, roues et modules déjà disponibles, sans qualification hors ligne des hooks. `-SkipOptionalTools` peut omettre Terragrunt, alors que Doctor l'exige. Terraform est uniquement recherché dans le PATH; aucun téléchargement Terraform/OpenTofu n'est implémenté. Les relais Bash exigent `powershell.exe` et ne sont pas des installateurs Linux/macOS.
 
-Doctor vérifie encore `.tools/python` même si le bootstrap a choisi un Python existant. Il ne lit pas l'index runtime, ne valide pas le cache des clones de hooks et ne remplace pas un audit des dépendances. Les preuves et blocages restent dans [testing.md](testing.md).
+Doctor lit le Runtime Index et vérifie la version/hash du Python sélectionné, le Python de `.venv`, le lock, les versions et provenances des wheels, PSScriptAnalyzer et les binaires. Il ne répare pas le cache des clones pre-commit (cette réparation appartient à Bootstrap) et ne remplace pas l'audit de sécurité pip-audit. Les preuves et blocages restent dans [testing.md](testing.md).

@@ -15,8 +15,6 @@ La procédure de qualification locale prévue sous Windows x64 est: bootstrap, D
 
 Le corpus synthétique Discovery rapporte 10 échantillons positifs, 2 négatifs, 3 ambiguïtés attendues, 0 faux positif, 0 faux négatif et 0 ambiguïté inattendue. Ces mesures sont des tests de régression à marqueurs connus, pas une mesure sur la diversité de dépôts consommateurs.
 
-Le corpus synthétique de Discovery rapporte 10 échantillons positifs, 2 négatifs, 3 ambiguïtés attendues, 0 faux positif, 0 faux négatif et 0 ambiguïté inattendue. Ce résultat est un test de régression à marqueurs connus, pas une mesure sur la prévalence ni la diversité de dépôts consommateurs.
-
 Le lancement Compliance sur le depot local a produit [compliance-report.json](../reports/compliance-report.json): 32 controles planifies, 4 success, 1 fail, 1 error et 26 skipped, verdict **FAIL**, couverture partielle. Le fail concerne `Update-Detection` du harnais historique (`PSUseShouldProcessForStateChangingFunctions`); l'erreur critique est ShellCheck indisponible sous Windows. Les nouveaux fichiers du module, de l'adaptateur et des tests passent l'analyse PowerShell. Aucun controle n'a ete ignore pour rendre ce rapport vert.
 
 Cycle Resolver: **44 PASS, 0 FAIL**. Les nouvelles regressions couvrent alternative de secours, priorite du profil quand plusieurs candidats sont disponibles, disponibilite alternative dans la matrice et incompatibilite native Ansible Windows malgre un lanceur present. Les compteurs de selection et reutilisation sont verifies dans le scenario Python complementaire.

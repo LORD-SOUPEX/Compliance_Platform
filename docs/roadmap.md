@@ -51,8 +51,8 @@ capacité implémentée.
 Les descriptions de finalité et d'architecture cible expriment des objectifs,
 pas des garanties déjà livrées. Les écarts observés figurent dans l'état actuel
 et les phases existantes ci-dessous. Les détails opérationnels sont maintenus
-dans [docs/architecture-current.md](docs/architecture-current.md) et les preuves
-de cet audit dans [docs/testing.md](docs/testing.md).
+dans [l'architecture actuelle](architecture-current.md) et les preuves
+de cet audit dans [les validations](testing.md).
 
 Le cycle d'implementation suivant a repare le cache pre-commit deplace et les
 erreurs Markdown ainsi exposees. Bootstrap termine en code 0 et positionne
@@ -151,26 +151,26 @@ pistes d'étude remplaçables, pas des décisions d'architecture.
 
 | Élément présent | Réalité observée | Potentiel de réutilisation |
 | --- | --- | --- |
-| [README.md](README.md) | Documentation Windows, modes, outils, limites et blocage de sécurité | Documentation de référence et point d'entrée des consommateurs |
-| [scripts/bootstrap.ps1](scripts/bootstrap.ps1) | Recherche Python 3.11, installation locale, vérification des archives, paquets et hooks | Expérience d'installation et catalogue de distribution |
-| [scripts/doctor.ps1](scripts/doctor.ps1) | Diagnostic des versions, exécutables, fichiers et hygiène; réparation limitée sur demande | Futur diagnostic de capacités et de conformité |
-| [scripts/quality-gate.ps1](scripts/quality-gate.ps1) | Détection et orchestration multi-technologies dans un script | Comportements de référence à stabiliser avant séparation |
-| [scripts/check-emoji.ps1](scripts/check-emoji.ps1) | Contrôle des pictogrammes dans les textes, avec exclusions des contenus générés | Exemple de contrôle transverse indépendant d'une technologie métier |
-| [scripts/test.ps1](scripts/test.ps1) | Tests PowerShell du socle et éventuels tests Python avec couverture | Point d'entrée de validation |
-| [scripts/quality-gate.sh](scripts/quality-gate.sh) et autres relais Bash | Relais vers Windows PowerShell, pas moteurs Linux/macOS | Compatibilité Git Bash à conserver tant qu'elle est utile |
-| [.config/tool-versions.yml](.config/tool-versions.yml) | Catalogue de versions, sources, emplacements et sommes disponibles | Base d'un catalogue d'outils gouverné |
-| [requirements-dev.txt](requirements-dev.txt) et [requirements-dev.lock](requirements-dev.lock) | Versions directes et verrou de 154 paquets directs/transitifs pour Windows/Python 3.11 | Base de reproductibilité à compléter et qualifier |
-| [.config/quality-gate.yml](.config/quality-gate.yml) | Politique descriptive: statuts, seuils, exclusions et modes | Point de départ du futur catalogue déclaratif |
-| [pyproject.toml](pyproject.toml) | Paramètres Ruff, Pylint, mypy, pytest, couverture et Bandit | Standards Python initiaux, pas un produit Python métier |
-| [.pre-commit-config.yaml](.pre-commit-config.yaml) | Hooks génériques, Ruff, YAML, Markdown, secrets et catégories du gate | Adaptateur local existant |
-| [.vscode/tasks.json](.vscode/tasks.json) | Tâches bootstrap, Doctor, Quick, Full, Fix, Ci, hooks et tests | Expérience développeur déjà accessible |
-| [.vscode/settings.json](.vscode/settings.json) et [.vscode/extensions.json](.vscode/extensions.json) | Interpréteur local, hygiène des fichiers et recommandations d'extensions | Expérience développeur facultative; ni source de vérité ni prérequis des contrôles |
-| [.gitlab-ci.yml](.gitlab-ci.yml) | Un job Windows sans `allow_failure`, rapports conservés sept jours | Point d'entrée CI du socle; son échec n'est pas rendu consultatif |
-| [tests/integration/quality-gate.Tests.ps1](tests/integration/quality-gate.Tests.ps1) | 37 scénarios PowerShell sur Discovery, Matrix, Resolver, Runtime, exclusions, formats, processus et rapports | Fixtures synthétiques; pas de corpus réel de repositories consommateurs |
-| [.github/copilot-instructions.md](.github/copilot-instructions.md) et [.github/merge_request_template.md](.github/merge_request_template.md) | Consignes et checklist de contribution | Premiers supports de gouvernance humaine |
-| [.gitleaks.toml](.gitleaks.toml), [.yamllint.yml](.yamllint.yml), [.markdownlint.json](.markdownlint.json) et [.config/PSScriptAnalyzerSettings.psd1](.config/PSScriptAnalyzerSettings.psd1) | Paramètres spécialisés des contrôles | Règles existantes à inventorier et justifier |
-| [.editorconfig](.editorconfig), [.gitattributes](.gitattributes) et [.gitignore](.gitignore) | Conventions de fichiers et exclusion des environnements, caches et rapports | Standards transverses à conserver |
-| [docs/](docs/) | Documentation des composants actuels, limites, statuts et tests | Détails opérationnels liés depuis README et ce plan |
+| [README.md](../README.md) | Documentation Windows, modes, outils, limites et blocage de sécurité | Documentation de référence et point d'entrée des consommateurs |
+| [scripts/bootstrap.ps1](../scripts/bootstrap.ps1) | Recherche Python 3.11, installation locale, vérification des archives, paquets et hooks | Expérience d'installation et catalogue de distribution |
+| [scripts/doctor.ps1](../scripts/doctor.ps1) | Diagnostic des versions, exécutables, fichiers et hygiène; réparation limitée sur demande | Futur diagnostic de capacités et de conformité |
+| [scripts/quality-gate.ps1](../scripts/quality-gate.ps1) | Détection et orchestration multi-technologies dans un script | Comportements de référence à stabiliser avant séparation |
+| [scripts/check-emoji.ps1](../scripts/check-emoji.ps1) | Contrôle des pictogrammes dans les textes, avec exclusions des contenus générés | Exemple de contrôle transverse indépendant d'une technologie métier |
+| [scripts/test.ps1](../scripts/test.ps1) | Tests PowerShell du socle et éventuels tests Python avec couverture | Point d'entrée de validation |
+| [scripts/quality-gate.sh](../scripts/quality-gate.sh) et autres relais Bash | Relais vers Windows PowerShell, pas moteurs Linux/macOS | Compatibilité Git Bash à conserver tant qu'elle est utile |
+| [.config/tool-versions.yml](../.config/tool-versions.yml) | Catalogue de versions, sources, emplacements et sommes disponibles | Base d'un catalogue d'outils gouverné |
+| [requirements-dev.txt](../requirements-dev.txt) et [requirements-dev.lock](../requirements-dev.lock) | Versions directes et verrou de 154 paquets directs/transitifs pour Windows/Python 3.11 | Base de reproductibilité à compléter et qualifier |
+| [.config/quality-gate.yml](../.config/quality-gate.yml) | Politique descriptive: statuts, seuils, exclusions et modes | Point de départ du futur catalogue déclaratif |
+| [pyproject.toml](../pyproject.toml) | Paramètres Ruff, Pylint, mypy, pytest, couverture et Bandit | Standards Python initiaux, pas un produit Python métier |
+| [.pre-commit-config.yaml](../.pre-commit-config.yaml) | Hooks génériques, Ruff, YAML, Markdown, secrets et catégories du gate | Adaptateur local existant |
+| [.vscode/tasks.json](../.vscode/tasks.json) | Tâches bootstrap, Doctor, Quick, Full, Fix, Ci, hooks et tests | Expérience développeur déjà accessible |
+| [.vscode/settings.json](../.vscode/settings.json) et [.vscode/extensions.json](../.vscode/extensions.json) | Interpréteur local, hygiène des fichiers et recommandations d'extensions | Expérience développeur facultative; ni source de vérité ni prérequis des contrôles |
+| [.gitlab-ci.yml](../.gitlab-ci.yml) | Un job Windows sans `allow_failure`, rapports conservés sept jours | Point d'entrée CI du socle; son échec n'est pas rendu consultatif |
+| [tests/integration/quality-gate.Tests.ps1](../tests/integration/quality-gate.Tests.ps1) | 49 scénarios PowerShell sur Discovery, Matrix, Resolver, Runtime, exclusions, formats, processus et rapports | Fixtures synthétiques; pas de corpus réel de repositories consommateurs |
+| [Consignes Copilot](../.github/copilot-instructions.md) et [modèle de merge request](../.github/merge_request_template.md) | Consignes et checklist de contribution | Premiers supports de gouvernance humaine |
+| [.gitleaks.toml](../.gitleaks.toml), [.yamllint.yml](../.yamllint.yml), [.markdownlint.json](../.markdownlint.json) et [.config/PSScriptAnalyzerSettings.psd1](../.config/PSScriptAnalyzerSettings.psd1) | Paramètres spécialisés des contrôles | Règles existantes à inventorier et justifier |
+| [.editorconfig](../.editorconfig), [.gitattributes](../.gitattributes) et [.gitignore](../.gitignore) | Conventions de fichiers et exclusion des environnements, caches et rapports | Standards transverses à conserver |
+| [docs/](./) | Documentation des composants actuels, limites, statuts et tests | Détails opérationnels liés depuis README et cette roadmap |
 
 `src/Compliance.Engine.psm1` contient maintenant le moteur Compliance v1;
 `tests/unit/compliance-engine.Tests.ps1` couvre ses contrats et
@@ -195,12 +195,12 @@ Les rapports existants et les réexécutions du 6 octobre 2026 sont distingués:
 
 | Preuve existante | Résultat enregistré | Limite d'interprétation |
 | --- | --- | --- |
-| [reports/doctor-report.json](reports/doctor-report.json) | 67 PASS, aucun FAIL ou ERROR, 3 SKIP | Disponibilité et hygiène sur le poste observé, pas certification de sécurité |
-| [reports/quick.json](reports/quick.json), preuve antérieure du jour | 9 PASS, 1 FAIL, 1 WARN, 6 SKIP | Rapport non réécrit pendant cet audit; échec Markdownlint/cache pre-commit |
-| [reports/full.json](reports/full.json), preuve antérieure du jour | 10 PASS, 2 FAIL, 1 WARN, 6 SKIP | Rapport non réécrit; Markdownlint et audit des dépendances échouent |
+| [reports/doctor-report.json](../reports/doctor-report.json) | 67 PASS, aucun FAIL ou ERROR, 3 SKIP | Disponibilité et hygiène sur le poste observé, pas certification de sécurité |
+| [reports/quick.json](../reports/quick.json), preuve antérieure du jour | 9 PASS, 1 FAIL, 1 WARN, 6 SKIP | Rapport non réécrit pendant cet audit; échec Markdownlint/cache pre-commit |
+| [reports/full.json](../reports/full.json), preuve antérieure du jour | 10 PASS, 2 FAIL, 1 WARN, 6 SKIP | Rapport non réécrit; Markdownlint et audit des dépendances échouent |
 | Réexécution Quick pendant cet audit, sans `-ReportPath` | 9 PASS, 1 FAIL, 1 WARN, 6 SKIP, 0 ERROR; code 1 | Markdownlint reproduit le chemin obsolète; ShellCheck absent sous Windows |
 | Réexécution Full pendant cet audit, sans `-ReportPath` | 10 PASS, 2 FAIL, 1 WARN, 6 SKIP, 0 ERROR; code 1 | Inclut les 37 tests réussis et un audit réseau des dépendances de la plateforme |
-| [reports/quality-report.json](reports/quality-report.json) | Rapport Ci antérieur: 11 PASS, 1 FAIL, 1 WARN, 6 SKIP | Preuve historique, distincte du Full courant; pas une exécution GitLab distante |
+| [reports/quality-report.json](../reports/quality-report.json) | Rapport Ci antérieur: 11 PASS, 1 FAIL, 1 WARN, 6 SKIP | Preuve historique, distincte du Full courant; pas une exécution GitLab distante |
 | Exécution actuelle de `scripts/test.ps1` | 37 PASS, 0 FAIL | Tests PowerShell complets; aucun test Python métier n'est présent. Full exécute également la suite |
 | Dernière exécution documentée de `scripts/bootstrap.ps1` | Python 3.11 et cinq binaires vérifiés/indexés | Code 1 aux hooks; non relancée pendant l'audit; index relu: `windows-x64: experimental` |
 
@@ -220,7 +220,7 @@ Full a réinterrogé les avis et affiché quatre lignes pour `asteval==1.0.6` et
 `ecdsa==0.19.2`, avec un identifiant ecdsa répété. Les avis asteval annoncent 1.0.9
 comme correction; les métadonnées installées de Checkov 3.3.23 imposent néanmoins
 `asteval==1.0.6`. Aucune version corrective ecdsa n'est affichée. Les identifiants,
-pins et limites d'interprétation sont conservés dans [docs/testing.md](docs/testing.md).
+pins et limites d'interprétation sont conservés dans [docs/testing.md](testing.md).
 Le JSON du gate n'enregistre pas ces avis structurés. Aucune dépendance ni
 exclusion n'a été modifiée pour obtenir un succès.
 
@@ -459,7 +459,7 @@ Dans l'implémentation actuelle, Ansible ne déclare que `linting`, avec ansible
 et yamllint; le tableau ci-dessus est illustratif de la cible. Le resolver retient
 tous les candidats disponibles et déduplique par commande au sein de chaque
 technologie, pas globalement. Il ne vérifie ni contraintes de dépendances ni
-versions exécutables à chaque résolution. Voir [docs/resolver.md](docs/resolver.md).
+versions exécutables à chaque résolution. Voir [Tool Resolver](resolver.md).
 
 ## Capability Matrix
 
@@ -831,7 +831,7 @@ n'exécute pas les contrôles.
 Les détecteurs couvrent actuellement Python, PowerShell, Terraform/OpenTofu,
 Terragrunt, Ansible, Docker/Compose, Kubernetes, Helm, Shell, Markdown,
 JavaScript et TypeScript. Les heuristiques et leurs preuves sont détaillées dans
-[docs/discovery.md](docs/discovery.md). Les principales limites sont les
+[Discovery](discovery.md). Les principales limites sont les
 marqueurs faibles `hosts:` et `.tf`, les formats de fichiers non déclaratifs et
 l'absence de corpus de dépôts consommateurs permettant de mesurer les faux
 positifs/faux négatifs.
@@ -1228,7 +1228,7 @@ La Phase 4 est autorisee sans attendre la fermeture des phases 1 a 3. Le module
 aggregation, rapport et verdict, a partir de Discovery, Matrix et Resolver.
 `scripts/quality-gate.ps1 -Compliance` le lance; les modes historiques restent
 disponibles. Les contrats v1 et les limites sont dans
-[docs/compliance-engine.md](docs/compliance-engine.md).
+[Compliance Engine](compliance-engine.md).
 
 Objectif: transformer l'inventaire du consommateur et sa politique en plan
 d'exécution, résultats agrégés et décision explicable.
@@ -1362,7 +1362,7 @@ Statut: **PHASE EN COURS**.
 PowerShell, Git Bash, VS Code et GitLab utilisent le contrat commun
 `Compliance.Adapter.psm1` et `scripts/compliance-adapter.ps1`; Bash relaie le
 même wrapper. Le job GitLab est opt-in et `allow_failure`. Le contrat et les
-limitations sont documentés dans [docs/integrations.md](docs/integrations.md).
+limitations sont documentés dans [Intégrations](integrations.md).
 
 Objectif: proposer des points d'entrée facultatifs sans coupler le moteur à un
 éditeur, un shell, une CI ou un fournisseur Git.
@@ -1590,7 +1590,7 @@ Ne pas publier une RC tant qu'un critère obligatoire est bloqué. Un statut run
 
 L'audit documentaire est réalisé; les priorités techniques restent les tâches
 ouvertes des phases 1 à 3 et la qualification du contrat consommateur. Les pages
-existantes dans [docs/](docs/) portent les détails opérationnels et
-[docs/roadmap-status.md](docs/roadmap-status.md) résume les statuts sans créer une
+existantes dans [docs/](./) portent les détails opérationnels et
+[la synthèse des statuts](roadmap-status.md) résume les phases sans créer une
 roadmap indépendante. Aucune évolution technique ne doit être engagée sur la
 seule base de ce document, sans décision et autorisation explicites.

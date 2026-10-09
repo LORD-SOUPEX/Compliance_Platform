@@ -1,36 +1,144 @@
-# Compliance_Platform
+# Compliance Platform
 
-Socle d'un moteur local d'audit volontaire. Discovery inspecte un repository fourni; Quick/Full valident le socle et retournent des statuts et un code de sortie. Le verdict produit cible est consultatif; les limites des hooks et de la CI actuels sont précisées ci-dessous.
+## Vue d'ensemble
 
-## Démarrage rapide
+Compliance Platform est un outil local d'audit volontaire de dépôts. Il découvre les technologies, évalue les capacités disponibles et peut exécuter un plan de contrôles avec un rapport et un verdict consultatif. Il n'impose ni intégration à une forge ni blocage Git.
 
-Plateforme locale actuellement ciblée: Windows x64, PowerShell 5.1. Git et un accès HTTPS sont nécessaires au bootstrap.
+## Fonctionnalités clés
+
+- Runtime partagé installé et vérifié par Bootstrap; roue Python, binaire et module PowerShell sont tracés dans l'index runtime.
+- Discovery en lecture seule, avec preuves, racines, ambiguïtés et erreurs de parcours.
+- Capability Matrix et Tool Resolver pour expliciter les outils disponibles et leurs limites.
+- Compliance Engine v1 et catalogue de 28 contrôles, avec plan, permissions, résultats normalisés et rapport JSON.
+- Quick/Full/Ci/Fix historiques maintenus pendant que les parcours historiques et Compliance coexistent.
+- Adaptateurs locaux PowerShell, Git Bash et VS Code, plus un job GitLab informatif opt-in.
+
+Une technologie détectée n'est pas nécessairement contrôlée ni qualifiée. Le catalogue comprend Python, PowerShell, Terraform/OpenTofu, Terragrunt, Ansible, Docker/Compose, Kubernetes, Helm, Shell, Markdown, JavaScript et TypeScript; les contrôles varient selon la technologie et la plateforme.
+
+## Architecture
+
+```mermaid
+flowchart TD
+    Repo[Repository local] --> Discovery[Discovery]
+    Discovery --> Matrix[Capability Matrix]
+    Matrix --> Resolver[Tool Resolver]
+    Resolver --> Plan[Execution Plan]
+    Plan --> Engine[Compliance Engine]
+    Engine --> Report[Reporting]
+```
+
+Le parcours Compliance est décrit dans [l'architecture actuelle](docs/architecture-current.md) et [l'index documentaire](docs/index.md). Les modes Quick/Full historiques conservent leur orchestration dédiée.
+
+## Technologies reconnues
+
+Les marqueurs de fichiers couvrent Python, PowerShell, Terraform/OpenTofu, Terragrunt, Ansible, Docker/Compose, Kubernetes, Helm, Shell, Markdown, JavaScript et TypeScript. Les ambiguïtés, racines et contrôles réellement configurés sont détaillés dans [Discovery](docs/discovery.md) et [Capability Matrix](docs/capability-matrix.md). La détection seule ne certifie ni la prise en charge ni la qualité sur des dépôts réels.
+
+## Plateformes prises en charge
+
+La seule plateforme exécutée localement est Windows x64 avec Windows PowerShell 5.1 et Python 3.11. Windows x64 est `experimental` au niveau produit; Windows ARM64, Linux x64/ARM64 et macOS x64/ARM64 sont `targeted`, pas qualifiés. Le marqueur `qualified` de l'index runtime signifie que l'installation a terminé, pas que le produit est certifié.
+
+## Installation
+
+Depuis la racine du dépôt, utiliser Windows PowerShell 5.1. L'installation initiale nécessite les artefacts configurés et un accès HTTPS. Git Bash ne fournit qu'un relais vers PowerShell; il ne constitue pas un runtime Linux/macOS.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -DiscoveryOnly -RepositoryPath <chemin-du-depot>
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Compliance -RepositoryPath <chemin-du-depot> -PlanOnly
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Compliance -RepositoryPath <chemin-du-depot>
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Mode Quick
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1
 ```
 
-Remplacer `<chemin-du-depot>` par un chemin local entre guillemets. Exécuter les commandes depuis la racine de Compliance_Platform.
+## Bootstrap
 
-`-DiscoveryOnly` retourne le JSON de détection, matrice de capacités et résolution d'outils sans exécuter de contrôles. Ajouter `-ReportPath discovery.json` pour conserver ce résultat sous `reports/` de Compliance_Platform. Quick/Full valident le socle local; leur utilisation sur un dépôt externe n'est pas encore qualifiée.
+Bootstrap installe les outils épinglés dans les espaces locaux du dépôt, sans modifier le PATH système ni les dépôts analysés. Pour réutiliser les artefacts déjà en cache:
 
-`-Compliance` execute le moteur v1 et produit le rapport JSON consultatif PASS/FAIL. Quick/Full/Ci/Fix produisent aussi le rapport de référence, en plus de leurs sorties historiques. `-PlanOnly` n'execute rien et ne donne pas de verdict. Les contrôles réseau ou chargeant du code demandent des permissions explicites; voir [le moteur](docs/compliance-engine.md). Le rapport montre couverture partielle et contrôles omis.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -Offline -NoColor
+```
 
-Ajouter `-HumanSummary` pour un résumé sur stderr tout en conservant stdout JSON pur. Le moteur utilise le Control Catalog v1 ci-dessous.
+Le mode hors ligne ne qualifie pas un poste neuf. Voir [Runtime](docs/runtime.md).
 
-Le bootstrap Windows x64 termine maintenant et marque son index `qualified`; Quick passe sans echec. Ce marqueur ne certifie ni la securite du runtime ni un poste neuf. Le bootstrap installe aussi des hooks dans le depot de la plateforme. Les limites et blocages restants sont decrits dans [les validations](docs/testing.md). Le verdict cible est consultatif, mais les hooks et la CI du socle peuvent echouer.
+## Doctor
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor.ps1 -NoColor
+```
+
+Doctor vérifie le snapshot Python, les versions, les hashes des roues, les binaires et PSScriptAnalyzer dans l'index local. Il n'est pas une qualification multi-plateforme.
+
+## Discovery
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -DiscoveryOnly -RepositoryPath "C:\chemin\du\depot"
+```
+
+Discovery n'exécute pas de contrôles. Il retourne les technologies, preuves, racines, ambiguïtés, matrice et résolution en JSON.
+
+## Mode Compliance
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Compliance -RepositoryPath "C:\chemin\du\depot" -PlanOnly
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Compliance -RepositoryPath "C:\chemin\du\depot"
+```
+
+`-PlanOnly` ne lance aucun contrôle et ne produit aucun verdict. Les contrôles nécessitant réseau ou exécution de code demandent explicitement `-AllowNetwork` et/ou `-AllowCodeExecution`. Ces permissions ne sont pas un sandbox. Consulter [Compliance Engine](docs/compliance-engine.md).
+
+## Quick
+
+Quick valide le socle et les contrôles applicables au dépôt plateforme. Son code 0 n'est pas une qualification produit ni une validation de couverture d'un dépôt consommateur.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Mode Quick -NoColor
+```
+
+## Full
+
+Full exécute les contrôles approfondis et les tests du socle. Le dernier résultat est **11 PASS, 1 FAIL, 1 WARN, 6 SKIP**; le seul FAIL est pip-audit sur `asteval==1.0.6` et `ecdsa==0.19.2`. Aucun finding n'est exclu ou masqué.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Mode Full -NoColor
+```
+
+## Runtime
+
+L'index runtime Windows x64 référence cinq binaires, le Python sélectionné, 154 packages/wheels et PSScriptAnalyzer. Les hashes et versions sont vérifiés par Bootstrap, Doctor et Resolver. La qualification du runtime ne lève pas le blocage de sécurité Full. Détails: [Runtime](docs/runtime.md) et [Resolver](docs/resolver.md).
+
+## Reporting
+
+Compliance émet le rapport JSON v1 avec résultats, findings, diagnostics, couverture, limitations, métriques et verdict. Les rapports historiques restent disponibles; voir [Reporting](docs/reporting.md). Les rapports peuvent contenir des chemins ou sorties sensibles; leur partage est à la charge de l'utilisateur.
+
+## Modèle de sécurité
+
+Réseau et exécution de code sont refusés par défaut en mode Compliance et doivent être autorisés explicitement. Les autorisations ne fournissent aucune isolation: n'exécuter que des contrôles et dépôts de confiance. Les rapports restent locaux; le moteur ne contacte pas une forge et n'exécute aucune opération Git de commit, push ou merge. Les hooks et la CI du dépôt peuvent néanmoins propager un code non nul.
+
+## État actuel
+
+Dernière validation locale consignée le 9 octobre 2026:
+
+| Contrôle | Résultat |
+| --- | --- |
+| Bootstrap Offline | Succès, code 0 |
+| Doctor | 71 PASS, 0 FAIL, 0 WARN, 3 SKIP |
+| Tests | 49 scénarios Quality Gate; suites unitaires et intégrations réussies |
+| Quick | 10 PASS, 0 FAIL, 1 WARN, 6 SKIP; code 0 |
+| Full | 11 PASS, 1 FAIL, 1 WARN, 6 SKIP; seul pip-audit échoue |
+| Hooks pre-commit | Succès |
+
+Aucun test Python métier n'est présent; ShellCheck n'est pas fourni sur Windows.
+
+## Blocages externes connus
+
+- Quatre lignes d'avis pip-audit héritées des pins Checkov/ecdsa; décision sécurité ou correction fournisseur nécessaire, sans exclusion autorisée.
+- Qualification sur poste neuf et runner GitLab réel non réalisée.
+- Linux, macOS et architectures ARM64 non disponibles pour une qualification native.
+- Aucun corpus consommateur autorisé pour mesurer précision, coût et utilité.
+- Les décisions d'override/politique et la désignation des responsables support relèvent de décisions humaines.
 
 ## Documentation
 
-- [Architecture implémentée](docs/architecture-current.md), [Discovery](docs/discovery.md).
-- [Bootstrap et runtime](docs/runtime.md), [Capability Matrix](docs/capability-matrix.md), [Tool Resolver](docs/resolver.md).
-- [Compliance Engine](docs/compliance-engine.md), [Reporting](docs/reporting.md), [Policy Engine](docs/policy-engine.md).
-- [Catalogue de contrôles v1](.config/control-catalog.json) et [schéma](.config/control-catalog.schema.json).
-- [Intégrations optionnelles](docs/integrations.md) PowerShell, Bash, VS Code et GitLab.
-- [Tests et validations](docs/testing.md), [statuts de la roadmap](docs/roadmap-status.md).
-- [Vision, état et priorités du projet](plan.md), source de vérité.
+Commencer par [l'index documentaire](docs/index.md); le rapport d'obsolescence est dans [docs/obsolescence-audit.md](docs/obsolescence-audit.md).
+
+## Contribution
+
+Les consignes projet sont dans [.github/copilot-instructions.md](.github/copilot-instructions.md) et le modèle de merge request dans [.github/merge_request_template.md](.github/merge_request_template.md). Toute modification des contrôles doit être suivie des tests, Quick et Full; les findings de sécurité ne doivent pas être masqués.
+
+## Licence
+
+Aucun fichier `LICENSE` n'est présent dans ce dépôt.
