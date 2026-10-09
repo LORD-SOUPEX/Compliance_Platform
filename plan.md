@@ -1085,7 +1085,7 @@ Statut: **PHASE EN COURS**.
 Objectif: disposer d'une base fiable et clairement qualifiée avant d'élargir les
 capacités d'analyse et les usages volontaires de la plateforme.
 
-- [ ] BLOQUÉE: traiter ou arbitrer le blocage Checkov et ses dépendances vulnérables sans
+- [ ] BLOQUÉE (FOURNISSEUR / DÉCISION HUMAINE): traiter ou arbitrer le blocage Checkov et ses dépendances vulnérables sans
   suppression d'avis ni retrait silencieux d'un contrôle; asteval 1.0.9 est annoncé
   correctif, mais Checkov installé impose encore 1.0.6. Dépend d'une correction
   fournisseur ou d'une décision humaine; aucun finding n'est supprimé.
@@ -1093,10 +1093,11 @@ capacités d'analyse et les usages volontaires de la plateforme.
   de dépendances, des hooks et du diagnostic.
 - [x] Examiner les divergences entre catalogues, scripts et Doctor, y compris les
   notions d'outils facultatifs et de Python déjà fourni par le poste.
-- [ ] BLOQUÉE pour exécution: qualifier sur poste neuf et runner, puis vérifier
+- [ ] BLOQUÉE (POSTE NEUF / RUNNER GITLAB): qualifier sur poste neuf et runner, puis vérifier
   les scénarios réseau/hors ligne/échec; aucune machine vierge ni aucun runner
   réel n'est disponible. La procédure locale et les preuves attendues sont
-  documentées, mais ne remplacent pas cette exécution externe.
+  documentées, mais ne remplacent pas cette exécution externe. Le scénario
+  Bootstrap Offline local est validé; la qualification poste neuf/runner reste externe.
 - [x] Préserver et étendre les tests du socle: `scripts/test.ps1` exécute
   actuellement 44 scenarios avec 44 PASS; les 37 scenarios d'origine sont conserves.
 - [x] Recréer l'environnement Python local et vérifier les lanceurs Python/TOML.
@@ -1109,9 +1110,9 @@ capacités d'analyse et les usages volontaires de la plateforme.
   Quick sans FAIL ni ERROR, sans desactivation de regle.
 - [x] Réexécuter Quick/Full et documenter distinctement les échecs d'environnement
   et de sécurité, sans modifier les rapports antérieurs ni contourner le gate.
-- [ ] BLOQUÉE: obtenir Quick/Full sans échec d'audit de dépendances; Full reste
+- [ ] BLOQUÉE (FOURNISSEUR / ARBITRAGE SÉCURITÉ): obtenir Quick/Full sans échec d'audit de dépendances; Full reste
   bloqué par les quatre avis pip-audit sur asteval/ecdsa, sans exclusion permise.
-- [ ] BLOQUÉE: publier, sous autorisation distincte, un état identifié du socle;
+- [ ] BLOQUÉE (AUTORISATION HUMAINE): publier, sous autorisation distincte, un état identifié du socle;
   le workspace non suivi n'est pas une release consommable et aucune autorisation
   de publication n'est donnée.
 
@@ -1138,11 +1139,13 @@ explicable, sans annoncer comme supportées des technologies non qualifiées.
   automatique du contrôle; scénario négatif validé.
 - [x] Exclure les dossiers générés avant parcours et ne pas descendre dans les
   répertoires de réanalyse; limites des liens de fichiers documentées.
-- [ ] BLOQUÉE: mesurer faux positifs/faux négatifs sur un corpus autorisé de
+- [ ] BLOQUÉE (CORPUS CONSOMMATEUR): mesurer faux positifs/faux négatifs sur un corpus autorisé de
   repositories; aucun dépôt consommateur autorisé n'est fourni.
-- [ ] Étendre la résolution des racines et qualifier les heuristiques sur monorepos,
-  layouts mixtes et projets imbriqués, notamment Terraform/OpenTofu par racine.
-- [ ] Ajouter une stratégie d'override déclaratif et d'exclusion explicable.
+- [x] Étendre la résolution des racines et qualifier les heuristiques sur monorepos,
+  layouts mixtes et projets imbriqués, notamment Terraform/OpenTofu par racine;
+  tests d'intégration couvrent racines séparées, fichiers imbriqués et racine ambiguë.
+- [ ] BLOQUÉE (DÉCISION HUMAINE / GOUVERNANCE): ajouter une stratégie d'override déclaratif et d'exclusion explicable;
+  les règles d'autorisation, de priorité et de traçabilité doivent être approuvées avant implémentation.
 - [x] Restituer les erreurs de parcours et lecture dans `scan_errors`, conserver
   l'inventaire et le rapport DiscoveryOnly et retourner code 2 sur scan incomplet;
   regression de fichier verrouille et remise a zero entre scans validees.
@@ -1166,13 +1169,14 @@ les capacités et outils réellement nécessaires à chaque repository analysé.
 
 - [x] Réutiliser le catalogue existant de versions/sources et enregistrer les
   versions actives et SHA-256 des binaires dans `.tools/runtime/index.json`.
-- [ ] Étendre le catalogue des outils aux artefacts et dépendances par chaque
+- [ ] BLOQUÉE (FOURNISSEURS / AUTRES PLATEFORMES): étendre le catalogue des outils aux artefacts et dépendances par chaque
   couple OS + architecture.
 - [x] Vérifier versions et intégrité des cinq binaires Windows x64 actuellement
   installés.
 - [x] Enregistrer Gitleaks 8.30.1, TFLint 0.64.0, Terragrunt 1.1.6,
   Hadolint 2.15.1 et Trivy 0.75.0 dans l'index Runtime.
-- [ ] Définir une qualification mesurée pour toutes les combinaisons OS + architecture.
+- [ ] BLOQUÉE (AUTRES PLATEFORMES): définir une qualification mesurée pour toutes les combinaisons OS + architecture;
+  les hôtes requis pour produire ces preuves ne sont pas disponibles localement.
 - [x] Implémenter Capability Matrix, états disponibilité et raisons.
 - [x] Implémenter un Tool Resolver qui déduplique les outils disponibles par
   commande au sein d'une technologie et refuse les technologies ambiguës.
@@ -1184,7 +1188,7 @@ les capacités et outils réellement nécessaires à chaque repository analysé.
 - [x] Indexer le Python de base, le hash du venv, les 154 versions installées,
   le hash du lock et PSScriptAnalyzer avec hash de manifeste/arbre; Bootstrap,
   Doctor et Resolver consomment le même snapshot.
-- [ ] BLOQUÉE: qualifier les binaires Windows ARM64, Linux x64/ARM64 et macOS
+- [ ] BLOQUÉE (AUTRES PLATEFORMES): qualifier les binaires Windows ARM64, Linux x64/ARM64 et macOS
   x64/ARM64; ces hôtes/architectures ne sont pas disponibles dans l'environnement.
 - [x] Vérifier les sommes des téléchargements binaires, comparer la copie runtime
   à sa source et interrompre le bootstrap sur erreur d'installation.
@@ -1207,7 +1211,7 @@ les capacités et outils réellement nécessaires à chaque repository analysé.
   d'outil complementaire ni modifier les controles executes; fixtures validees.
 - [x] Exposer compteurs de candidats, commandes retenues, reutilisations,
   capacites non resolues et duree de selection par technologie, avec assertions.
-- [ ] BLOQUÉE: qualifier le coût total incluant scan, hash et probes sur un corpus
+- [ ] BLOQUÉE (CORPUS CONSOMMATEUR): qualifier le coût total incluant scan, hash et probes sur un corpus
   de dépôts consommateurs réels autorisés; aucun corpus autorisé n'est disponible.
   Les métriques locales/synthétiques ne prouvent pas les invocations évitées par le gate.
 
@@ -1371,11 +1375,11 @@ Objectif: proposer des points d'entrée facultatifs sans coupler le moteur à un
   convertit verdict FAIL en succès et conserve les erreurs techniques.
 - [x] Documenter permissions, données locales/artifacts, compatibilité et limites;
   tester les quatre contrats et wrappers.
-- [ ] BLOQUÉE: exécuter le job sur un runner GitLab réel et qualifier artifacts/règles;
+- [ ] BLOQUÉE (RUNNER GITLAB): exécuter le job sur un runner GitLab réel et qualifier artifacts/règles;
   aucun runner distant n'est accessible.
-- [ ] BLOQUÉE: valider sur des dépôts consommateurs autorisés et dans les contextes
+- [ ] BLOQUÉE (CORPUS CONSOMMATEUR / RUNNER GITLAB / VS CODE RÉEL): valider sur des dépôts consommateurs autorisés et dans les contextes
   GitLab/VS Code réels; ces dépôts et environnements ne sont pas fournis.
-- [ ] BLOQUÉE: qualifier les adaptateurs sur des dépôts réels représentatifs;
+- [ ] BLOQUÉE (CORPUS CONSOMMATEUR): qualifier les adaptateurs sur des dépôts réels représentatifs;
   les fixtures locales ne démontrent pas le comportement chez un consommateur.
 
 Réutilisation: tâches VS Code, scripts PowerShell et Bash, job GitLab et formats
@@ -1396,8 +1400,9 @@ Aucune exécution native des cinq autres plateformes n'est établie.
 Objectif: rendre le moteur et ses contrôles maintenables, reproductibles et
 portables pour des usages volontaires variés.
 
-- [ ] Stabiliser versions, configuration, documentation, support des plateformes et
-  procédures de mise à jour.
+- [ ] BLOQUÉE (QUALIFICATION PLATEFORMES / DÉCISION GOUVERNANCE): stabiliser versions, configuration, documentation, support des plateformes et
+  procédures de mise à jour. Les vérifications locales sont exécutées; le support
+  natif des plateformes et les responsabilités de maintenance restent externes.
 - [x] Formaliser les commandes reproductibles de qualification Windows x64 et
   consigner les résultats Quick/Full, les limites et le statut du runner distant.
 - [x] Inclure dans les rapports l'empreinte SHA-256 du catalogue réellement chargé,
@@ -1417,20 +1422,20 @@ portables pour des usages volontaires variés.
 - [x] Exposer les durées Discovery, Resolver, Compliance et Reporting dans le
   rapport v1, en champs facultatifs rétrocompatibles; DiscoveryOnly expose aussi
   les deux premières durées.
-- [ ] BLOQUÉE: compléter les mesures d'utilité des rapports et coût des contrôles
+- [ ] BLOQUÉE (CORPUS CONSOMMATEUR): compléter les mesures d'utilité des rapports et coût des contrôles
   avec des dépôts consommateurs autorisés; aucun corpus n'est disponible.
-- [ ] BLOQUÉE: répéter ces mesures sur des dépôts externes représentatifs et
+- [ ] BLOQUÉE (CORPUS CONSOMMATEUR): répéter ces mesures sur des dépôts externes représentatifs et
   autorisés; leur fourniture relève de l'accès consommateur.
-- [ ] BLOQUÉE: qualifier nativement chaque plateforme avec bootstrap, tests et
+- [ ] BLOQUÉE (AUTRES PLATEFORMES / FOURNISSEUR / ARBITRAGE SÉCURITÉ): qualifier nativement chaque plateforme avec bootstrap, tests et
   gates; cinq hôtes/architectures manquent et Windows Full reste bloqué par
   pip-audit. `qualified` runtime ne qualifie pas le produit.
-- [ ] BLOQUÉE: mesurer qualité de détection, coût, temps, couverture et utilité
+- [ ] BLOQUÉE (CORPUS CONSOMMATEUR): mesurer qualité de détection, coût, temps, couverture et utilité
   des rapports sur des données autorisées; le corpus synthétique ne les remplace pas.
 - [x] Définir les seuils de support `targeted`/`experimental`/`qualified`, les
   éléments à fournir pour un signalement et les vérifications des contributions.
-- [ ] BLOQUÉE: désigner les mainteneurs, le canal de triage et les responsabilités
+- [ ] BLOQUÉE (DÉCISION GOUVERNANCE): désigner les mainteneurs, le canal de triage et les responsabilités
   de support; nécessite une décision organisationnelle.
-- [ ] BLOQUÉE: étendre les technologies et adaptateurs selon des besoins observés;
+- [ ] BLOQUÉE (CORPUS CONSOMMATEUR / DÉCISION HUMAINE): étendre les technologies et adaptateurs selon des besoins observés;
   aucune demande consommateur autorisée ni priorité métier n'est fournie.
 
 Critères de sortie proposés: exécutions reproductibles, limites connues,
