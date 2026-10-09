@@ -38,6 +38,23 @@ function Get-PythonWheelProvenanceError {
     if ($actualHash -ne $provenance.artifact_sha256) { return 'SHA-256 de la roue acquise divergent.' }
 }
 
+function Get-DirectoryTreeSha256 {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return $null }
+    $root = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    $entries = New-Object System.Collections.Generic.List[string]
+    foreach ($file in Get-ChildItem -LiteralPath $Path -File -Recurse | Sort-Object FullName) {
+        $relativePath = $file.FullName.Substring($root.Length).Replace('\', '/')
+        $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        $entries.Add("$relativePath $hash`n")
+    }
+    if ($entries.Count -eq 0) { return $null }
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($entries -join ''))
+    $algorithm = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($algorithm.ComputeHash($bytes)).Replace('-', '').ToLowerInvariant() }
+    finally { $algorithm.Dispose() }
+}
+
 function Get-RuntimePythonInventoryError {
     param([Parameter(Mandatory = $true)][pscustomobject]$Platform)
     if (-not $Platform.python -or $Platform.python.packages -isnot [array] -or $Platform.python_packages -isnot [array]) { return 'Snapshot Python absent ou mal formé.' }
@@ -61,4 +78,4 @@ function Get-RuntimePythonInventoryError {
     }
 }
 
-Export-ModuleMember -Function Get-ToolArtifactProvenanceError, Get-PythonWheelProvenanceError, Get-RuntimePythonInventoryError
+Export-ModuleMember -Function Get-ToolArtifactProvenanceError, Get-PythonWheelProvenanceError, Get-DirectoryTreeSha256, Get-RuntimePythonInventoryError

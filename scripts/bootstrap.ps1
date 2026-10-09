@@ -367,23 +367,6 @@ function Register-ToolRuntimeEntry {
     Write-Status PASS "$ToolName $Version enregistré et vérifié dans Tool Runtime ($PlatformId)."
 }
 
-function Get-DirectorySha256 {
-    param([Parameter(Mandatory = $true)][string]$Path)
-    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { throw "Repertoire runtime absent: $Path" }
-    $root = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    $entries = New-Object System.Collections.Generic.List[string]
-    foreach ($file in Get-ChildItem -LiteralPath $Path -File -Recurse | Sort-Object FullName) {
-        $relativePath = $file.FullName.Substring($root.Length).Replace('\', '/')
-        $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-        $entries.Add("$relativePath $hash`n")
-    }
-    if ($entries.Count -eq 0) { throw "Repertoire runtime vide: $Path" }
-    $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($entries -join ''))
-    $algorithm = [Security.Cryptography.SHA256]::Create()
-    try { return [BitConverter]::ToString($algorithm.ComputeHash($bytes)).Replace('-', '').ToLowerInvariant() }
-    finally { $algorithm.Dispose() }
-}
-
 function Get-PythonWheelProvenanceRecord {
     param(
         [Parameter(Mandatory = $true)][string]$ReportPath,
@@ -573,8 +556,9 @@ function Register-ToolRuntimeInventory {
         path = $ModuleRelativePath.Replace('\', '/')
         source = $ModuleSource
         manifest_sha256 = (Get-FileHash -LiteralPath $moduleManifest -Algorithm SHA256).Hash.ToLowerInvariant()
-        tree_sha256 = Get-DirectorySha256 -Path $ModulePath
+        tree_sha256 = Get-DirectoryTreeSha256 -Path $ModulePath
     }
+    if (-not $moduleRecord.tree_sha256) { throw "Repertoire runtime absent ou vide: $ModulePath" }
     if ($shouldRegister) {
         $platformData = $platformProperty.Value
         $platformData | Add-Member -MemberType NoteProperty -Name python -Value $pythonRecord -Force

@@ -98,23 +98,6 @@ function Get-DoctorRuntimePlatform {
     return $platform
 }
 
-function Get-DoctorDirectorySha256 {
-    param([Parameter(Mandatory = $true)][string]$Path)
-    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return $null }
-    $root = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    $entries = New-Object System.Collections.Generic.List[string]
-    foreach ($file in Get-ChildItem -LiteralPath $Path -File -Recurse | Sort-Object FullName) {
-        $relativePath = $file.FullName.Substring($root.Length).Replace('\', '/')
-        $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-        $entries.Add("$relativePath $hash`n")
-    }
-    if ($entries.Count -eq 0) { return $null }
-    $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($entries -join ''))
-    $algorithm = [Security.Cryptography.SHA256]::Create()
-    try { return [BitConverter]::ToString($algorithm.ComputeHash($bytes)).Replace('-', '').ToLowerInvariant() }
-    finally { $algorithm.Dispose() }
-}
-
 try {
     Write-Information -InformationAction Continue "[INFO] Racine du dépôt : $repoRoot"
     $architectureValue = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
@@ -220,7 +203,7 @@ try {
             $_.Version.ToString() -eq $analyzerRecord.version -and [IO.Path]::GetFullPath($_.ModuleBase) -eq $analyzerPath
         } | Select-Object -First 1
         $manifestHash = if (Test-Path -LiteralPath $analyzerManifest -PathType Leaf) { (Get-FileHash -LiteralPath $analyzerManifest -Algorithm SHA256).Hash.ToLowerInvariant() } else { $null }
-        $treeHash = Get-DoctorDirectorySha256 -Path $analyzerPath
+        $treeHash = Get-DirectoryTreeSha256 -Path $analyzerPath
         if ($availableAnalyzer -and $manifestHash -eq $analyzerRecord.manifest_sha256 -and $treeHash -eq $analyzerRecord.tree_sha256) { Add-Status PASS 'PSScriptAnalyzer' "Version $($analyzerRecord.version), manifeste et arbre conformes au Runtime Index." }
         else { Add-Status ERROR 'PSScriptAnalyzer' 'Module absent, version divergente ou hash runtime invalide.' }
     }

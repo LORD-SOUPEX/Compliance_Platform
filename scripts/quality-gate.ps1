@@ -589,23 +589,6 @@ function Get-ArtifactIntegrityError {
     } catch { return "Verification d integrite impossible: $($_.Exception.Message)" }
 }
 
-function Get-ToolRuntimeDirectorySha256 {
-    param([Parameter(Mandatory = $true)][string]$Path)
-    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return $null }
-    $root = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    $entries = New-Object System.Collections.Generic.List[string]
-    foreach ($file in Get-ChildItem -LiteralPath $Path -File -Recurse | Sort-Object FullName) {
-        $relativePath = $file.FullName.Substring($root.Length).Replace('\', '/')
-        $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-        $entries.Add("$relativePath $hash`n")
-    }
-    if ($entries.Count -eq 0) { return $null }
-    $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($entries -join ''))
-    $algorithm = [Security.Cryptography.SHA256]::Create()
-    try { return [BitConverter]::ToString($algorithm.ComputeHash($bytes)).Replace('-', '').ToLowerInvariant() }
-    finally { $algorithm.Dispose() }
-}
-
 function Get-IndexedPythonPackageName {
     param([Parameter(Mandatory = $true)][string]$Command)
     $distribution = if ($Command -eq 'ansible') { 'ansible-core' } else { $Command }
@@ -622,7 +605,7 @@ function Get-IndexedModuleIntegrityError {
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { return 'Manifeste du module PowerShell absent.' }
     $manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($manifestHash -ne $Record.manifest_sha256) { return 'Manifeste du module PowerShell altere.' }
-    $treeHash = Get-ToolRuntimeDirectorySha256 -Path $modulePath
+    $treeHash = Get-DirectoryTreeSha256 -Path $modulePath
     if (-not $treeHash -or $treeHash -ne $Record.tree_sha256) { return 'Arbre du module PowerShell altere.' }
 }
 

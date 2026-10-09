@@ -412,7 +412,7 @@ try {
         $bootstrapTokens = $null
         $bootstrapErrors = $null
         $bootstrapAst = [Management.Automation.Language.Parser]::ParseFile($bootstrapPath, [ref]$bootstrapTokens, [ref]$bootstrapErrors)
-        $runtimeFunctions = @($bootstrapAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -in @('Register-ToolRuntimeEntry', 'Register-ToolRuntimeInventory', 'Get-DirectorySha256', 'Get-PythonWheelProvenanceRecord', 'Get-PythonWheelInventory', 'Assert-ToolManifest', 'Update-ToolRuntimePlatformStatus', 'Get-VerifiedDownload', 'Get-ManifestBlock', 'Get-ToolBlock', 'Get-ManifestValue', 'Install-PSScriptAnalyzer', 'Write-Status') }, $false))
+        $runtimeFunctions = @($bootstrapAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -in @('Register-ToolRuntimeEntry', 'Register-ToolRuntimeInventory', 'Get-PythonWheelProvenanceRecord', 'Get-PythonWheelInventory', 'Assert-ToolManifest', 'Update-ToolRuntimePlatformStatus', 'Get-VerifiedDownload', 'Get-ManifestBlock', 'Get-ToolBlock', 'Get-ManifestValue', 'Install-PSScriptAnalyzer', 'Write-Status') }, $false))
         foreach ($definition in $runtimeFunctions) { . ([scriptblock]::Create($definition.Extent.Text)) }
         $script:Manifest = [IO.File]::ReadAllText((Join-Path $originalRoot '.config/tool-versions.yml'), [Text.Encoding]::UTF8)
         Assert-ToolManifest -PythonPath $python -ManifestPath (Join-Path $originalRoot '.config/tool-versions.yml') -RequirementsPath (Join-Path $originalRoot 'requirements-dev.txt')
@@ -522,7 +522,7 @@ try {
         Write-Fixture '.tools/runtime/index.json' ($index | ConvertTo-Json -Depth 16)
         $nestedPipRecord.version = $nestedPipVersion
         Write-Fixture '.tools/runtime/index.json' ($index | ConvertTo-Json -Depth 16)
-        Assert-Condition ($platformData.powershell_modules[0].version -eq '1.25.0' -and $platformData.powershell_modules[0].tree_sha256 -eq (Get-DirectorySha256 -Path $moduleRoot)) 'Inventaire module PowerShell divergent de son arbre.'
+        Assert-Condition ($platformData.powershell_modules[0].version -eq '1.25.0' -and $platformData.powershell_modules[0].tree_sha256 -eq (Get-DirectoryTreeSha256 -Path $moduleRoot)) 'Inventaire module PowerShell divergent de son arbre.'
         Write-Fixture '.venv/Scripts/pip.exe' 'pip shim fixture'
         $nestedPipRecord.version = '0.0.0'
         Write-Fixture '.tools/runtime/index.json' ($index | ConvertTo-Json -Depth 16)

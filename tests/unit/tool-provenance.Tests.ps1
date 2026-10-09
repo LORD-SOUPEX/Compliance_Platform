@@ -37,6 +37,19 @@ try {
     $wheelRecord.provenance.artifact_path = '.tools/cache/wheels/../../../../outside.whl'
     if ((Get-PythonWheelProvenanceError -Record $wheelRecord -RepositoryRoot $workspace) -notmatch 'sortant') { throw 'Escaping wheel cache path was accepted.' }
 
+    $treePath = Join-Path $workspace 'module-tree'
+    New-Item -ItemType Directory -Path (Join-Path $treePath 'nested') -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $treePath 'root.txt'), 'root', [Text.UTF8Encoding]::new($false))
+    $nestedFile = Join-Path $treePath 'nested/child.txt'
+    [IO.File]::WriteAllText($nestedFile, 'child', [Text.UTF8Encoding]::new($false))
+    $treeHash = Get-DirectoryTreeSha256 -Path $treePath
+    if ($treeHash -notmatch '^[a-f0-9]{64}$' -or $treeHash -ne (Get-DirectoryTreeSha256 -Path $treePath)) { throw 'Directory tree hash is invalid or unstable.' }
+    [IO.File]::WriteAllText($nestedFile, 'modified', [Text.UTF8Encoding]::new($false))
+    if ((Get-DirectoryTreeSha256 -Path $treePath) -eq $treeHash) { throw 'Modified directory tree retained its previous hash.' }
+    $emptyTreePath = Join-Path $workspace 'empty-tree'
+    New-Item -ItemType Directory -Path $emptyTreePath -Force | Out-Null
+    if ($null -ne (Get-DirectoryTreeSha256 -Path $emptyTreePath) -or $null -ne (Get-DirectoryTreeSha256 -Path (Join-Path $workspace 'missing-tree'))) { throw 'Empty or missing directory did not return null.' }
+
     $bootstrapTokens = $null
     $bootstrapErrors = $null
     $bootstrapAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $repoRoot 'scripts/bootstrap.ps1'), [ref]$bootstrapTokens, [ref]$bootstrapErrors)
@@ -102,4 +115,4 @@ try {
     if (Test-Path -LiteralPath $workspace) { Remove-Item -LiteralPath $workspace -Recurse -Force }
 }
 
-Write-Information -InformationAction Continue '[SUMMARY] Tool provenance unit PASS=13 FAIL=0'
+Write-Information -InformationAction Continue '[SUMMARY] Tool provenance unit PASS=14 FAIL=0'
