@@ -57,6 +57,125 @@ function Get-ToolBlock {
     return Get-ManifestBlock -Text $Section -Name $Name -Indent 2
 }
 
+function Assert-ToolManifest {
+    param(
+        [Parameter(Mandatory = $true)][string]$PythonPath,
+        [Parameter(Mandatory = $true)][string]$ManifestPath,
+        [Parameter(Mandatory = $true)][string]$RequirementsPath
+    )
+    $validator = @'
+import pathlib, re, sys, yaml
+from urllib.parse import urlparse
+
+class UniqueKeyLoader(yaml.SafeLoader):
+    pass
+
+def construct_unique_mapping(loader, node, deep=False):
+    mapping = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise ValueError(f"duplicate YAML key: {key}")
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+UniqueKeyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_unique_mapping)
+
+def require_mapping(value, label):
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be a mapping")
+    return value
+
+def require_https(value, label, host=None):
+    parsed = urlparse(value if isinstance(value, str) else "")
+    if parsed.scheme != "https" or not parsed.netloc or (host and parsed.hostname != host):
+        raise ValueError(f"{label} must use an approved HTTPS URL")
+
+def require_relative(value, label):
+    path = pathlib.PurePosixPath(value.replace("\\", "/")) if isinstance(value, str) else pathlib.PurePosixPath("/")
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError(f"{label} must remain a relative path")
+
+def normalize(name):
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+try:
+    manifest_path = pathlib.Path(sys.argv[1])
+    requirements_path = pathlib.Path(sys.argv[2])
+    manifest = require_mapping(yaml.load(manifest_path.read_text(encoding="utf-8"), Loader=UniqueKeyLoader), "manifest")
+    expected_keys = {"schema", "dependency_lock", "python", "python_packages", "powershell", "binary_tools", "markdownlint", "terraform", "optional_tools"}
+    if set(manifest) != expected_keys or type(manifest.get("schema")) is not int or manifest["schema"] != 1:
+        raise ValueError("manifest root keys or schema version are invalid")
+    if manifest["dependency_lock"] != "requirements-dev.lock":
+        raise ValueError("dependency_lock must name requirements-dev.lock")
+    python = require_mapping(manifest["python"], "python")
+    for field in ("version", "architecture", "install_type", "source", "sha256", "checksum_source", "local_path"):
+        if not isinstance(python.get(field), str) or not python[field]:
+            raise ValueError(f"python.{field} is required")
+    require_https(python["source"], "python.source", "www.python.org")
+    require_https(python["checksum_source"], "python.checksum_source", "www.python.org")
+    if not re.fullmatch(r"[a-fA-F0-9]{64}", python["sha256"]):
+        raise ValueError("python.sha256 must be a SHA-256 digest")
+    require_relative(python["local_path"], "python.local_path")
+
+    requirements = {}
+    for line in requirements_path.read_text(encoding="utf-8").splitlines():
+        value = line.strip()
+        if not value or value.startswith("#"):
+            continue
+        match = re.fullmatch(r"([A-Za-z0-9][A-Za-z0-9._-]*)==([A-Za-z0-9][A-Za-z0-9.!+_-]*)", value)
+        if not match:
+            raise ValueError(f"requirements-dev.txt contains a non-exact pin: {value}")
+        name = normalize(match.group(1))
+        if name in requirements:
+            raise ValueError(f"duplicate direct requirement: {name}")
+        requirements[name] = match.group(2)
+    packages = manifest["python_packages"]
+    if not isinstance(packages, list) or not packages:
+        raise ValueError("python_packages must be a non-empty list")
+    package_pins = {}
+    for package in packages:
+        package = require_mapping(package, "python_packages item")
+        name = normalize(package.get("name", ""))
+        version = package.get("version")
+        if not name or not isinstance(version, str) or not version:
+            raise ValueError("python package name and version are required")
+        if name in package_pins:
+            raise ValueError(f"duplicate python package: {name}")
+        require_https(package.get("source"), f"python_packages.{name}.source", "pypi.org")
+        package_pins[name] = version
+    if package_pins != requirements:
+        raise ValueError("python_packages pins differ from requirements-dev.txt")
+
+    analyzer = require_mapping(require_mapping(manifest["powershell"], "powershell").get("psscriptanalyzer"), "powershell.psscriptanalyzer")
+    require_https(analyzer.get("source"), "powershell.psscriptanalyzer.source", "www.powershellgallery.com")
+    if not isinstance(analyzer.get("version"), str) or not analyzer["version"]:
+        raise ValueError("PSScriptAnalyzer version is required")
+    require_relative(analyzer.get("local_path"), "powershell.psscriptanalyzer.local_path")
+
+    tools = require_mapping(manifest["binary_tools"], "binary_tools")
+    for name, tool in tools.items():
+        tool = require_mapping(tool, f"binary_tools.{name}")
+        for field in ("version", "source", "local_path", "required"):
+            if field not in tool:
+                raise ValueError(f"binary_tools.{name}.{field} is required")
+        require_https(tool["source"], f"binary_tools.{name}.source")
+        require_relative(tool["local_path"], f"binary_tools.{name}.local_path")
+        if not isinstance(tool["required"], bool):
+            raise ValueError(f"binary_tools.{name}.required must be boolean")
+        if "version_args" in tool and (not isinstance(tool["version_args"], str) or not tool["version_args"]):
+            raise ValueError(f"binary_tools.{name}.version_args must be non-empty text")
+        if "checksum_asset_sha256" in tool and not re.fullmatch(r"[a-fA-F0-9]{64}", str(tool["checksum_asset_sha256"])):
+            raise ValueError(f"binary_tools.{name}.checksum_asset_sha256 must be a SHA-256 digest")
+except Exception as error:
+    print(f"Tool manifest validation failed: {error}", file=sys.stderr)
+    sys.exit(2)
+'@
+    $output = $validator | & $PythonPath - $ManifestPath $RequirementsPath 2>&1
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) { throw "Manifeste Tool invalide : $($output -join ' ')" }
+}
+
 function Invoke-CheckedCommand {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
@@ -699,6 +818,7 @@ try {
         $installArguments += @('--no-index', '--find-links', $wheelhouse)
     }
     Invoke-CheckedCommand -FilePath $venvPython -Arguments $installArguments -Description 'installation des dépendances Python verrouillées'
+    Assert-ToolManifest -PythonPath $venvPython -ManifestPath $manifestPath -RequirementsPath $requirementsPath
 
     $lockToolsRequirementsPath = Join-Path $repoRoot 'requirements-lock-tools.txt'
     $lockVenvRoot = Join-Path $toolsRoot 'lock-venv'

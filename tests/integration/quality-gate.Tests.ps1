@@ -412,9 +412,21 @@ try {
         $bootstrapTokens = $null
         $bootstrapErrors = $null
         $bootstrapAst = [Management.Automation.Language.Parser]::ParseFile($bootstrapPath, [ref]$bootstrapTokens, [ref]$bootstrapErrors)
-        $runtimeFunctions = @($bootstrapAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -in @('Register-ToolRuntimeEntry', 'Register-ToolRuntimeInventory', 'Get-DirectorySha256', 'Get-PythonWheelProvenanceRecord', 'Get-PythonWheelInventory', 'Update-ToolRuntimePlatformStatus', 'Get-VerifiedDownload', 'Get-ManifestBlock', 'Get-ToolBlock', 'Get-ManifestValue', 'Install-PSScriptAnalyzer', 'Write-Status') }, $false))
+        $runtimeFunctions = @($bootstrapAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -in @('Register-ToolRuntimeEntry', 'Register-ToolRuntimeInventory', 'Get-DirectorySha256', 'Get-PythonWheelProvenanceRecord', 'Get-PythonWheelInventory', 'Assert-ToolManifest', 'Update-ToolRuntimePlatformStatus', 'Get-VerifiedDownload', 'Get-ManifestBlock', 'Get-ToolBlock', 'Get-ManifestValue', 'Install-PSScriptAnalyzer', 'Write-Status') }, $false))
         foreach ($definition in $runtimeFunctions) { . ([scriptblock]::Create($definition.Extent.Text)) }
         $script:Manifest = [IO.File]::ReadAllText((Join-Path $originalRoot '.config/tool-versions.yml'), [Text.Encoding]::UTF8)
+        Assert-ToolManifest -PythonPath $python -ManifestPath (Join-Path $originalRoot '.config/tool-versions.yml') -RequirementsPath (Join-Path $originalRoot 'requirements-dev.txt')
+        Write-Fixture 'manifest-duplicate.yml' "schema: 1`nschema: 1`n"
+        $duplicateManifestRejected = $false
+        try { Assert-ToolManifest -PythonPath $python -ManifestPath (Join-Path $repoRoot 'manifest-duplicate.yml') -RequirementsPath (Join-Path $originalRoot 'requirements-dev.txt') }
+        catch { $duplicateManifestRejected = $_.Exception.Message -match 'duplicate YAML key' }
+        Assert-Condition $duplicateManifestRejected 'Clé YAML dupliquée acceptée dans le Tool Manifest.'
+        $requirementsFixture = Get-Content -LiteralPath (Join-Path $originalRoot 'requirements-dev.txt') -Raw -Encoding UTF8
+        Write-Fixture 'requirements-manifest-mismatch.txt' ($requirementsFixture.Replace('ruff==0.16.10', 'ruff==0.16.11'))
+        $manifestPinMismatchRejected = $false
+        try { Assert-ToolManifest -PythonPath $python -ManifestPath (Join-Path $originalRoot '.config/tool-versions.yml') -RequirementsPath (Join-Path $repoRoot 'requirements-manifest-mismatch.txt') }
+        catch { $manifestPinMismatchRejected = $_.Exception.Message -match 'pins differ' }
+        Assert-Condition $manifestPinMismatchRejected 'Divergence de pins manifeste/requirements acceptée.'
         $moduleRoot = Join-Path $originalRoot '.tools/powershell-modules'
         $script:Force = $false
         Install-PSScriptAnalyzer
