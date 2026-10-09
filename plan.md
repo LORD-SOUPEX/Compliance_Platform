@@ -1085,9 +1085,10 @@ Statut: **PHASE EN COURS**.
 Objectif: disposer d'une base fiable et clairement qualifiée avant d'élargir les
 capacités d'analyse et les usages volontaires de la plateforme.
 
-- [ ] Traiter ou arbitrer le blocage Checkov et ses dépendances vulnérables sans
+- [ ] BLOQUÉE: traiter ou arbitrer le blocage Checkov et ses dépendances vulnérables sans
   suppression d'avis ni retrait silencieux d'un contrôle; asteval 1.0.9 est annoncé
-  correctif, mais Checkov installé impose encore 1.0.6.
+  correctif, mais Checkov installé impose encore 1.0.6. Dépend d'une correction
+  fournisseur ou d'une décision humaine; aucun finding n'est supprimé.
 - [x] Clarifier le support Windows, les prérequis et le périmètre réel du verrou
   de dépendances, des hooks et du diagnostic.
 - [x] Examiner les divergences entre catalogues, scripts et Doctor, y compris les
@@ -1106,9 +1107,11 @@ capacités d'analyse et les usages volontaires de la plateforme.
   Quick sans FAIL ni ERROR, sans desactivation de regle.
 - [x] Réexécuter Quick/Full et documenter distinctement les échecs d'environnement
   et de sécurité, sans modifier les rapports antérieurs ni contourner le gate.
-- [ ] Obtenir Quick/Full sans échec de Markdownlint ni d'audit de dépendances.
-- [ ] Prévoir, sous autorisation distincte, la publication d'un état identifié du
-  socle; le workspace non suivi ne constitue pas une release consommable.
+- [ ] BLOQUÉE: obtenir Quick/Full sans échec d'audit de dépendances; Full reste
+  bloqué par les quatre avis pip-audit sur asteval/ecdsa, sans exclusion permise.
+- [ ] BLOQUÉE: publier, sous autorisation distincte, un état identifié du socle;
+  le workspace non suivi n'est pas une release consommable et aucune autorisation
+  de publication n'est donnée.
 
 Réutilisation: scripts, tests, conventions, rapports et documentation existants.
 
@@ -1133,7 +1136,8 @@ explicable, sans annoncer comme supportées des technologies non qualifiées.
   automatique du contrôle; scénario négatif validé.
 - [x] Exclure les dossiers générés avant parcours et ne pas descendre dans les
   répertoires de réanalyse; limites des liens de fichiers documentées.
-- [ ] Mesurer faux positifs/faux négatifs sur un corpus autorisé de repositories.
+- [ ] BLOQUÉE: mesurer faux positifs/faux négatifs sur un corpus autorisé de
+  repositories; aucun dépôt consommateur autorisé n'est fourni.
 - [ ] Étendre la résolution des racines et qualifier les heuristiques sur monorepos,
   layouts mixtes et projets imbriqués, notamment Terraform/OpenTofu par racine.
 - [ ] Ajouter une stratégie d'override déclaratif et d'exclusion explicable.
@@ -1178,7 +1182,8 @@ les capacités et outils réellement nécessaires à chaque repository analysé.
 - [x] Indexer le Python de base, le hash du venv, les 154 versions installées,
   le hash du lock et PSScriptAnalyzer avec hash de manifeste/arbre; Bootstrap,
   Doctor et Resolver consomment le même snapshot.
-- [ ] Qualifier les binaires Windows ARM64, Linux x64/ARM64 et macOS x64/ARM64.
+- [ ] BLOQUÉE: qualifier les binaires Windows ARM64, Linux x64/ARM64 et macOS
+  x64/ARM64; ces hôtes/architectures ne sont pas disponibles dans l'environnement.
 - [x] Vérifier les sommes des téléchargements binaires, comparer la copie runtime
   à sa source et interrompre le bootstrap sur erreur d'installation.
 - [x] Compléter la provenance externe des binaires préinstallés et des roues Python;
@@ -1364,9 +1369,12 @@ Objectif: proposer des points d'entrée facultatifs sans coupler le moteur à un
   convertit verdict FAIL en succès et conserve les erreurs techniques.
 - [x] Documenter permissions, données locales/artifacts, compatibilité et limites;
   tester les quatre contrats et wrappers.
-- [ ] Exécuter le job sur un runner GitLab réel et qualifier artifacts/règles.
-- [ ] Valider les intégrations sur des dépôts consommateurs autorisés et dans les contextes GitLab/VS Code réels.
-- [ ] Qualifier les adaptateurs sur des dépôts réels représentatifs; les fixtures locales ne démontrent pas leur comportement chez un consommateur.
+- [ ] BLOQUÉE: exécuter le job sur un runner GitLab réel et qualifier artifacts/règles;
+  aucun runner distant n'est accessible.
+- [ ] BLOQUÉE: valider sur des dépôts consommateurs autorisés et dans les contextes
+  GitLab/VS Code réels; ces dépôts et environnements ne sont pas fournis.
+- [ ] BLOQUÉE: qualifier les adaptateurs sur des dépôts réels représentatifs;
+  les fixtures locales ne démontrent pas le comportement chez un consommateur.
 
 Réutilisation: tâches VS Code, scripts PowerShell et Bash, job GitLab et formats
 de rapports existants, après qualification de leur comportement consultatif.
@@ -1407,18 +1415,21 @@ portables pour des usages volontaires variés.
 - [x] Exposer les durées Discovery, Resolver, Compliance et Reporting dans le
   rapport v1, en champs facultatifs rétrocompatibles; DiscoveryOnly expose aussi
   les deux premières durées.
-- [ ] Compléter les mesures d'utilité des rapports et coût des contrôles avec des
-  données provenant de dépôts consommateurs autorisés.
-- [ ] Répéter ces mesures sur des dépôts externes représentatifs et autorisés.
-- [ ] Qualifier nativement chaque plateforme avec bootstrap, tests et gates; le
-  statut runtime `qualified` seul ne qualifie pas le produit.
-- [ ] Mesurer qualité de détection, coût, temps d'exécution, couverture et utilité
-  des rapports sans compter l'adoption comme une obligation.
+- [ ] BLOQUÉE: compléter les mesures d'utilité des rapports et coût des contrôles
+  avec des dépôts consommateurs autorisés; aucun corpus n'est disponible.
+- [ ] BLOQUÉE: répéter ces mesures sur des dépôts externes représentatifs et
+  autorisés; leur fourniture relève de l'accès consommateur.
+- [ ] BLOQUÉE: qualifier nativement chaque plateforme avec bootstrap, tests et
+  gates; cinq hôtes/architectures manquent et Windows Full reste bloqué par
+  pip-audit. `qualified` runtime ne qualifie pas le produit.
+- [ ] BLOQUÉE: mesurer qualité de détection, coût, temps, couverture et utilité
+  des rapports sur des données autorisées; le corpus synthétique ne les remplace pas.
 - [x] Définir les seuils de support `targeted`/`experimental`/`qualified`, les
   éléments à fournir pour un signalement et les vérifications des contributions.
-- [ ] Désigner les mainteneurs, le canal de triage et les responsabilités de support.
-- [ ] Étendre progressivement les technologies et adaptateurs selon des besoins
-  observés et des critères de qualité documentés.
+- [ ] BLOQUÉE: désigner les mainteneurs, le canal de triage et les responsabilités
+  de support; nécessite une décision organisationnelle.
+- [ ] BLOQUÉE: étendre les technologies et adaptateurs selon des besoins observés;
+  aucune demande consommateur autorisée ni priorité métier n'est fournie.
 
 Critères de sortie proposés: exécutions reproductibles, limites connues,
 maintenance définie, usages locaux et intégrés documentés, sans dépendance
