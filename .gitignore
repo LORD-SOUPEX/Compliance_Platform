@@ -1,0 +1,45 @@
+# Local Python environment and caches
+.venv/
+.tools/*
+!.tools/README.md
+.tools/bin/
+.tools/cache/
+.tools/python/
+.tools/powershell-modules/
+.tools/pre-commit/
+.tools/test-workspaces/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ansible/
+.cache/
+.tox/
+.coverage
+coverage.xml
+htmlcov/
+
+# Generated reports and logs
+reports/*
+!reports/.gitkeep
+*.log
+*.tmp
+*.bak
+
+# Terraform state, cache, plans, and local variables
+.terraform/
+.terragrunt-cache/
+.terragrunt-cache-*/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+*.plan
+crash.log
+
+# Local editor and environment settings
+.vscode/*.local.json
+.env
+.env.*
+!.env.example

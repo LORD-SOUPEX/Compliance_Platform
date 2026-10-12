@@ -1,0 +1,18 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Exclut uniquement les contenus générés ignorés par Git."
+paths = [
+  '''(^|/)\.git/''',
+  '''(^|/)\.venv/''',
+  '''(^|/)\.tools/''',
+  '''(^|/)reports/''',
+  '''(^|/)__pycache__/''',
+  '''(^|/)\.pytest_cache/''',
+  '''(^|/)\.mypy_cache/''',
+  '''(^|/)\.ruff_cache/''',
+  '''(^|/)\.cache/''',
+  '''(^|/)\.terraform/''',
+  '''(^|/)\.terragrunt-cache/'''
+]

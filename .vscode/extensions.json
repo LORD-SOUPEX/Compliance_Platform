@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "ms-vscode.powershell",
+    "redhat.vscode-yaml",
+    "hashicorp.terraform",
+    "GitLab.gitlab-workflow"
+  ]
+}

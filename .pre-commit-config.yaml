@@ -1,0 +1,68 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=5120]
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-xml
+      - id: detect-private-key
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.10
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        args: [-c, .yamllint.yml]
+  - repo: local
+    hooks:
+      - id: markdownlint
+        name: Validation Markdown
+        entry: markdownlint-cli2
+        language: node
+        language_version: 26.10.0
+        additional_dependencies: [markdownlint-cli2@0.18.1]
+        types: [markdown]
+      - id: scan-emojis
+        name: Recherche des pictogrammes interdits
+        entry: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-emoji.ps1 -Path .
+        language: system
+        pass_filenames: false
+      - id: gitleaks
+        name: Recherche de secrets
+        entry: .tools/bin/gitleaks.exe dir --config .gitleaks.toml --redact .
+        language: system
+        pass_filenames: false
+      - id: powershell-analysis
+        name: Analyse PowerShell
+        entry: >-
+          powershell -NoProfile -ExecutionPolicy Bypass -File
+          scripts/quality-gate.ps1 -Mode Quick -Category PowerShell -NoColor
+        language: system
+        pass_filenames: false
+        files: '\.(ps1|psm1|psd1)$'
+      - id: ansible-analysis
+        name: Analyse Ansible
+        entry: >-
+          powershell -NoProfile -ExecutionPolicy Bypass -File
+          scripts/quality-gate.ps1 -Mode Quick -Category Ansible -NoColor
+        language: system
+        pass_filenames: false
+        files: '\.(yml|yaml)$'
+      - id: terraform-analysis
+        name: Analyse Terraform
+        entry: >-
+          powershell -NoProfile -ExecutionPolicy Bypass -File
+          scripts/quality-gate.ps1 -Mode Quick -Category Terraform -NoColor
+        language: system
+        pass_filenames: false
+        files: '\.(tf|tfvars)$'

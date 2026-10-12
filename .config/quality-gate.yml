@@ -1,0 +1,44 @@
+version: 1
+
+quality_gate:
+  blocking_statuses: [FAIL, ERROR]
+  thresholds:
+    python_coverage: 80
+    maximum_file_size_mb: 5
+    critical_vulnerabilities: 0
+    high_vulnerabilities: 0
+  paths:
+    reports: reports
+    local_tools: .tools/bin
+    local_cache: .tools/cache
+    test_workspaces: .tools/test-workspaces
+  exclusions:
+    generated:
+      - .git
+      - .venv
+      - .tools
+      - reports
+      - __pycache__
+      - .pytest_cache
+      - .mypy_cache
+      - .ruff_cache
+      - .cache
+      - .terraform
+      - .terragrunt-cache
+  missing_tools:
+    required: ERROR
+    optional: WARN
+  modes:
+    quick:
+      required: [repository, emoji_scan, secret_scan, formats, python, powershell, iac]
+      optional: [markdown, containers, shell]
+    full:
+      required: [repository, emoji_scan, secret_scan, formats, python, powershell, iac, tests, dependency_audit]
+      optional: [molecule, trivy_image]
+    ci:
+      required: [repository, emoji_scan, secret_scan, formats, python, powershell, iac, tests, dependency_audit]
+      optional: [molecule, trivy_image]
+  downloads:
+    timeout_seconds: 180
+    require_official_checksum_when_available: true
+    offline_cache: .tools/cache

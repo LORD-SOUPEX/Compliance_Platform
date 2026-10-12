@@ -27,11 +27,11 @@ flowchart TD
     Engine --> Report[Reporting]
 ```
 
-Le parcours Compliance est décrit dans [l'architecture actuelle](docs/architecture-current.md) et [l'index documentaire](docs/index.md). Les modes Quick/Full historiques conservent leur orchestration dédiée.
+Pour auditer votre projet externe, suivre le [tutoriel d'utilisation](docs/utilisation.md). Le parcours technique est décrit dans [l'architecture](docs/architecture-current.md). Les modes Quick/Full historiques conservent leur orchestration dédiée.
 
 ## Technologies reconnues
 
-Les marqueurs de fichiers couvrent Python, PowerShell, Terraform/OpenTofu, Terragrunt, Ansible, Docker/Compose, Kubernetes, Helm, Shell, Markdown, JavaScript et TypeScript. Les ambiguïtés, racines et contrôles réellement configurés sont détaillés dans [Discovery](docs/discovery.md) et [Capability Matrix](docs/capability-matrix.md). La détection seule ne certifie ni la prise en charge ni la qualité sur des dépôts réels.
+Les marqueurs de fichiers couvrent Python, PowerShell, Terraform/OpenTofu, Terragrunt, Ansible, Docker/Compose, Kubernetes, Helm, Shell, Markdown, JavaScript et TypeScript. Les ambiguïtés, racines et capacités sont détaillées dans [l'architecture](docs/architecture-current.md#discovery-et-capacités). La détection seule ne certifie ni la prise en charge ni la qualité sur des dépôts réels.
 
 ## Plateformes prises en charge
 
@@ -53,7 +53,7 @@ Bootstrap installe les outils épinglés dans les espaces locaux du dépôt, san
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -Offline -NoColor
 ```
 
-Le mode hors ligne ne qualifie pas un poste neuf. Voir [Runtime](docs/runtime.md).
+Le mode hors ligne ne qualifie pas un poste neuf. Voir [Maintenance](docs/maintenance.md).
 
 ## Doctor
 
@@ -78,7 +78,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Co
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Compliance -RepositoryPath "C:\chemin\du\depot"
 ```
 
-`-PlanOnly` ne lance aucun contrôle et ne produit aucun verdict. Les contrôles nécessitant réseau ou exécution de code demandent explicitement `-AllowNetwork` et/ou `-AllowCodeExecution`. Ces permissions ne sont pas un sandbox. Consulter [Compliance Engine](docs/compliance-engine.md).
+`-PlanOnly` ne lance aucun contrôle et ne produit aucun verdict. Les contrôles nécessitant réseau ou exécution de code demandent explicitement `-AllowNetwork` et/ou `-AllowCodeExecution`. Ces permissions ne sont pas un sandbox. Le [tutoriel](docs/utilisation.md) explique comment auditer un dossier projet, lire le rapport, corriger les findings et relancer l'audit.
 
 ## Quick
 
@@ -98,11 +98,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Mo
 
 ## Runtime
 
-L'index runtime Windows x64 référence cinq binaires, le Python sélectionné, 154 packages/wheels et PSScriptAnalyzer. Les hashes et versions sont vérifiés par Bootstrap, Doctor et Resolver. La qualification du runtime ne lève pas le blocage de sécurité Full. Détails: [Runtime](docs/runtime.md) et [Resolver](docs/resolver.md).
+L'index runtime Windows x64 référence cinq binaires, le Python sélectionné, 154 packages/wheels et PSScriptAnalyzer. Les hashes et versions sont vérifiés par Bootstrap, Doctor et Resolver. La qualification du runtime ne lève pas le blocage de sécurité Full. Détails: [Runtime et intégrité](docs/architecture-current.md#runtime-et-intégrité).
 
 ## Reporting
 
-Compliance émet le rapport JSON v1 avec résultats, findings, diagnostics, couverture, limitations, métriques et verdict. Les rapports historiques restent disponibles; voir [Reporting](docs/reporting.md). Les rapports peuvent contenir des chemins ou sorties sensibles; leur partage est à la charge de l'utilisateur.
+Compliance émet le rapport JSON v1 avec résultats, findings, diagnostics, couverture, limitations, métriques et verdict. Les rapports historiques restent disponibles; voir [Reporting et verdict](docs/architecture-current.md#reporting-et-verdict). Les rapports peuvent contenir des chemins ou sorties sensibles; leur partage est à la charge de l'utilisateur.
 
 ## Modèle de sécurité
 
@@ -133,7 +133,9 @@ Aucun test Python métier n'est présent; ShellCheck n'est pas fourni sur Window
 
 ## Documentation
 
-Commencer par [l'index documentaire](docs/index.md); le rapport d'obsolescence est dans [docs/obsolescence-audit.md](docs/obsolescence-audit.md).
+- [Tutoriel d'utilisation](docs/utilisation.md): auditer un projet externe et vérifier les corrections.
+- [Architecture et contrats techniques](docs/architecture-current.md): composants, technologies, permissions et rapports.
+- [Maintenance et qualification](docs/maintenance.md): installation, mises à jour, tests et blocages externes.
 
 ## Contribution
 
