@@ -2,6 +2,34 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Extension: Install tools",
+      "type": "process",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/vscode-extension.ps1", "-Action", "Install"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Extension: Build",
+      "type": "process",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/vscode-extension.ps1", "-Action", "Build"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Extension: Tests",
+      "type": "process",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/vscode-extension.ps1", "-Action", "Test"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Extension: Host tests",
+      "type": "process",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/vscode-extension.ps1", "-Action", "TestHost"],
+      "problemMatcher": []
+    },
+    {
       "label": "Bootstrap",
       "type": "process",
       "command": "powershell",

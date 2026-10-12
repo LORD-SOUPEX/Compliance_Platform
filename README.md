@@ -29,6 +29,10 @@ flowchart TD
 
 Pour auditer votre projet externe, suivre le [tutoriel d'utilisation](docs/utilisation.md). Le parcours technique est décrit dans [l'architecture](docs/architecture-current.md). Les modes Quick/Full historiques conservent leur orchestration dédiée.
 
+### Préparation Dans VS Code
+
+Le MVP local [vscode-extension](vscode-extension/package.json) ajoute une TreeView dans l'Explorateur : sélection d'une Target externe, Pipeline source distincte, préparation puis audit global, permissions explicites, statuts, durées, sorties et annulation. Un lecteur local ouvre le rapport validé en fin d'audit et permet de consulter verdict, couverture, contrôles, findings et sorties, sans conversion Markdown. Le moteur PowerShell reste responsable du contrat et du verdict. Les sessions sont sous `.tools/state/runs/`, jamais dans la Target ; seuls leurs identifiants sont conservés pour les retrouver comme historiques. Les lancements partiels restent hors périmètre. Le [tutoriel](docs/utilisation.md#audit-vs-code-mvp-local) décrit son lancement en Extension Development Host.
+
 ## Technologies reconnues
 
 Les marqueurs de fichiers couvrent Python, PowerShell, Terraform/OpenTofu, Terragrunt, Ansible, Docker/Compose, Kubernetes, Helm, Shell, Markdown, JavaScript et TypeScript. Les ambiguïtés, racines et capacités sont détaillées dans [l'architecture](docs/architecture-current.md#discovery-et-capacités). La détection seule ne certifie ni la prise en charge ni la qualité sur des dépôts réels.

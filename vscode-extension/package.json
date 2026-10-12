@@ -1,0 +1,54 @@
+{
+  "name": "compliance-local-pipelines",
+  "displayName": "Compliance Local Pipelines",
+  "description": "Preparation des pipelines de conformite pour une Target locale externe.",
+  "version": "0.1.0",
+  "private": true,
+  "publisher": "compliance-platform",
+  "engines": { "vscode": "^1.81.0" },
+  "main": "./.extension-build/src/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": { "supported": "limited", "description": "La preparation des outils exige un workspace approuve." },
+    "virtualWorkspaces": false
+  },
+  "contributes": {
+    "commands": [
+      { "command": "compliance.selectTarget", "title": "Compliance: Selectionner une Target", "icon": "$(folder-opened)" },
+      { "command": "compliance.refreshPlan", "title": "Compliance: Actualiser la preparation", "icon": "$(refresh)" },
+      { "command": "compliance.runAudit", "title": "Compliance: Lancer l'audit", "icon": "$(play)", "enablement": "compliance.canRun" },
+      { "command": "compliance.cancelAudit", "title": "Compliance: Annuler l'audit", "icon": "$(debug-stop)", "enablement": "compliance.auditActive" },
+      { "command": "compliance.openLastReport", "title": "Compliance: Ouvrir le rapport de la derniere session", "icon": "$(preview)", "enablement": "compliance.hasReport" },
+      { "command": "compliance.openReportFile", "title": "Compliance: Ouvrir un rapport existant", "icon": "$(go-to-file)" },
+      { "command": "compliance.refreshReport", "title": "Compliance: Actualiser le rapport", "icon": "$(refresh)" },
+      { "command": "compliance.openRawReport", "title": "Compliance: Ouvrir le JSON brut", "icon": "$(json)" },
+      { "command": "compliance.openControlOutput", "title": "Compliance: Ouvrir les sorties du controle", "icon": "$(output)" },
+      { "command": "compliance.openSessionFolder", "title": "Compliance: Ouvrir le dossier de la session", "icon": "$(folder-opened)", "enablement": "compliance.hasSession" },
+      { "command": "compliance.showLogs", "title": "Compliance: Ouvrir les messages de session", "icon": "$(output)" }
+    ],
+    "views": { "explorer": [{ "id": "compliance.pipelines", "name": "Compliance Pipelines", "icon": "$(list-tree)" }] },
+    "viewsWelcome": [{ "view": "compliance.pipelines", "contents": "[Selectionner une Target](command:compliance.selectTarget)" }],
+    "menus": {
+      "view/title": [
+        { "command": "compliance.selectTarget", "when": "view == compliance.pipelines", "group": "navigation@1" },
+        { "command": "compliance.refreshPlan", "when": "view == compliance.pipelines", "group": "navigation@2" },
+        { "command": "compliance.showLogs", "when": "view == compliance.pipelines", "group": "navigation@3" },
+        { "command": "compliance.runAudit", "when": "view == compliance.pipelines", "group": "navigation@4" },
+        { "command": "compliance.cancelAudit", "when": "view == compliance.pipelines", "group": "navigation@5" },
+        { "command": "compliance.openSessionFolder", "when": "view == compliance.pipelines", "group": "navigation@6" },
+        { "command": "compliance.openLastReport", "when": "view == compliance.pipelines", "group": "navigation@7" },
+        { "command": "compliance.openReportFile", "when": "view == compliance.pipelines", "group": "report@1" }
+      ],
+      "view/item/context": [{ "command": "compliance.openControlOutput", "when": "view == compliance.pipelines && viewItem == complianceControlOutput", "group": "inline" }]
+    },
+    "configuration": {
+      "title": "Compliance",
+      "properties": { "compliance.reportRedactionPatterns": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Motifs de masquage transmis au backend pour les sorties et rapports de session." } }
+    }
+  },
+  "devDependencies": {
+    "@types/node": "22.15.30",
+    "@types/vscode": "1.81.0",
+    "@vscode/test-electron": "2.5.2",
+    "typescript": "5.9.3"
+  }
+}

@@ -17,6 +17,7 @@ quality_gate:
       - .git
       - .venv
       - .tools
+      - .extension-build
       - reports
       - __pycache__
       - .pytest_cache

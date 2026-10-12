@@ -6,7 +6,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$ignoredDirectoryPattern = '(^|[\\/])(?:\.git|\.venv|\.tools|__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache|\.cache|reports|\.terraform|\.terragrunt-cache)([\\/]|$)'
+$ignoredDirectoryPattern = '(^|[\\/])(?:\.git|\.venv|\.tools|\.extension-build|__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache|\.cache|reports|\.terraform|\.terragrunt-cache)([\\/]|$)'
 $forbiddenRanges = @(
     @(0x2300, 0x23FF),
     @(0x2600, 0x27BF),

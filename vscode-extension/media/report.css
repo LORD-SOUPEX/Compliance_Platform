@@ -1,0 +1,16 @@
+:root { color-scheme: light dark; }
+body { margin: 0; padding: 24px; color: var(--vscode-editor-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); line-height: 1.5; letter-spacing: 0; }
+header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 2px solid var(--vscode-focusBorder); padding-bottom: 16px; }
+h1 { font-size: 24px; margin: 0; } h2 { font-size: 19px; margin: 28px 0 12px; } h3 { font-size: 16px; } h4 { font-size: 14px; }
+nav { display: flex; flex-wrap: wrap; gap: 8px; }
+button { font: inherit; color: var(--vscode-button-foreground); background: var(--vscode-button-background); border: 1px solid transparent; padding: 5px 12px; cursor: pointer; border-radius: 3px; }
+button:hover { background: var(--vscode-button-hoverBackground); } button:focus-visible { outline: 2px solid var(--vscode-focusBorder); } button:disabled { opacity: .5; cursor: default; }
+.muted { color: var(--vscode-descriptionForeground); } .notice { border-left: 4px solid var(--vscode-editorWarning-foreground); padding: 8px 16px; background: var(--vscode-editor-inactiveSelectionBackground); }
+dl { display: grid; grid-template-columns: minmax(120px, 180px) minmax(0, 1fr); gap: 5px 16px; } dt { color: var(--vscode-descriptionForeground); } dd { margin: 0; overflow-wrap: anywhere; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 12px; border-block: 1px solid var(--vscode-panel-border); padding: 12px 0; }
+.metrics strong { display: block; font-size: 22px; } .metrics span { color: var(--vscode-descriptionForeground); }
+.control { border: 1px solid var(--vscode-panel-border); border-radius: 4px; padding: 10px 12px; margin: 8px 0; }
+summary { cursor: pointer; display: list-item; overflow-wrap: anywhere; } summary strong { margin-inline: 10px; } .status { font-weight: 600; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--vscode-textCodeBlock-background); padding: 10px; max-height: 320px; overflow: auto; }
+li, p, h1, h2, h3 { overflow-wrap: anywhere; } .finding { border-top: 1px solid var(--vscode-panel-border); padding: 8px 0; }
+@media (max-width: 540px) { body { padding: 12px; } dl { grid-template-columns: 1fr; gap: 2px; } dd { margin-bottom: 8px; } }

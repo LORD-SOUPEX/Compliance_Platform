@@ -287,4 +287,16 @@ try {
     }
 } finally { Remove-Item -LiteralPath $adapterRoot -Recurse -Force }
 $passed++
+$script:progressEvents = New-Object System.Collections.Generic.List[string]
+$script:cancelProgress = $false
+$globalControls[0].dependencies = @()
+$globalControls[1].dependencies = @()
+$progressPlan = [pscustomobject]@{ repository = $platformRoot; controls = $globalControls }
+$progressRunner = { param($executable, $arguments, $root, $timeout, $maxBytes) [pscustomobject]@{ exit_code = 0; stdout = 'ok'; stderr = ''; error = $null; timed_out = $false } }
+$progressResults = @(Invoke-CompliancePlan -Plan $progressPlan -ProcessRunner $progressRunner -PlatformRoot $platformRoot -OnControlStarted { param($control, $started); $script:progressEvents.Add("start/$($control.id)") } -OnControlCompleted { param($control, $result); $script:progressEvents.Add("end/$($control.id)"); $script:cancelProgress = $true } -IsCancelled { $script:cancelProgress })
+Assert-Compliance ($progressResults.Count -eq 2 -and $progressResults[0].status -eq 'success' -and $progressResults[1].diagnostics[0].code -eq 'cancelled_before_start') 'Annulation entre controles non appliquee.'
+Assert-Compliance ($script:progressEvents.Count -eq 3) 'Callbacks absents ou controle annule demarre.'
+$progressReport = New-ComplianceReport -Discovery $discoveryReport -Matrix @() -Resolver @() -Plan $progressPlan -Results $progressResults -RunId ('a' * 32) -Interrupted
+Assert-Compliance ($progressReport.metadata.run_id -eq ('a' * 32) -and $progressReport.verdict -eq 'FAIL' -and -not $progressReport.coverage.complete -and (Test-ComplianceReport $progressReport)) 'Rapport interrompu non fiable.'
+$passed++
 Write-Information -InformationAction Continue "[SUMMARY] Compliance unit PASS=$passed FAIL=0"

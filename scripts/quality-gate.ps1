@@ -10,6 +10,8 @@ param(
     [switch]$HumanSummary,
     [switch]$AllowNetwork,
     [switch]$AllowCodeExecution,
+    [ValidatePattern('^[a-f0-9]{32}$')][string]$ProgressRunId,
+    [ValidatePattern('^[a-f0-9]{64}$')][string]$ExpectedCatalogSha256,
     [ValidateSet('PowerShell', 'Bash', 'VSCode', 'GitLab')][string]$Adapter = 'PowerShell',
     [ValidateRange(1, 86400)][int]$ComplianceTimeoutSeconds = 1800,
     [ValidateRange(1024, 10485760)][int]$ComplianceMaxOutputBytes = 1048576,
@@ -49,6 +51,7 @@ $script:Technologies = $null
 $script:ProcessTimeoutSeconds = $TimeoutSeconds
 $script:ProbeCandidateTools = $true
 $script:CommandProbeCache = @{}
+$script:ProgressSession = $null
 $script:ReportRedactionPatterns = @($ReportRedactionPattern | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 foreach ($pattern in $script:ReportRedactionPatterns) {
     try { $null = [regex]::new($pattern) }
@@ -150,7 +153,7 @@ function Get-DiscoveryFileContent {
 function Get-ProjectFile {
     param([string]$Root = $repoRoot)
     $script:ScanErrors = New-Object System.Collections.Generic.List[object]
-    $excluded = @('.git', '.venv', '.tools', 'reports', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.cache', '.terraform', '.terragrunt-cache')
+    $excluded = @('.git', '.venv', '.tools', '.extension-build', 'reports', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.cache', '.terraform', '.terragrunt-cache')
     $pending = New-Object System.Collections.Generic.Stack[string]
     $pending.Push($Root)
     while ($pending.Count -gt 0) {
@@ -182,7 +185,7 @@ function Invoke-BoundedProcess {
     if ($waitMilliseconds -lt 1 -or $waitMilliseconds -gt 86400000) { throw 'Timeout processus hors limites.' }
     $started = [DateTimeOffset]::UtcNow
     $timer = [Diagnostics.Stopwatch]::StartNew()
-    $result = [pscustomobject]@{ execution_start = $started.ToString('o'); execution_end = $null; duration_ms = 0; stdout = ''; stderr = ''; exit_code = $null; error = $null; timed_out = $false; output_truncated = $false }
+    $result = [pscustomobject]@{ execution_start = $started.ToString('o'); execution_end = $null; duration_ms = 0; stdout = ''; stderr = ''; exit_code = $null; error = $null; timed_out = $false; output_truncated = $false; cancelled = $false }
     $process = New-Object Diagnostics.Process
     try {
         $resolved = if (Test-Path -LiteralPath $Executable -PathType Leaf) { [IO.Path]::GetFullPath($Executable) } else {
@@ -204,11 +207,15 @@ function Invoke-BoundedProcess {
         $null = $process.Start()
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit($waitMilliseconds)) {
-            $result.timed_out = $true
-            $result.error = "Delai depasse : $Timeout secondes."
+        while (-not $process.WaitForExit([Math]::Min(200, $waitMilliseconds))) {
+            $sessionVariable = Get-Variable -Name ProgressSession -Scope Script -ErrorAction SilentlyContinue
+            $result.cancelled = $sessionVariable -and $sessionVariable.Value -and (Test-ComplianceCancellation -Session $sessionVariable.Value)
+            if (-not $result.cancelled -and $timer.ElapsedMilliseconds -lt $waitMilliseconds) { continue }
+            $result.timed_out = -not $result.cancelled
+            $result.error = if ($result.cancelled) { 'Execution annulee.' } else { "Delai depasse : $Timeout secondes." }
             if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { & taskkill /PID $process.Id /T /F | Out-Null }
             else { $process.Kill() }
+            break
         }
         $process.WaitForExit()
         $result.stdout = $stdout.Result
@@ -992,8 +999,12 @@ function Invoke-GenericCheck {
 
     $jsonFiles = @($script:Files | Where-Object Extension -eq '.json')
     $jsonErrors = New-Object System.Collections.Generic.List[string]
+    Add-Type -AssemblyName System.Web.Extensions
+    $jsonParser = New-Object System.Web.Script.Serialization.JavaScriptSerializer
+    $jsonParser.MaxJsonLength = 10485760
+    $jsonParser.RecursionLimit = 100
     foreach ($file in $jsonFiles) {
-        try { Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop | Out-Null }
+        try { $null = $jsonParser.DeserializeObject([IO.File]::ReadAllText($file.FullName, [Text.Encoding]::UTF8)) }
         catch { $jsonErrors.Add("$($file.Name) : $($_.Exception.Message)") }
     }
     if ($jsonFiles.Count -eq 0) { Add-Check SKIP 'Validation JSON' 'Aucun fichier JSON détecté.' }
@@ -1184,6 +1195,19 @@ function Invoke-FixMode {
 }
 
 try {
+    if ($ProgressRunId) {
+        if (-not $Compliance -or $PlanOnly -or $DiscoveryOnly -or $Mode -eq 'Fix') { throw 'La progression exige un audit Compliance global.' }
+        Import-Module (Join-Path $platformRoot 'src/Compliance.Session.psm1') -Force
+        [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+        $script:ProgressSession = New-ComplianceSession -PlatformRoot $platformRoot -Repository $repoRoot -RunId $ProgressRunId -Network ([bool]$AllowNetwork) -CodeExecution ([bool]$AllowCodeExecution) -CatalogHash $script:ControlCatalog.content_sha256
+        Write-ComplianceEvent -Session $script:ProgressSession -Type 'session_started' -Data $script:ProgressSession
+        if ($ExpectedCatalogSha256 -and $ExpectedCatalogSha256 -ne $script:ControlCatalog.content_sha256) { throw 'Catalogue modifie depuis le consentement ; nouvelle preparation requise.' }
+        $runtime = Get-ToolRuntimeIndex
+        if (-not $runtime -or $runtime.PSObject.Properties.Name -contains 'error' -or $runtime.data.platforms.'windows-x64'.status -ne 'qualified') { throw 'Runtime source invalide.' }
+        $inventoryError = Get-RuntimePythonInventoryError -Platform $runtime.data.platforms.'windows-x64'
+        if ($inventoryError) { throw $inventoryError }
+        Write-ComplianceEvent -Session $script:ProgressSession -Type 'preparation_started'
+    }
     if ($PlanOnly -and -not $Compliance) { throw 'PlanOnly exige le mode Compliance.' }
     if ($Compliance -and ($DiscoveryOnly -or $Mode -eq 'Fix' -or $Category -ne 'All')) { throw 'Compliance ne se combine pas avec DiscoveryOnly, Fix ou Category.' }
     Push-Location $repoRoot
@@ -1222,6 +1246,12 @@ try {
             $complianceTimer = [Diagnostics.Stopwatch]::StartNew()
             try {
                 $executionPlan = New-CompliancePlan -Discovery $discoveryResult.technologies -CapabilityMatrix $discoveryResult.capability_matrix -Resolver $discoveryResult.tool_resolution -RepositoryRoot $repoRoot -Timeout $TimeoutSeconds -GlobalTimeout $ComplianceTimeoutSeconds -MaxOutputBytes $ComplianceMaxOutputBytes -AllowNetwork:$AllowNetwork -AllowCodeExecution:$AllowCodeExecution
+                if ($script:ProgressSession) {
+                    Write-ComplianceEvent -Session $script:ProgressSession -Type 'preparation_completed' -Data ([pscustomobject]@{ scan_complete = $discoveryResult.scan_complete })
+                    $snapshot = New-ComplianceReport -Discovery $discoveryResult -Matrix $discoveryResult.capability_matrix -Resolver $discoveryResult.tool_resolution -Plan $executionPlan -Results @() -PlanOnly -RunId $ProgressRunId -SourceAdapter $Adapter -CatalogSha256 $script:ControlCatalog.content_sha256 -RedactionPatterns $script:ReportRedactionPatterns -RedactionReplacement $ReportRedactionReplacement
+                    Write-ComplianceSessionJson -Path (Join-Path $script:ProgressSession.directory 'execution-plan.json') -Value $snapshot
+                    Write-ComplianceEvent -Session $script:ProgressSession -Type 'plan_available' -Data $snapshot
+                }
                 if (-not $PlanOnly -and $discoveryResult.scan_complete) {
                     $runner = {
                         param($executable, $arguments, $root, $timeout, $maximumOutputBytes)
@@ -1229,7 +1259,26 @@ try {
                     }
                     $env:PRE_COMMIT_HOME = Join-Path $platformRoot '.tools/pre-commit'
                     $env:PIP_CERT = Join-Path $platformRoot '.tools/cache/windows-root-ca.pem'
-                    $executionResults = @(Invoke-CompliancePlan -Plan $executionPlan -ProcessRunner $runner -PlatformRoot $platformRoot -GlobalTimeout $ComplianceTimeoutSeconds)
+                    $progressOptions = @{}
+                    if ($script:ProgressSession) {
+                        $progressOptions.IsCancelled = { Test-ComplianceCancellation -Session $script:ProgressSession }
+                        $progressOptions.OnControlStarted = {
+                            param($control, $started)
+                            Write-ComplianceEvent -Session $script:ProgressSession -Type 'control_started' -Control $control -Data ([pscustomobject]@{ status = 'Running'; execution_start = $started })
+                        }
+                        $progressOptions.OnControlCompleted = {
+                            param($control, $result)
+                            $safeResult = Protect-QualityGateReportValue -Value $result
+                            $hash = [Security.Cryptography.SHA256]::Create()
+                            try { $key = [BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($control.id))).Replace('-', '').ToLowerInvariant() }
+                            finally { $hash.Dispose() }
+                            $outputPath = Join-Path $script:ProgressSession.directory "logs/$key.json"
+                            Write-ComplianceSessionJson -Path $outputPath -Value $safeResult
+                            $presentation = Get-CompliancePresentation -Result $safeResult
+                            Write-ComplianceEvent -Session $script:ProgressSession -Type 'control_completed' -Control $control -Data ([pscustomobject]@{ status = $presentation.status; reason = $presentation.reason; result = $safeResult; output_path = $outputPath })
+                        }
+                    }
+                    $executionResults = @(Invoke-CompliancePlan -Plan $executionPlan -ProcessRunner $runner -PlatformRoot $platformRoot -GlobalTimeout $ComplianceTimeoutSeconds @progressOptions)
                 }
             } catch {
                 $preparationFailed = $true
@@ -1240,20 +1289,30 @@ try {
                 $script:StageMetrics.compliance_ms = $complianceTimer.ElapsedMilliseconds
             }
             $platformQualificationStatus = Get-PlatformQualificationStatus -PlatformId (Get-ExecutionPlatform).id
-            $complianceReport = New-ComplianceReport -Discovery $discoveryResult -Matrix $discoveryResult.capability_matrix -Resolver $discoveryResult.tool_resolution -Plan $executionPlan -Results $executionResults -PlanOnly:($PlanOnly -and -not $preparationFailed) -SourceAdapter $Adapter -CatalogSha256 $script:ControlCatalog.content_sha256 -PlatformQualificationStatus $platformQualificationStatus -StageMetrics $script:StageMetrics -RedactionPatterns $script:ReportRedactionPatterns -RedactionReplacement $ReportRedactionReplacement
+            $sessionOptions = @{}
+            $cancelled = $false
+            if ($script:ProgressSession) { $cancelled = Test-ComplianceCancellation -Session $script:ProgressSession; $sessionOptions.RunId = $ProgressRunId; $sessionOptions.Interrupted = $cancelled }
+            $complianceReport = New-ComplianceReport -Discovery $discoveryResult -Matrix $discoveryResult.capability_matrix -Resolver $discoveryResult.tool_resolution -Plan $executionPlan -Results $executionResults -PlanOnly:($PlanOnly -and -not $preparationFailed) -SourceAdapter $Adapter -CatalogSha256 $script:ControlCatalog.content_sha256 -PlatformQualificationStatus $platformQualificationStatus -StageMetrics $script:StageMetrics -RedactionPatterns $script:ReportRedactionPatterns -RedactionReplacement $ReportRedactionReplacement @sessionOptions
             if ($preparationFailed) { $complianceReport.execution_status = 'error' }
             $complianceJson = $complianceReport | ConvertTo-Json -Depth 20
-            $reportName = if ($ReportPath) { $ReportPath } else { 'compliance-report.json' }
+            $reportName = if ($script:ProgressSession) { $script:ProgressSession.report_path } elseif ($ReportPath) { $ReportPath } else { 'compliance-report.json' }
             $compliancePath = if ([IO.Path]::IsPathRooted($reportName)) { $reportName } else { Join-Path (Join-Path $platformRoot 'reports') $reportName }
             $reportDirectory = Split-Path -Parent $compliancePath
             if (-not (Test-Path -LiteralPath $reportDirectory -PathType Container)) { New-Item -ItemType Directory -Path $reportDirectory -Force | Out-Null }
-            [IO.File]::WriteAllText($compliancePath, $complianceJson, [Text.UTF8Encoding]::new($false))
+            if ($script:ProgressSession) { Write-ComplianceSessionJson -Path $compliancePath -Value $complianceReport }
+            else { [IO.File]::WriteAllText($compliancePath, $complianceJson, [Text.UTF8Encoding]::new($false)) }
             Remove-ExpiredComplianceReport -ReportsDirectory (Join-Path $platformRoot 'reports') -RetentionDays $ReportRetentionDays -CurrentReportPath $compliancePath
             if ($HumanSummary) {
                 $displayVerdict = if ($PlanOnly) { 'PLAN' } else { $complianceReport.verdict }
                 [Console]::Error.WriteLine("Compliance ${displayVerdict}: $($complianceReport.summary.success) success, $($complianceReport.summary.fail) fail, $($complianceReport.summary.error) error, $($complianceReport.summary.skipped) skipped. Rapport: $compliancePath")
             }
-            Write-Output $complianceJson
+            if ($script:ProgressSession) {
+                Write-ComplianceEvent -Session $script:ProgressSession -Type 'report_available' -Data ([pscustomobject]@{ report_path = $compliancePath })
+                $state = if ($cancelled) { 'cancelled' } elseif ($preparationFailed -or -not $discoveryResult.scan_complete) { 'failed' } else { 'completed' }
+                Complete-ComplianceSession -Session $script:ProgressSession -State $state
+                Write-ComplianceEvent -Session $script:ProgressSession -Type "session_$state" -Data ([pscustomobject]@{ verdict = $complianceReport.verdict; coverage = $complianceReport.coverage; reason = if ($cancelled) { [pscustomobject]@{ code = 'session_interrupted'; message = 'Audit annule ; couverture incomplete.' } } else { $null } })
+            } else { Write-Output $complianceJson }
+            if ($cancelled) { exit 2 }
             if ($preparationFailed -or -not $discoveryResult.scan_complete) { exit 2 }
             if ($PlanOnly) { exit 0 }
             if ($complianceReport.verdict -eq 'FAIL') { exit 1 }
@@ -1347,6 +1406,11 @@ try {
     Write-Information -InformationAction Continue '[PASS] Quality Gate terminé avec succès.'
     exit 0
 } catch {
+    if ($script:ProgressSession) {
+        Complete-ComplianceSession -Session $script:ProgressSession -State 'failed'
+        Write-ComplianceEvent -Session $script:ProgressSession -Type 'session_failed' -Data ([pscustomobject]@{ reason = [pscustomobject]@{ code = 'preparation_error'; message = Protect-QualityGateReportValue -Value $_.Exception.Message -RedactText:$true } })
+        exit 2
+    }
     Add-Check ERROR 'Exécution Quality Gate' $_.Exception.Message
     Write-Information -InformationAction Continue ("[SUMMARY] PASS={0} FAIL={1} WARN={2} SKIP={3} ERROR={4}" -f $script:Counts.PASS,$script:Counts.FAIL,$script:Counts.WARN,$script:Counts.SKIP,$script:Counts.ERROR)
     exit 2

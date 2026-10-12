@@ -61,6 +61,7 @@ function New-CompliancePlan {
                     if ($applicability -eq 'not_applicable') { $reason = 'Capacite non requise ou candidat non retenu par le resolver.' }
                     if ($applicability -eq 'ambiguous') { $reason = @($technology.ambiguities) -join '; ' }
                     if ($applicability -eq 'capability_unavailable') { $reason = @($capability.reasons) -join '; ' }
+                    $reasonCode = if ($hasAlternative -and $selected.Count -eq 0 -and $applicability -eq 'not_applicable') { 'alternative_not_selected' } else { $applicability }
                     $command = if ($candidate) { $candidate.command } else { 'none' }
                     $catalogControls = if ($capability.PSObject.Properties.Name -contains 'catalog_controls') { @($capability.catalog_controls) } else { @() }
                     $catalogControlCount = @($catalogControls).Count
@@ -81,6 +82,7 @@ function New-CompliancePlan {
                     }
                     if ($applicability -eq 'applicable' -and -not $evidenceMatches) {
                         $applicability = 'not_applicable'
+                        $reasonCode = 'not_applicable'
                         $reason = 'Aucune preuve du catalogue ne correspond a cette racine.'
                     }
                     $metadata = if ($candidate -and $candidate.PSObject.Properties.Name -contains 'severity') { $candidate } else { $catalogControl }
@@ -95,6 +97,7 @@ function New-CompliancePlan {
                     $parameters = if ($metadata) { $metadata.parameters } else { [pscustomobject]@{} }
                     if ($applicability -eq 'applicable' -and (($sideEffect -in @('network', 'network_code_execution') -and -not $AllowNetwork) -or ($sideEffect -in @('code_execution', 'network_code_execution') -and -not $AllowCodeExecution))) {
                         $applicability = 'not_applicable'
+                        $reasonCode = 'permission_denied'
                         $reason = "Effet $sideEffect non autorise pour cette execution."
                     }
                     $controlId = "$($technology.technology)/$($capability.name)/$command/$root"
@@ -108,6 +111,7 @@ function New-CompliancePlan {
                         control_catalog_id = if ($catalogControl) { $catalogControl.id } elseif ($candidate -and $candidate.PSObject.Properties.Name -contains 'catalog_id') { $candidate.catalog_id } else { $null }
                         root = $root
                         applicability = $applicability
+                        reason_code = $reasonCode
                         execution_order = $controls.Count + 1
                         timeout = $controlTimeout
                         max_output_bytes = $MaxOutputBytes
@@ -287,7 +291,10 @@ function Invoke-CompliancePlan {
         [Parameter(Mandatory = $true)][pscustomobject]$Plan,
         [Parameter(Mandatory = $true)][scriptblock]$ProcessRunner,
         [Parameter(Mandatory = $true)][string]$PlatformRoot,
-        [int]$GlobalTimeout = 0
+        [int]$GlobalTimeout = 0,
+        [scriptblock]$OnControlStarted,
+        [scriptblock]$OnControlCompleted,
+        [scriptblock]$IsCancelled
     )
     if ($GlobalTimeout -eq 0) { $GlobalTimeout = if ($Plan.PSObject.Properties.Name -contains 'budgets') { $Plan.budgets.timeout_seconds } else { 1800 } }
     if ($GlobalTimeout -lt 1 -or $GlobalTimeout -gt 86400) { throw 'Budget global hors limites.' }
@@ -298,7 +305,9 @@ function Invoke-CompliancePlan {
         $result = New-ComplianceResult -Control $control
         $dependencies = if ($control.PSObject.Properties.Name -contains 'dependencies') { @($control.dependencies) } else { @() }
         $failedDependencies = @($dependencies | Where-Object { -not $completed.ContainsKey($_) -or $completed[$_].status -ne 'success' })
-        if ($control.applicability -eq 'applicable' -and $failedDependencies.Count -gt 0) {
+        if ($IsCancelled -and (& $IsCancelled)) {
+            $result.diagnostics = @([pscustomobject]@{ code = 'cancelled_before_start'; message = 'Controle non lance apres annulation.'; critical = $false })
+        } elseif ($control.applicability -eq 'applicable' -and $failedDependencies.Count -gt 0) {
             if ($control.required) { $result.status = 'error'; $result.critical = $true } else { $result.status = 'skipped' }
             $result.diagnostics = @([pscustomobject]@{ code = 'dependency_failed'; message = "Prerequis non satisfaits: $($failedDependencies -join ', ')"; critical = $result.critical })
         } elseif ($control.applicability -eq 'applicable' -and $planTimer.Elapsed.TotalSeconds -ge $GlobalTimeout) {
@@ -310,9 +319,11 @@ function Invoke-CompliancePlan {
                 $result.status = 'error'
                 $result.critical = $true
             }
-            $result.diagnostics = @([pscustomobject]@{ code = $control.applicability; message = $control.reason; critical = $result.critical })
+            $code = if ($control.PSObject.Properties.Name -contains 'reason_code') { $control.reason_code } else { $control.applicability }
+            $result.diagnostics = @([pscustomobject]@{ code = $code; message = $control.reason; critical = $result.critical })
         } else {
             try {
+                if ($OnControlStarted) { & $OnControlStarted $control $result.execution_start | Out-Null }
                 $root = [IO.Path]::GetFullPath((Join-Path $Plan.repository $control.root))
                 $prefix = $Plan.repository.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
                 if ($root -ne $Plan.repository -and -not $root.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Racine d execution hors depot.' }
@@ -323,6 +334,7 @@ function Invoke-CompliancePlan {
                 if ([string]::IsNullOrWhiteSpace($result.tool_version)) {
                     $versionArguments = if ($control.tool.command -eq 'checkov' -and [IO.Path]::GetExtension($control.tool.source) -eq '.cmd') { @('-x', $control.tool.source, '--version') } else { @('--version') }
                     $probe = & $ProcessRunner $invocation.executable @($versionArguments) $root $remaining $control.max_output_bytes
+                    if ($probe -and $probe.PSObject.Properties.Name -contains 'cancelled' -and $probe.cancelled) { throw [OperationCanceledException]::new('Execution annulee.') }
                     if ($probe -and $probe.timed_out) {
                         $result.stdout = $probe.stdout
                         $result.stderr = $probe.stderr
@@ -341,7 +353,10 @@ function Invoke-CompliancePlan {
                     if ($execution.PSObject.Properties.Name -contains $property) { $result.$property = $execution.$property }
                 }
                 if ($result.output_truncated) { $result.diagnostics += [pscustomobject]@{ code = 'output_truncated'; message = 'Sorties tronquees par la limite de capture du controle.'; critical = $false } }
-                if ($execution.error) {
+                if ($execution.PSObject.Properties.Name -contains 'cancelled' -and $execution.cancelled) {
+                    $result.status = 'skipped'
+                    $result.diagnostics = @([pscustomobject]@{ code = 'cancelled_during_execution'; message = 'Arbre du controle termine apres annulation.'; critical = $false })
+                } elseif ($execution.error) {
                     $result.status = 'error'
                     $result.critical = [bool]$control.required
                     $result.diagnostics = @([pscustomobject]@{ code = if ($execution.timed_out) { 'timeout' } else { 'process_error' }; message = $execution.error; critical = $result.critical })
@@ -352,16 +367,18 @@ function Invoke-CompliancePlan {
                     $result.diagnostics = @([pscustomobject]@{ code = 'exit_nonzero'; message = "Controle en echec (code $($execution.exit_code))."; critical = $false })
                 }
             } catch {
-                $result.status = 'error'
-                $result.critical = [bool]$control.required
+                $cancelled = $_.Exception -is [OperationCanceledException]
+                $result.status = if ($cancelled) { 'skipped' } else { 'error' }
+                $result.critical = (-not $cancelled -and [bool]$control.required)
                 $result.execution_end = [DateTimeOffset]::UtcNow.ToString('o')
-                $result.diagnostics = @([pscustomobject]@{ code = if ($_.Exception -is [TimeoutException]) { 'timeout' } else { 'execution_error' }; message = $_.Exception.Message; critical = $result.critical })
+                $result.diagnostics = @([pscustomobject]@{ code = if ($cancelled) { 'cancelled_during_execution' } elseif ($_.Exception -is [TimeoutException]) { 'timeout' } else { 'execution_error' }; message = $_.Exception.Message; critical = $result.critical })
             }
         }
         $controlTimer.Stop()
         $result.execution_end = [DateTimeOffset]::UtcNow.ToString('o')
         $result.duration_ms = $controlTimer.ElapsedMilliseconds
         $completed[$control.id] = $result
+        if ($OnControlCompleted) { & $OnControlCompleted $control $result | Out-Null }
         $result
     }
     $planTimer.Stop()
@@ -570,7 +587,9 @@ function New-ComplianceReport {
         [string]$PlatformQualificationStatus = $null,
         [pscustomobject]$StageMetrics,
         [string[]]$RedactionPatterns = @(),
-        [string]$RedactionReplacement = '[REDACTED]'
+        [string]$RedactionReplacement = '[REDACTED]',
+        [ValidatePattern('^[a-f0-9]{32}$')][string]$RunId,
+        [switch]$Interrupted
     )
     if (-not $PSCmdlet.ShouldProcess($Plan.repository, 'Construire le rapport Compliance en memoire')) { return }
     $reportingTimer = [Diagnostics.Stopwatch]::StartNew()
@@ -588,6 +607,13 @@ function New-ComplianceReport {
                 $normalizedResults += $missing
             }
         }
+    }
+    if ($Interrupted) {
+        $interruption = New-ComplianceResult -Control ([pscustomobject]@{ id = 'engine/session'; tool = $null; technology = 'engine'; capability = 'session'; root = '.' })
+        $interruption.status = 'error'
+        $interruption.critical = $true
+        $interruption.diagnostics = @([pscustomobject]@{ code = 'session_interrupted'; message = 'Session interrompue ; evaluation incomplete.'; critical = $true })
+        $normalizedResults += $interruption
     }
     $scanDiagnostics = @()
     $scanFindings = @()
@@ -669,7 +695,7 @@ function New-ComplianceReport {
         engine_version = '0.1.0'
         generated_at = [DateTimeOffset]::UtcNow.ToString('o')
         metadata = [pscustomobject]@{
-            run_id = [guid]::NewGuid().ToString('N')
+            run_id = if ($RunId) { $RunId } else { [guid]::NewGuid().ToString('N') }
             source_mode = $SourceMode
             source_adapter = $SourceAdapter
             platform = if ($runtimePlatform.Count -gt 0) { $runtimePlatform[0] } else { $null }
@@ -681,7 +707,7 @@ function New-ComplianceReport {
             code_execution_authorized = [bool]$permissions.code_execution
         }
         repository = $Plan.repository
-        execution_status = if ($PlanOnly) { 'planned' } elseif (-not $discoveryScanComplete) { 'blocked' } else { 'completed' }
+        execution_status = if ($PlanOnly) { 'planned' } elseif ($Interrupted -or -not $discoveryScanComplete) { 'blocked' } else { 'completed' }
         discovery = $Discovery
         matrix = @($Matrix)
         resolver = @($Resolver)

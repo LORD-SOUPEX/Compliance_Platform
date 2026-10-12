@@ -665,6 +665,8 @@ try {
     }
     Invoke-TestCase 'Exclusions générées avant parcours' {
         Write-Fixture '.tools/cache/hidden.py' "invalid`n"
+        Write-Fixture '.tools/state/runs/fixture/plan.json' "invalid`n"
+        Write-Fixture 'vscode-extension/.extension-build/extension.js' "invalid`n"
         Write-Fixture '.venv/hidden.tf' "invalid`n"
         Write-Fixture 'reports/hidden.sh' "invalid`n"
         Update-Detection
@@ -688,6 +690,7 @@ try {
     }
     Invoke-TestCase 'Pictogrammes générés exclus' {
         Write-Fixture '.tools/cache/notes.txt' ([char]::ConvertFromUtf32(0x1F600) + "`n")
+        Write-Fixture 'vscode-extension/.extension-build/notes.txt' ([char]::ConvertFromUtf32(0x1F600) + "`n")
         Assert-Condition ((Invoke-Scanner) -eq 0) 'Cache analysé.'
     }
     Invoke-TestCase 'Outil requis absent bloque' {
@@ -755,7 +758,7 @@ try {
     }
     Invoke-TestCase 'Formats JSON TOML XML valides' {
         & git -C $repoRoot init --quiet | Out-Null
-        Write-Fixture 'data.json' "{`"value`": 1}`n"
+        Write-Fixture 'data.json' "{`"value`": 1, `"packages`": {`"`": {`"name`": `"fixture`"}}}`n"
         Write-Fixture 'data.toml' "value = 1`n"
         Write-Fixture 'data.xml' "<value>1</value>`n"
         Update-Detection

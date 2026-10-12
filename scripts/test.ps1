@@ -21,6 +21,8 @@ try {
         & powershell -NoProfile -ExecutionPolicy Bypass -File $test.FullName
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
+    & (Join-Path $PSScriptRoot 'vscode-extension.ps1') -Action Test
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     if ($testFiles.Count -eq 0) {
         Write-Information -InformationAction Continue '[SKIP] Aucun test Python; les tests PowerShell du socle ont été exécutés.'
         exit 0

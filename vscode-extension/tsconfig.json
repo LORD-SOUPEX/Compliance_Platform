@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2021",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "moduleDetection": "legacy",
+    "strict": true,
+    "esModuleInterop": true,
+    "rootDir": ".",
+    "outDir": ".extension-build",
+    "paths": { "@vscode/test-electron": ["../.tools/vscode-extension/node_modules/@vscode/test-electron"] },
+    "typeRoots": ["../.tools/vscode-extension/node_modules/@types"],
+    "skipLibCheck": false,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts", "media/**/*.ts"]
+}

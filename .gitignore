@@ -8,6 +8,7 @@
 .tools/powershell-modules/
 .tools/pre-commit/
 .tools/test-workspaces/
+vscode-extension/.extension-build/
 __pycache__/
 *.py[cod]
 .pytest_cache/

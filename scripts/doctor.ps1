@@ -29,7 +29,7 @@ function Add-Status {
 }
 
 function Get-ProjectFile {
-    $excluded = @('.git', '.venv', '.tools', 'reports', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.cache', '.terraform', '.terragrunt-cache')
+    $excluded = @('.git', '.venv', '.tools', '.extension-build', 'reports', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.cache', '.terraform', '.terragrunt-cache')
     $pending = New-Object System.Collections.Generic.Stack[string]
     $pending.Push($repoRoot)
     while ($pending.Count -gt 0) {

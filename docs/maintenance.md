@@ -46,6 +46,22 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Mo
 
 Pour une première installation, utiliser Bootstrap sans `-Offline`. Les tâches VS Code correspondantes existent. Les hooks doivent utiliser le cache local configuré par le dépôt; aucune installation globale n'est autorisée.
 
+### Extension Locale
+
+Le MVP local utilise Node 26.10.0 et npm 11.19.1 du hook Markdown local, sans installation globale. TypeScript 5.9.3, les types et l'outil de test sont épinglés dans [le manifeste](../vscode-extension/package.json) et son lock. `Install` applique `npm ci` avec scripts d'installation désactivés sous `.tools/vscode-extension/` et cache sous `.tools/cache/npm/` ; il nécessite le réseau ou les artefacts npm déjà en cache. Il reste explicite, jamais déclenché par la sélection d'une Target.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/vscode-extension.ps1 -Action Install
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/vscode-extension.ps1 -Action Test
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/vscode-extension.ps1 -Action TestHost
+```
+
+`Test` compile et couvre projection, séquences, statuts, erreurs, stockage, permissions, masquage, audits réels avec annulation et lecteur : historiques v1, fichiers invalides/modifiés, identités, chemins et messages hostiles. Il est également appelé par les tests du socle. Les fixtures d'audit indépendantes sont concurrentes dans les tests uniquement. Le moteur et l'interface exécutent toujours un audit global à la fois et des contrôles séquentiels. La suite PowerShell de session vérifie aussi la terminaison du processus et de son enfant ; celle du lecteur vérifie la validation canonique et les octets associés. `TestHost` utilise l'exécutable VS Code installé accessible via `code`, avec profils locaux isolés sous `.tools/`, et vérifie activation, TreeView, commandes, ouverture du lecteur, échappement des sorties et JSON brut. Le host observé est VS Code 1.81.1 x64 ; sa version n'est pas téléchargée ni considérée comme une qualification de toutes les versions compatibles. Le drapeau de confiance désactivée est réservé au host de test isolé, pas au lancement utilisateur. La vérification visuelle des dialogues natifs et de l'écran d'initiation reste une étape manuelle distincte.
+
+Le lecteur valide un snapshot temporaire sous `.tools/state/report-reader/` puis le supprime ; il compare le hash des octets validés et détecte les modifications raisonnablement observables pendant lecture/validation. La référence persistante VS Code ne contient que run_id, Target et source. Aucun consentement n'est réutilisé. La rétention CLI des anciens JSON sous `reports/` n'est pas étendue aux sessions : aucune suppression automatique de session n'est ajoutée.
+
+La compilation produit uniquement `vscode-extension/.extension-build/`, ignoré par Git et exclu des inventaires et scans de fichiers générés. Les sources TypeScript restent analysables. Cette exclusion ne qualifie pas le lint JS/TS : ces technologies restent sans outil configuré dans le catalogue. Les sessions sont sous `.tools/state/runs/` ; elles n'utilisent pas la rétention historique de `reports/`. Linux/macOS et ARM64 restent hors périmètre de ce prototype. Aucun VSIX n'est produit à cette étape.
+
 Derniers résultats consignés le 9 octobre 2026, pas une promesse de résultats futurs:
 
 | Validation | Résultat |
