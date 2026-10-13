@@ -133,6 +133,7 @@ func TestExtractedBinaryHashesFromArchives(t *testing.T) {
 		t.Fatalf("Plateforme windows-x64 absente")
 	}
 
+	verifiedCount := 0
 	for toolName, arcPath := range archiveFiles {
 		tool, exists := winPlat.Tools[toolName]
 		if !exists {
@@ -163,8 +164,14 @@ func TestExtractedBinaryHashesFromArchives(t *testing.T) {
 			t.Errorf("Binary SHA-256 mismatch pour %s extrait de l'archive: attendu %s, obtenu %s", toolName, tool.BinarySHA256, actualBinHash)
 		} else {
 			t.Logf("SUCCESS: Binaire extrait pour %s (%d octets) vérifié avec succès: %s", toolName, len(binBytes), actualBinHash)
+			verifiedCount++
 		}
 	}
+
+	if verifiedCount == 0 {
+		t.Skip("Toutes les archives sont absentes du cache local (.tools/cache): test sauté pour éviter un faux succès en CI minimale")
+	}
 }
+
 
 

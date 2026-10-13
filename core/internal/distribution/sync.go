@@ -52,6 +52,8 @@ type SyncOptions struct {
 	PublicKey       ed25519.PublicKey
 	CABundlePath    string // Optional enterprise CA bundle for TLS
 	ArchiveCacheDir string // Optional directory for caching/retrieving archives offline
+	ToolName        string // Optional: if specified, synchronizes ONLY this tool
+	OfflineOnly     bool   // If true, strictly forbids network requests
 }
 
 // SyncResult details synced tools.
@@ -111,6 +113,10 @@ func SyncRuntime(opts SyncOptions) (*SyncResult, error) {
 	}
 
 	for name, tool := range plat.Tools {
+		if opts.ToolName != "" && name != opts.ToolName {
+			continue // Skip tools outside the requested filter
+		}
+
 		destPath := filepath.Join(binDir, tool.Name)
 		if runtime.GOOS == "windows" && !strings.HasSuffix(destPath, ".exe") {
 			destPath += ".exe"
@@ -137,6 +143,9 @@ func SyncRuntime(opts SyncOptions) (*SyncResult, error) {
 		}
 
 		if archiveBytes == nil {
+			if opts.OfflineOnly {
+				return nil, fmt.Errorf("%w pour %s: mode hors-ligne actif et archive introuvable localement", ErrToolNotFound, name)
+			}
 			archiveBytes, err = fetchBytes(tool.ArchiveURL, client)
 			if err != nil {
 				return nil, fmt.Errorf("téléchargement de l'outil %s: %w", name, err)
@@ -166,8 +175,14 @@ func SyncRuntime(opts SyncOptions) (*SyncResult, error) {
 				ErrBinaryHashMismatch, name, tool.BinarySHA256, actualBinaryHash)
 		}
 
-		if err := os.WriteFile(destPath, binBytes, 0755); err != nil {
-			return nil, fmt.Errorf("écriture de l'exécutable %s: %w", destPath, err)
+		// Écriture atomique avec fichier temporaire et renommage
+		tempPath := fmt.Sprintf("%s.tmp.%d", destPath, time.Now().UnixNano())
+		if err := os.WriteFile(tempPath, binBytes, 0755); err != nil {
+			return nil, fmt.Errorf("écriture temporaire de l'exécutable %s: %w", tempPath, err)
+		}
+		if err := os.Rename(tempPath, destPath); err != nil {
+			_ = os.Remove(tempPath)
+			return nil, fmt.Errorf("renommage atomique vers %s: %w", destPath, err)
 		}
 
 		result.SyncedTools[name] = destPath

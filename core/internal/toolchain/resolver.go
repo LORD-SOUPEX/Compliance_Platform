@@ -134,7 +134,7 @@ func (r *Resolver) ResolveTool(ctx context.Context, toolName string) (*ResolvedT
 		}, nil
 	}
 
-	// 3. Binary missing: trigger on-demand sync
+	// 3. Binary missing: trigger on-demand sync for THIS tool only
 	syncRes, err := distribution.SyncRuntime(distribution.SyncOptions{
 		ManifestPath:    r.opts.ManifestPath,
 		SigPath:         r.opts.SigPath,
@@ -143,6 +143,8 @@ func (r *Resolver) ResolveTool(ctx context.Context, toolName string) (*ResolvedT
 		Platform:        r.opts.Platform,
 		PublicKey:       r.opts.PublicKey,
 		CABundlePath:    r.opts.CABundlePath,
+		ToolName:        toolName,
+		OfflineOnly:     r.opts.OfflineOnly,
 	})
 	if err != nil {
 		if r.opts.OfflineOnly {

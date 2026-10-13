@@ -55,11 +55,29 @@ type PipelineStep struct {
 	Env            map[string]string `json:"env,omitempty"`
 }
 
-// ParsePipeline parses a pipeline from JSON bytes.
+// ParsePipeline parses a pipeline from JSON bytes with strict field checking.
 func ParsePipeline(data []byte) (*Pipeline, error) {
 	var p Pipeline
-	if err := json.Unmarshal(data, &p); err != nil {
+	dec := json.NewDecoder(strings.NewReader(string(data)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&p); err != nil {
 		return nil, fmt.Errorf("erreur de décodage JSON du pipeline: %w", err)
+	}
+
+	if p.Version != "1" {
+		return nil, fmt.Errorf("%w: version %q non supportée (attendu: '1')", ErrGuardrailViolation, p.Version)
+	}
+
+	if !isValidCategory(p.Category) {
+		return nil, fmt.Errorf("%w: catégorie %q invalide", ErrGuardrailViolation, p.Category)
+	}
+
+	if sideEffectRank(p.SideEffectLevel) == -1 {
+		return nil, fmt.Errorf("%w: niveau d'effet de bord global %q invalide", ErrGuardrailViolation, p.SideEffectLevel)
+	}
+
+	if len(p.Steps) == 0 {
+		return nil, fmt.Errorf("%w: le pipeline doit contenir au moins une étape", ErrGuardrailViolation)
 	}
 
 	if err := ValidateDAG(&p); err != nil {
@@ -67,6 +85,30 @@ func ParsePipeline(data []byte) (*Pipeline, error) {
 	}
 
 	return &p, nil
+}
+
+func isValidCategory(cat string) bool {
+	switch cat {
+	case "quality", "dev_deployment", "ephemeral_sandbox", "maintenance":
+		return true
+	default:
+		return false
+	}
+}
+
+func sideEffectRank(level string) int {
+	switch level {
+	case "read_only":
+		return 0
+	case "filesystem":
+		return 1
+	case "network":
+		return 2
+	case "apply_destroy":
+		return 3
+	default:
+		return -1
+	}
 }
 
 // LoadPipelineFile loads and validates a declarative pipeline JSON file.
@@ -78,14 +120,39 @@ func LoadPipelineFile(path string) (*Pipeline, error) {
 	return ParsePipeline(data)
 }
 
-// ValidateDAG verifies step uniqueness, dependency existence, and cycle freedom.
+// ValidateDAG verifies step uniqueness, dependency existence, cycle freedom, and guardrail consistency.
 func ValidateDAG(p *Pipeline) error {
 	stepMap := make(map[string]PipelineStep)
+	pipeRank := sideEffectRank(p.SideEffectLevel)
 
 	for _, step := range p.Steps {
+		if step.ID == "" {
+			return fmt.Errorf("%w: identifiant d'étape vide", ErrGuardrailViolation)
+		}
 		if _, exists := stepMap[step.ID]; exists {
 			return fmt.Errorf("%w: étape %q", ErrDuplicateStepID, step.ID)
 		}
+		if step.TimeoutSeconds < 1 {
+			return fmt.Errorf("%w: timeout_seconds pour l'étape %q doit être >= 1", ErrGuardrailViolation, step.ID)
+		}
+
+		stepRank := sideEffectRank(step.SideEffect)
+		if stepRank == -1 {
+			return fmt.Errorf("%w: effet de bord %q invalide pour l'étape %q", ErrGuardrailViolation, step.SideEffect, step.ID)
+		}
+
+		// Règle de confinement : une étape ne peut pas dépasser le plafond global du pipeline
+		if stepRank > pipeRank {
+			return fmt.Errorf("%w: l'étape %q (%s) dépasse le niveau global du pipeline (%s)",
+				ErrGuardrailViolation, step.ID, step.SideEffect, p.SideEffectLevel)
+		}
+
+		// Règle de sécurité : toute étape apply_destroy exige une section guardrails valide
+		if step.SideEffect == "apply_destroy" && p.Guardrails == nil {
+			return fmt.Errorf("%w: l'étape %q est en apply_destroy mais aucun guardrails n'est configuré dans le pipeline",
+				ErrGuardrailViolation, step.ID)
+		}
+
 		stepMap[step.ID] = step
 	}
 
@@ -178,6 +245,7 @@ func ComputeTopologicalOrder(p *Pipeline) ([]PipelineStep, error) {
 // GuardrailContext encapsulates execution context for guardrail evaluation.
 type GuardrailContext struct {
 	Environment   string
+	StateBackend  string
 	IsRunAll      bool
 	UserConfirmed bool
 	PlanSucceeded bool
@@ -196,14 +264,14 @@ func ValidateStepGuardrails(p *Pipeline, step *PipelineStep, ctx GuardrailContex
 	}
 
 	if p.Guardrails == nil {
-		return nil
+		return fmt.Errorf("%w: exécution bloquée : section guardrails absente pour l'étape apply_destroy %q", ErrGuardrailViolation, step.ID)
 	}
 
-	// 2. Forbidden environments check (case-insensitive substring/match)
+	// 2. Forbidden environments check (exact or token-based: prod, prod-*, *-prod, shared-*, etc.)
 	envClean := strings.ToLower(strings.TrimSpace(ctx.Environment))
 	for _, forbidden := range p.Guardrails.ForbiddenEnvironments {
 		forbClean := strings.ToLower(strings.TrimSpace(forbidden))
-		if envClean == forbClean || strings.Contains(envClean, forbClean) {
+		if matchForbiddenEnv(forbClean, envClean) {
 			return fmt.Errorf("%w: environnement %q interdit par la règle %q pour l'étape %q",
 				ErrForbiddenEnvironment, ctx.Environment, forbidden, step.ID)
 		}
@@ -237,7 +305,36 @@ func ValidateStepGuardrails(p *Pipeline, step *PipelineStep, ctx GuardrailContex
 			ErrConfirmationRequired, step.ID)
 	}
 
+	// 6. State backend restrictions check
+	if len(p.Guardrails.StateBackendRestrictions) > 0 && ctx.StateBackend != "" {
+		backendClean := strings.ToLower(strings.TrimSpace(ctx.StateBackend))
+		backendAllowed := false
+		for _, pat := range p.Guardrails.StateBackendRestrictions {
+			patClean := strings.ToLower(strings.TrimSpace(pat))
+			if matchEnvPattern(patClean, backendClean) {
+				backendAllowed = true
+				break
+			}
+		}
+		if !backendAllowed {
+			return fmt.Errorf("%w: state backend %q non autorisé pour l'étape %q (autorisés: %v)",
+				ErrGuardrailViolation, ctx.StateBackend, step.ID, p.Guardrails.StateBackendRestrictions)
+		}
+	}
+
 	return nil
+}
+
+func matchForbiddenEnv(forbidden, env string) bool {
+	if env == forbidden {
+		return true
+	}
+	for _, sep := range []string{"-", "_", ".", "/"} {
+		if strings.HasPrefix(env, forbidden+sep) || strings.HasSuffix(env, sep+forbidden) || strings.Contains(env, sep+forbidden+sep) {
+			return true
+		}
+	}
+	return false
 }
 
 func matchEnvPattern(pattern, env string) bool {

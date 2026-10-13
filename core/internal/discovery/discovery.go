@@ -34,17 +34,24 @@ type ProjectRootEntry struct {
 	Path       string `json:"path"`
 }
 
+// ScanError records an error encountered during directory walk or file inspection.
+type ScanError struct {
+	Path      string `json:"path"`
+	Operation string `json:"operation"`
+	Error     string `json:"error"`
+}
+
 // DiscoveryResult represents the full output of discovery.
 type DiscoveryResult struct {
 	SchemaVersion    int                `json:"schema_version"`
 	Repository       string             `json:"repository"`
 	Technologies     []TechnologyRecord `json:"technologies"`
-	ProjectRoots     []ProjectRootEntry `json:"project_roots"`
-	Ambiguities      []AmbiguityDetail  `json:"ambiguities"`
+	ProjectRoots     interface{}        `json:"project_roots"`
+	Ambiguities      interface{}        `json:"ambiguities"`
 	CapabilityMatrix []interface{}      `json:"capability_matrix"`
 	ToolResolution   []interface{}      `json:"tool_resolution"`
 	ScanComplete     bool               `json:"scan_complete"`
-	ScanErrors       []interface{}      `json:"scan_errors"`
+	ScanErrors       []ScanError        `json:"scan_errors"`
 	Metrics          DiscoveryMetrics   `json:"metrics"`
 }
 
@@ -54,13 +61,13 @@ type DiscoveryMetrics struct {
 	ResolverMs  int64 `json:"resolver_ms"`
 }
 
+// Exactly matches Get-ProjectFile in scripts/quality-gate.ps1
 var excludedDirs = map[string]bool{
 	".git":              true,
 	".venv":             true,
 	".tools":            true,
 	".extension-build":  true,
 	"reports":           true,
-	"node_modules":      true,
 	"__pycache__":       true,
 	".pytest_cache":     true,
 	".mypy_cache":       true,
@@ -103,13 +110,14 @@ var tsMarkers = []string{
 }
 
 var (
-	reDockerFile    = regexp.MustCompile(`^(?i)(Dockerfile|Containerfile)(\..+)?$`)
-	reDockerCompose = regexp.MustCompile(`^(?i)(docker-compose|compose)\.(ya?ml)$`)
-	reTerragrunt    = regexp.MustCompile(`^(?i)terragrunt(\.stack)?\.hcl$`)
-	reTsConfig      = regexp.MustCompile(`^(?i)tsconfig(\..+)?\.json$`)
-	reAnsibleHosts  = regexp.MustCompile(`(?m)^\s*(?:-\s*)?hosts\s*:`)
-	reKubeKind      = regexp.MustCompile(`(?m)^\s*kind\s*:\s*(Pod|Deployment|StatefulSet|DaemonSet|ReplicaSet|Job|CronJob|Service|ConfigMap|Secret|Ingress|PersistentVolume|PersistentVolumeClaim|Namespace|ServiceAccount|Role|RoleBinding|ClusterRole|ClusterRoleBinding|CustomResourceDefinition)\s*(?:#.*)?$`)
-	reKubeApi       = regexp.MustCompile(`(?m)^\s*apiVersion\s*:\s*\S+`)
+	reDockerFile      = regexp.MustCompile(`^(?i)(Dockerfile|Containerfile)(\..+)?$`)
+	reDockerCompose   = regexp.MustCompile(`^(?i)(docker-compose|compose)\.(ya?ml)$`)
+	reTerragrunt      = regexp.MustCompile(`^(?i)terragrunt(\.stack)?\.hcl$`)
+	reTsConfig        = regexp.MustCompile(`^(?i)tsconfig(\..+)?\.json$`)
+	reAnsibleHosts    = regexp.MustCompile(`(?i)(?m)^\s*(?:-\s*)?hosts\s*:`)
+	reAnsibleEvidence = regexp.MustCompile(`(?i)(^|/)(ansible\.cfg|galaxy\.yml|requirements\.yml)$|(^|/)meta/runtime\.yml$|(^|/)(roles|playbooks)/`)
+	reKubeKind        = regexp.MustCompile(`(?i)(?m)^\s*kind\s*:\s*(Pod|Deployment|StatefulSet|DaemonSet|ReplicaSet|Job|CronJob|Service|ConfigMap|Secret|Ingress|PersistentVolume|PersistentVolumeClaim|Namespace|ServiceAccount|Role|RoleBinding|ClusterRole|ClusterRoleBinding|CustomResourceDefinition)\s*(?:#.*)?$`)
+	reKubeApi         = regexp.MustCompile(`(?i)(?m)^\s*apiVersion\s*:\s*\S+`)
 )
 
 type techAccumulator struct {
@@ -147,19 +155,19 @@ func (acc *techAccumulator) addEvidence(relFile, relRoot, status, ambiguity stri
 }
 
 func (acc *techAccumulator) toRecord() TechnologyRecord {
-	var evidenceList []string
+	evidenceList := make([]string, 0)
 	for e := range acc.evidence {
 		evidenceList = append(evidenceList, e)
 	}
 	sort.Strings(evidenceList)
 
-	var rootsList []string
+	rootsList := make([]string, 0)
 	for r := range acc.roots {
 		rootsList = append(rootsList, r)
 	}
 	sort.Strings(rootsList)
 
-	var ambList []string
+	ambList := make([]string, 0)
 	for a := range acc.ambiguities {
 		ambList = append(ambList, a)
 	}
@@ -204,9 +212,16 @@ func DiscoverAll(repoRoot string) (*DiscoveryResult, error) {
 
 	var discoveredFiles []fileInfo
 	var yamlFiles []fileInfo
+	scanErrors := make([]ScanError, 0)
 
 	err = filepath.WalkDir(absRepo, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
+			rel, _ := filepath.Rel(absRepo, path)
+			scanErrors = append(scanErrors, ScanError{
+				Path:      filepath.ToSlash(rel),
+				Operation: "enumerate",
+				Error:     walkErr.Error(),
+			})
 			return nil
 		}
 		if d.IsDir() {
@@ -379,37 +394,56 @@ func DiscoverAll(repoRoot string) (*DiscoveryResult, error) {
 	// 11. Ansible
 	for _, f := range discoveredFiles {
 		rel := f.relPath
-		isAnsibleEvidence := false
-		ansibleRoot := f.dir
+		if !reAnsibleEvidence.MatchString(rel) {
+			continue
+		}
 
-		if strings.HasSuffix(rel, "ansible.cfg") || strings.HasSuffix(rel, "galaxy.yml") || strings.HasSuffix(rel, "requirements.yml") {
-			isAnsibleEvidence = true
-		} else if strings.Contains(rel, "/roles/") || strings.Contains(rel, "/playbooks/") || strings.HasPrefix(rel, "roles/") || strings.HasPrefix(rel, "playbooks/") {
-			isAnsibleEvidence = true
-			if idx := strings.Index(rel, "/roles/"); idx != -1 {
-				ansibleRoot = filepath.Join(absRepo, filepath.FromSlash(rel[:idx]))
-			} else if idx := strings.Index(rel, "/playbooks/"); idx != -1 {
-				ansibleRoot = filepath.Join(absRepo, filepath.FromSlash(rel[:idx]))
+		ansibleRoot := f.dir
+		if strings.EqualFold(f.name, "ansible.cfg") || strings.EqualFold(f.name, "galaxy.yml") || strings.EqualFold(f.name, "requirements.yml") {
+			ansibleRoot = f.dir
+		} else if idx := strings.Index(rel, "roles/"); idx != -1 {
+			prefix := rel[:idx]
+			if prefix == "" {
+				sub := rel[len("roles/"):]
+				if slashIdx := strings.Index(sub, "/"); slashIdx != -1 {
+					roleName := sub[:slashIdx]
+					ansibleRoot = filepath.Join(absRepo, "roles", roleName)
+				} else {
+					ansibleRoot = absRepo
+				}
+			} else {
+				rootRel := strings.TrimSuffix(prefix, "/")
+				ansibleRoot = filepath.Join(absRepo, filepath.FromSlash(rootRel))
+			}
+		} else if idx := strings.Index(rel, "playbooks/"); idx != -1 {
+			prefix := rel[:idx]
+			rootRel := strings.TrimSuffix(prefix, "/")
+			if rootRel != "" {
+				ansibleRoot = filepath.Join(absRepo, filepath.FromSlash(rootRel))
 			} else {
 				ansibleRoot = absRepo
 			}
 		} else if strings.HasSuffix(rel, "meta/runtime.yml") {
-			isAnsibleEvidence = true
-			parent := filepath.Dir(filepath.Dir(f.absPath))
-			ansibleRoot = parent
+			ansibleRoot = filepath.Dir(filepath.Dir(f.absPath))
 		}
 
-		if isAnsibleEvidence {
-			relRoot := toRelRoot(absRepo, ansibleRoot)
-			accumulators["ansible"].addEvidence(f.relPath, relRoot, "detected", "")
-		}
+		relRoot := toRelRoot(absRepo, ansibleRoot)
+		accumulators["ansible"].addEvidence(f.relPath, relRoot, "detected", "")
 	}
 
 	// Ansible fallback on YAML files if absent
 	if accumulators["ansible"].status == "absent" {
 		for _, f := range yamlFiles {
 			content, readErr := os.ReadFile(f.absPath)
-			if readErr == nil && reAnsibleHosts.Match(content) {
+			if readErr != nil {
+				scanErrors = append(scanErrors, ScanError{
+					Path:      f.relPath,
+					Operation: "read",
+					Error:     readErr.Error(),
+				})
+				continue
+			}
+			if reAnsibleHosts.Match(content) {
 				relRoot := toRelRoot(absRepo, f.dir)
 				amb := "La clé hosts: dans un YAML est un signal faible; le fichier peut être un playbook Ansible ou un YAML générique."
 				accumulators["ansible"].addEvidence(f.relPath, relRoot, "ambiguous", amb)
@@ -420,7 +454,15 @@ func DiscoverAll(repoRoot string) (*DiscoveryResult, error) {
 	// 12. Kubernetes
 	for _, f := range yamlFiles {
 		content, readErr := os.ReadFile(f.absPath)
-		if readErr == nil && reKubeApi.Match(content) && reKubeKind.Match(content) {
+		if readErr != nil {
+			scanErrors = append(scanErrors, ScanError{
+				Path:      f.relPath,
+				Operation: "read",
+				Error:     readErr.Error(),
+			})
+			continue
+		}
+		if reKubeApi.Match(content) && reKubeKind.Match(content) {
 			relRoot := toRelRoot(absRepo, f.dir)
 			status := "detected"
 			amb := ""
@@ -433,9 +475,9 @@ func DiscoverAll(repoRoot string) (*DiscoveryResult, error) {
 	}
 
 	// Build sorted Technologies list
-	var techRecords []TechnologyRecord
-	var projectRoots []ProjectRootEntry
-	var ambiguities []AmbiguityDetail
+	techRecords := make([]TechnologyRecord, 0, len(allKnownTechnologies))
+	projectRoots := make([]ProjectRootEntry, 0)
+	ambiguities := make([]AmbiguityDetail, 0)
 
 	for _, techName := range allKnownTechnologies {
 		rec := accumulators[techName].toRecord()
@@ -466,10 +508,10 @@ func DiscoverAll(repoRoot string) (*DiscoveryResult, error) {
 		Technologies:     techRecords,
 		ProjectRoots:     projectRoots,
 		Ambiguities:      ambiguities,
-		CapabilityMatrix: []interface{}{},
-		ToolResolution:   []interface{}{},
-		ScanComplete:     true,
-		ScanErrors:       []interface{}{},
+		CapabilityMatrix: make([]interface{}, 0),
+		ToolResolution:   make([]interface{}, 0),
+		ScanComplete:     (len(scanErrors) == 0),
+		ScanErrors:       scanErrors,
 		Metrics: DiscoveryMetrics{
 			DiscoveryMs: time.Since(start).Milliseconds(),
 			ResolverMs:  0,
@@ -480,7 +522,7 @@ func DiscoverAll(repoRoot string) (*DiscoveryResult, error) {
 }
 
 // DiscoverPython scans repoRoot and discovers Python evidence and roots.
-// Maintained for backward compatibility with Phase 0 callers.
+// Maintained for strict backward compatibility with Phase 0 contracts.
 func DiscoverPython(repoRoot string) (*DiscoveryResult, error) {
 	full, err := DiscoverAll(repoRoot)
 	if err != nil {
@@ -495,14 +537,21 @@ func DiscoverPython(repoRoot string) (*DiscoveryResult, error) {
 		}
 	}
 
+	// Return only Python project roots as string slice for Phase 0 parity
+	pyRoots := make([]string, 0, len(pyRecord.Roots))
+	pyRoots = append(pyRoots, pyRecord.Roots...)
+
+	pyAmbiguities := make([]string, 0, len(pyRecord.Ambiguities))
+	pyAmbiguities = append(pyAmbiguities, pyRecord.Ambiguities...)
+
 	return &DiscoveryResult{
 		SchemaVersion:    full.SchemaVersion,
 		Repository:       full.Repository,
 		Technologies:     []TechnologyRecord{pyRecord},
-		ProjectRoots:     full.ProjectRoots,
-		Ambiguities:      full.Ambiguities,
-		CapabilityMatrix: full.CapabilityMatrix,
-		ToolResolution:   full.ToolResolution,
+		ProjectRoots:     pyRoots,
+		Ambiguities:      pyAmbiguities,
+		CapabilityMatrix: make([]interface{}, 0),
+		ToolResolution:   make([]interface{}, 0),
 		ScanComplete:     full.ScanComplete,
 		ScanErrors:       full.ScanErrors,
 		Metrics:          full.Metrics,
