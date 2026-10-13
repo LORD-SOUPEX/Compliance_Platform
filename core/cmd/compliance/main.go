@@ -16,7 +16,6 @@ import (
 	"compliance/internal/discovery"
 	"compliance/internal/distribution"
 	"compliance/internal/engine"
-	"compliance/internal/osutil"
 	"compliance/internal/selftest"
 	"compliance/internal/server"
 	"os/signal"
@@ -338,75 +337,11 @@ func resolveTool(name, override string) ToolInvocation {
 		}
 	}
 
-	// 3. Fallback: check repo .venv/Scripts or .venv/bin
-	venvCandidate := filepath.Join(".venv", "Scripts", name+".exe")
-	if runtime.GOOS != "windows" {
-		venvCandidate = filepath.Join(".venv", "bin", name)
-	}
-	if _, err := os.Stat(venvCandidate); err == nil {
-		abs, _ := filepath.Abs(venvCandidate)
-		// On Windows, test if this venv wrapper can actually run without crashing on pyvenv.cfg
-		if name == "bandit" {
-			testCmd := exec.Command(abs, "--version")
-			osutil.SetHideWindow(testCmd)
-			if testErr := testCmd.Run(); testErr != nil {
-				// Broken venv wrapper (relocated drive). Fallback to python -m bandit
-				return resolveBanditPythonModule()
-			}
-		}
-		return ToolInvocation{Executable: abs}
-	}
-
-	// 3. Special handling for bandit if in .venv/Lib/site-packages
-	if name == "bandit" {
-		inv := resolveBanditPythonModule()
-		if inv.Executable != "" {
-			return inv
-		}
-	}
-
-	// 4. Check system PATH
+	// 3. Check system PATH
 	if p, err := exec.LookPath(name); err == nil {
 		return ToolInvocation{Executable: p}
 	}
 
-	return ToolInvocation{}
-}
-
-func resolveBanditPythonModule() ToolInvocation {
-	pythonCandidates := []string{
-		filepath.Join(".tools", "python", "python.exe"),
-		"python",
-		"python3",
-	}
-
-	sitePackages := filepath.Join(".venv", "Lib", "site-packages")
-	if runtime.GOOS != "windows" {
-		// e.g. .venv/lib/python3.11/site-packages
-		matches, _ := filepath.Glob(".venv/lib/python*/site-packages")
-		if len(matches) > 0 {
-			sitePackages = matches[0]
-		}
-	}
-	absSite, _ := filepath.Abs(sitePackages)
-
-	for _, py := range pythonCandidates {
-		if _, err := os.Stat(py); err == nil {
-			absPy, _ := filepath.Abs(py)
-			return ToolInvocation{
-				Executable: absPy,
-				Args:       []string{"-m", "bandit", "-q"},
-				Env:        []string{"PYTHONPATH=" + absSite},
-			}
-		}
-		if p, err := exec.LookPath(py); err == nil {
-			return ToolInvocation{
-				Executable: p,
-				Args:       []string{"-m", "bandit", "-q"},
-				Env:        []string{"PYTHONPATH=" + absSite},
-			}
-		}
-	}
 	return ToolInvocation{}
 }
 

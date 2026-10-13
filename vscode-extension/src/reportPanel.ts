@@ -99,7 +99,7 @@ export class ReportPanel implements vscode.Disposable {
         await this.context.workspaceState.update('compliance.lastReport', selected);
     }
     async open(file: string, reference?: ReportReference, historical = true, focus?: string): Promise<void> {
-        if (!vscode.workspace.isTrusted) { throw new Error('Approuver la Pipeline source avant sa validation PowerShell.'); }
+        if (!vscode.workspace.isTrusted) { throw new Error('Approuver la Pipeline source avant sa validation.'); }
         const request = ++this.requestSequence;
         const loaded = await loadReport(this.source, file, reference, historical);
         if (request !== this.requestSequence) { return; }

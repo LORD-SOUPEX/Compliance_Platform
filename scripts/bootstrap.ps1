@@ -1,10 +1,14 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [switch]$Force,
     [switch]$Offline,
     [switch]$SkipOptionalTools,
     [switch]$NoColor
 )
+
+# [DEPRECATED / HÉRITÉ] Ce script PowerShell 5.1 est déprécié.
+# La gestion et synchronisation du runtime est assurée par 'compliance runtime sync' et le manifeste signé.
+Write-Warning "[DEPRECATED] bootstrap.ps1 est déprécié. Utilisez la CLI Go 'compliance' (ex: compliance runtime sync / compliance selftest)."
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'

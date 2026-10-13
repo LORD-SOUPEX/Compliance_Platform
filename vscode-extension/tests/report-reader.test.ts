@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { displayReport, findingLocation, loadReport, maximumReportBytes, readSession, readStable, reportMessage, targetFile, ReportReference } from '../src/reportReader';
 import { reportFixture } from './reportFixture';
-import { runProcess } from '../src/backend';
+import { DaemonClient } from '../src/daemonClient';
 import { runInNewContext } from 'node:vm';
 
 const source = path.resolve(__dirname, '../../..');
@@ -103,11 +103,18 @@ test('Fichier modifie pendant validation refuse ; plan seul et scan incomplet re
     try {
         const file = path.join(directory, 'report.json'); const raw = reportFixture(directory);
         await fs.writeFile(file, JSON.stringify(raw));
-        await assert.rejects(loadReport(source, file, undefined, true, async invocation => {
-            const result = await runProcess(invocation);
-            raw.execution_results[0].stdout = 'Sortie modifiee'; await fs.writeFile(file, JSON.stringify(raw));
-            return result;
-        }), /modifie/);
+        const mockClient = {
+            ensureDaemon: async () => {},
+            validateReport: async (r: any, d?: string) => {
+                const daemon = new DaemonClient();
+                await daemon.ensureDaemon(source);
+                const env = await daemon.validateReport(r, d);
+                raw.execution_results[0].stdout = 'Sortie modifiee';
+                await fs.writeFile(file, JSON.stringify(raw));
+                return env;
+            }
+        } as unknown as DaemonClient;
+        await assert.rejects(loadReport(source, file, undefined, true, mockClient), /modifie/);
         raw.execution_results = []; raw.summary.success = 0; raw.execution_status = 'planned'; raw.verdict = null; raw.coverage.complete = false; raw.coverage.executed_controls = 0;
         await fs.writeFile(file, JSON.stringify(raw));
         assert.equal((await loadReport(source, file)).controls[0].status, 'Pending');

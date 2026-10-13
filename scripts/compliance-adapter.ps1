@@ -13,6 +13,10 @@ param(
     [string]$ReportRedactionPattern
 )
 
+# [DEPRECATED / HÉRITÉ] Ce script PowerShell est déprécié.
+# L'adaptateur d'exécution et la validation des rapports sont assurés par le démon Go ('compliance daemon').
+Write-Warning "[DEPRECATED] compliance-adapter.ps1 est déprécié. Utilisez le démon autonome Go."
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $platformRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path

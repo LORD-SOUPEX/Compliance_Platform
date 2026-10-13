@@ -1,9 +1,13 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [string]$ReportPath,
     [switch]$NoColor,
     [switch]$Repair
 )
+
+# [DEPRECATED / HÉRITÉ] Ce script PowerShell 5.1 est déprécié.
+# La vérification de santé et de conformité est assurée par 'compliance selftest'.
+Write-Warning "[DEPRECATED] doctor.ps1 est déprécié. Utilisez la CLI Go 'compliance' (ex: compliance selftest)."
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'

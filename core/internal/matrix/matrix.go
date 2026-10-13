@@ -270,23 +270,7 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 		}
 	}
 
-	// 5. Legacy fallback: .venv/Scripts/<command>[.exe / .cmd]
-	venvScripts := filepath.Join(root, ".venv", "Scripts")
-	if platform.OS != "windows" {
-		venvScripts = filepath.Join(root, ".venv", "bin")
-	}
-	candidates := []string{
-		filepath.Join(venvScripts, command+".exe"),
-		filepath.Join(venvScripts, command+".cmd"),
-		filepath.Join(venvScripts, command),
-	}
-	for _, cand := range candidates {
-		if _, err := os.Stat(cand); err == nil {
-			return probeCommand(cand, true)
-		}
-	}
-
-	// 4. Check PowerShell modules for Invoke-ScriptAnalyzer
+	// 5. Check PowerShell modules for Invoke-ScriptAnalyzer
 	if command == "Invoke-ScriptAnalyzer" {
 		psModule := filepath.Join(root, ".tools", "powershell-modules", "PSScriptAnalyzer")
 		if _, err := os.Stat(psModule); err == nil {

@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [ValidateSet('Quick', 'Full', 'Ci', 'Fix')][string]$Mode = 'Quick',
     [ValidateSet('Generic', 'Documentation', 'Security', 'Python', 'PowerShell', 'Ansible', 'Terraform', 'Terragrunt', 'Container', 'Shell', 'Tests', 'All')][string]$Category = 'All',
@@ -21,6 +21,10 @@ param(
     [switch]$NoColor,
     [ValidateRange(1, 3600)][int]$TimeoutSeconds = 300
 )
+
+# [DEPRECATED / HÉRITÉ] Ce script PowerShell 5.1 est déprécié.
+# Le moteur autonome Go (core/) et la CLI 'compliance' sont l'unique source de vérité.
+Write-Warning "[DEPRECATED] quality-gate.ps1 est déprécié. Utilisez la CLI Go 'compliance' (ex: compliance run / compliance selftest)."
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'

@@ -188,18 +188,18 @@ Autres fragilités constatées :
 
 ### Lot 0 : Sécuriser l'existant (préalable)
 
-- [ ] Commiter (par commits logiques) tout le travail Phase 4bis/5 non suivi (`core/internal/server/`, `selftest/`, `daemonClient.ts`, `package_vsix.py`, tests).
-- [ ] Définir `.gitignore` : `core/*.exe`, `.scratch_daemon_test/`, `vscode-extension/{bin,dist,node_modules,.vscode-test}`.
-- [ ] Supprimer `.scratch_daemon_test/` et `core/compliance.exe`.
+- [x] Commiter (par commits logiques) tout le travail Phase 4bis/5 non suivi (`core/internal/server/`, `selftest/`, `daemonClient.ts`, `package_vsix.py`, tests). (Tag v1 posé)
+- [x] Définir `.gitignore` : `core/*.exe`, `.scratch_daemon_test/`, `vscode-extension/{dist,node_modules,.vscode-test}`.
+- [x] Supprimer `.scratch_daemon_test/` et `core/compliance.exe`.
 
 ### Lot 1 : Purge et décommissionnement
 
-- [ ] Retirer les replis PowerShell de `backend.ts`, `auditBackend.ts`, `reportReader.ts` ; injecter un `DaemonClient` dans les tests au lieu de la branche `runner !== runProcess`.
-- [ ] Remplacer la vérification d'index runtime PowerShell de `auditBackend.ts` par une vérification via le démon.
-- [ ] Supprimer les 5 shims `scripts/*.sh`.
-- [ ] Ajouter des bannières de dépréciation réelles en tête de `quality-gate.ps1`, `bootstrap.ps1`, `doctor.ps1`, `compliance-adapter.ps1`, `src/*.psm1`.
+- [x] Retirer les replis PowerShell de `backend.ts`, `auditBackend.ts`, `reportReader.ts` ; injecter un `DaemonClient` dans les tests au lieu de la branche `runner !== runProcess`.
+- [x] Remplacer la vérification d'index runtime PowerShell de `auditBackend.ts` par une vérification via le démon.
+- [x] Supprimer les 5 shims `scripts/*.sh`.
+- [x] Ajouter des bannières de dépréciation réelles en tête de `quality-gate.ps1`, `bootstrap.ps1`, `doctor.ps1`, `compliance-adapter.ps1`, `src/*.psm1`.
 - [ ] Archiver (déplacer vers `legacy/powershell/` ou tag Git `powershell-final`) une fois le Lot 3 clos et les décisions n° 2 à 4 prises.
-- [ ] Retirer le repli `.venv` du résolveur et de `main.go`.
+- [x] Retirer le repli `.venv` du résolveur et de `main.go`.
 
 ### Lot 2 : Réalignement documentaire et contrats
 

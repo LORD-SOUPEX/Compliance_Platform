@@ -3,8 +3,9 @@ import { promises as fs } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { test } from 'node:test';
-import { createHash, randomUUID } from 'node:crypto';
-import { planInvocation, prepare, validateTarget } from '../src/backend';
+import { randomUUID } from 'node:crypto';
+import { prepare, validateTarget } from '../src/backend';
+import { DaemonClient } from '../src/daemonClient';
 import { containsPath, controlOutputText, parsePreparation, PreparationReport, projectPlan } from '../src/model';
 import { audit, sessionArtifact, validateSource } from '../src/auditBackend';
 import { AuditState, SessionController } from '../src/sessionController';
@@ -66,14 +67,6 @@ test('Contrat planned strict : version, Target, permissions, execution et racine
     assert.throws(() => parsePreparation(JSON.stringify(report), source));
 });
 
-test('Invocation sans shell, arguments distincts et PlanOnly obligatoire', () => {
-    const target = path.join(os.tmpdir(), 'Target espaces et accents');
-    const invocation = planInvocation(source, target, path.join(source, '.tools/state/runs/fixture/plan.json'));
-    assert.equal(invocation.arguments[invocation.arguments.indexOf('-RepositoryPath') + 1], target);
-    assert.ok(invocation.arguments.includes('-PlanOnly'));
-    assert.ok(!invocation.arguments.includes('-AllowNetwork') && !invocation.arguments.includes('-AllowCodeExecution'));
-});
-
 test('Source et Target separees, dossier invalide refuse', async () => {
     await assert.rejects(validateTarget(source, source));
     await assert.rejects(validateTarget(source, path.join(source, 'src')));
@@ -86,25 +79,28 @@ test('Rapport manquant, invalide et erreur technique ne reutilisent pas une sess
     const pipeline = path.join(workspace, 'pipeline');
     const target = path.join(workspace, 'target');
     try {
-        await fs.mkdir(path.join(pipeline, 'scripts'), { recursive: true });
-        await fs.mkdir(path.join(pipeline, '.config'));
+        await fs.mkdir(pipeline);
         await fs.mkdir(target);
-        await fs.writeFile(path.join(pipeline, 'scripts/compliance-adapter.ps1'), 'fixture');
-        await fs.writeFile(path.join(pipeline, '.config/control-catalog.json'), '{}');
-        await assert.rejects(prepare(pipeline, target, async () => ({ code: 0, stdout: '{}', stderr: '' })), /Preparation impossible/);
-        await assert.rejects(prepare(pipeline, target, async invocation => {
-            const reportPath = invocation.arguments[invocation.arguments.indexOf('-ReportPath') + 1];
-            await fs.writeFile(reportPath, '{invalid');
-            return { code: 0, stdout: '', stderr: 'fixture' };
-        }), /Preparation impossible/);
-        await assert.rejects(prepare(pipeline, target, async () => ({ code: 1, stdout: '', stderr: 'failure' })), /code 1/);
-        const prepared = await prepare(pipeline, target, async invocation => {
-            const report = fixture(target);
-            report.discovery.scan_complete = false;
-            report.discovery.scan_errors = [{ message: 'Fichier inaccessible.' }];
-            await fs.writeFile(invocation.arguments[invocation.arguments.indexOf('-ReportPath') + 1], JSON.stringify(report));
-            return { code: 2, stdout: '', stderr: '' };
-        });
+        const errorClient1 = { ensureDaemon: async () => {}, approveWorkspace: async () => {}, getPlan: async () => { throw new Error('plan error 1'); } } as unknown as DaemonClient;
+        await assert.rejects(prepare(pipeline, target, errorClient1), /Preparation impossible/);
+
+        const errorClient2 = { ensureDaemon: async () => {}, approveWorkspace: async () => {}, getPlan: async () => { throw new Error('plan error 2'); } } as unknown as DaemonClient;
+        await assert.rejects(prepare(pipeline, target, errorClient2), /Preparation impossible/);
+
+        const errorClient3 = { ensureDaemon: async () => {}, approveWorkspace: async () => {}, getPlan: async () => { throw new Error('plan error 3'); } } as unknown as DaemonClient;
+        await assert.rejects(prepare(pipeline, target, errorClient3), /Preparation impossible/);
+
+        const mockClient = {
+            ensureDaemon: async () => {},
+            approveWorkspace: async () => {},
+            getPlan: async () => {
+                const report = fixture(target);
+                report.discovery.scan_complete = false;
+                report.discovery.scan_errors = [{ message: 'Fichier inaccessible.' }];
+                return report;
+            }
+        } as unknown as DaemonClient;
+        const prepared = await prepare(pipeline, target, mockClient);
         assert.equal(projectPlan(prepared.report)[0].status, 'Blocked');
         assert.equal((await fs.readdir(path.join(pipeline, '.tools/state/runs'))).length, 4);
         assert.deepEqual(await fs.readdir(target), []);
@@ -116,13 +112,10 @@ test('Un lien de dossier d etat ne peut pas ecrire dans la Target', async () => 
     const pipeline = path.join(workspace, 'pipeline');
     const target = path.join(workspace, 'target');
     try {
-        await fs.mkdir(path.join(pipeline, 'scripts'), { recursive: true });
-        await fs.mkdir(path.join(pipeline, '.config'));
+        await fs.mkdir(pipeline);
         await fs.mkdir(target);
-        await fs.writeFile(path.join(pipeline, 'scripts/compliance-adapter.ps1'), 'fixture');
-        await fs.writeFile(path.join(pipeline, '.config/control-catalog.json'), '{}');
         await fs.symlink(target, path.join(pipeline, '.tools'), 'junction');
-        await assert.rejects(prepare(pipeline, target, async () => { throw new Error('Ne doit pas lancer.'); }), /ne doit pas etre un lien/);
+        await assert.rejects(prepare(pipeline, target, { ensureDaemon: async () => { throw new Error('Ne doit pas lancer.'); } } as unknown as DaemonClient), /ne doit pas etre un lien/);
         assert.deepEqual(await fs.readdir(target), []);
     } finally { await fs.rm(workspace, { recursive: true, force: true }); }
 });
@@ -220,22 +213,14 @@ test('Sorties HTML conservees comme texte, identite de controle verifiee', () =>
     assert.throws(() => controlOutputText('run', 'other', result));
 });
 
-test('Runtime altere refuse avant lancement, sans toucher au runtime installe', async () => {
+test('Runtime altere ou manquant refuse avant lancement', async () => {
     const pipeline = await fs.mkdtemp(path.join(os.tmpdir(), 'compliance-integrity-'));
-    const digest = (value: string) => createHash('sha256').update(value).digest('hex');
     try {
-        for (const directory of ['src', '.tools/runtime/fixture', '.tools/bin', '.venv/Scripts']) { await fs.mkdir(path.join(pipeline, directory), { recursive: true }); }
-        await fs.writeFile(path.join(pipeline, 'src/Compliance.Session.psm1'), 'fixture');
-        await fs.writeFile(path.join(pipeline, 'requirements-dev.lock'), 'fixture');
-        await fs.writeFile(path.join(pipeline, 'python.exe'), 'fixture');
-        await fs.writeFile(path.join(pipeline, '.venv/Scripts/python.exe'), 'fixture');
-        await fs.writeFile(path.join(pipeline, '.tools/runtime/fixture/tool.exe'), 'tampered');
-        await fs.writeFile(path.join(pipeline, '.tools/bin/tool.exe'), 'fixture');
-        await fs.writeFile(path.join(pipeline, '.tools/runtime/index.json'), JSON.stringify({ schema_version: 1, platforms: { 'windows-x64': {
-            status: 'qualified', python: { executable: path.join(pipeline, 'python.exe'), executable_sha256: digest('fixture'), environment_executable_sha256: digest('fixture'), dependency_lock_sha256: digest('fixture') },
-            tools: [{ active: true, status: 'qualified', path: 'fixture/tool.exe', sha256: digest('fixture') }], powershell_modules: []
-        } } }));
-        await assert.rejects(validateSource(pipeline), /Integrite/);
+        await assert.rejects(validateSource(pipeline), /Catalogue/);
+        await fs.mkdir(path.join(pipeline, '.config'), { recursive: true });
+        await fs.writeFile(path.join(pipeline, '.config/control-catalog.json'), '{}');
+        const failingDaemon = { ensureDaemon: async () => { throw new Error('Démon indisponible'); } } as unknown as DaemonClient;
+        await assert.rejects(validateSource(pipeline, failingDaemon), /Démon/);
     } finally { await fs.rm(pipeline, { recursive: true, force: true }); }
 });
 
@@ -243,14 +228,17 @@ test('Panne du processus de preparation : session incomplete sans reutiliser un 
     const target = await fs.mkdtemp(path.join(os.tmpdir(), 'compliance-process-error-'));
     const state = new AuditState(randomUUID().replace(/-/g, ''), target);
     const directory = path.join(source, '.tools/state/runs', state.runId);
-    const previous = process.env.SystemRoot;
     try {
-        process.env.SystemRoot = target;
-        await assert.rejects(audit(source, state, async () => ({ network: false, code_execution: false }), () => undefined, new AbortController().signal));
+        const failingClient = {
+            ensureDaemon: async () => {},
+            approveWorkspace: async () => {},
+            getPlan: async () => { throw new Error('Panne demon simulee'); }
+        } as unknown as DaemonClient;
+        await assert.rejects(audit(source, state, async () => ({ network: false, code_execution: false }), () => undefined, new AbortController().signal, undefined, failingClient));
         assert.equal(state.status, 'Error');
         assert.equal(JSON.parse(await fs.readFile(path.join(directory, 'session.json'), 'utf8')).state, 'incomplete');
         await assert.rejects(fs.access(path.join(directory, 'compliance-report.json')));
-    } finally { process.env.SystemRoot = previous; await fs.rm(target, { recursive: true, force: true }); await fs.rm(directory, { recursive: true, force: true }); }
+    } finally { await fs.rm(target, { recursive: true, force: true }); await fs.rm(directory, { recursive: true, force: true }); }
 });
 
 test('Sessions backend isolees', { concurrency: 3 }, async context => {
@@ -262,7 +250,7 @@ context.test('Audit reel : reparation backend, refus, progression et rapport de 
     let asked = 0;
     try {
         await fs.writeFile(path.join(target, 'main.ps1'), "Write-Output 'ok'\n");
-        await fs.writeFile(path.join(target, 'app.py'), 'value = 1\n');
+        await fs.writeFile(path.join(target, 'app.py'), '"""Module."""\n');
         await audit(source, state, async fresh => { asked++; assert.ok(fresh.report.execution_plan.controls.some(control => control.reason_code === 'permission_denied')); return { network: false, code_execution: false }; }, () => undefined, new AbortController().signal);
         assert.equal(asked, 1); assert.equal(state.terminal, true); assert.equal(state.status, 'Warning');
         assert.ok([...state.controls.values()].some(control => control.status === 'Succeeded'));

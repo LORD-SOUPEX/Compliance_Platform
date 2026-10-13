@@ -1,3 +1,9 @@
+<#
+.SYNOPSIS
+    [DEPRECATED / HÉRITÉ] Ce module PowerShell est un composant hérité.
+    Le moteur autonome Go (core/) et la CLI 'compliance' sont l'unique source de vérité.
+#>
+
 Set-StrictMode -Version Latest
 
 function Import-PlatformSupportMatrix {

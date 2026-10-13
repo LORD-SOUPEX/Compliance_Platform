@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import { planInvocation, Runner, runProcess, stateRoot } from './backend';
+import { stateRoot } from './backend';
 import { containsPath, Reason, VisualStatus } from './model';
 import { DaemonClient } from './daemonClient';
 
@@ -122,7 +122,7 @@ export async function readSession(source: string, reference: ReportReference): P
     return { directory, session };
 }
 
-export async function loadReport(source: string, file: string, reference?: ReportReference, historical = !reference, runner: Runner = runProcess): Promise<LoadedReport> {
+export async function loadReport(source: string, file: string, reference?: ReportReference, historical = !reference, client?: DaemonClient): Promise<LoadedReport> {
     const associated = reference ? await readSession(source, reference) : undefined;
     if (associated && path.relative(path.join(associated.directory, 'compliance-report.json'), path.resolve(file)) !== '') { throw new Error('Rapport hors session attendue.'); }
     const bytes = await readStable(file);
@@ -135,30 +135,10 @@ export async function loadReport(source: string, file: string, reference?: Repor
     try {
         const snapshot = path.join(staging, 'report.json'); await fs.writeFile(snapshot, bytes, { flag: 'wx' });
         const digest = createHash('sha256').update(bytes).digest('hex');
-        let envelope: any;
 
-        if (runner !== runProcess) {
-            // Exécution via runner fourni explicitement (ex. tests unitaires d'injection / TOCTOU)
-            const invocation = planInvocation(source, source, snapshot);
-            invocation.arguments = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(source, 'scripts/compliance-adapter.ps1'), '-ValidateReportPath', snapshot];
-            const validation = await runner(invocation);
-            if (validation.code !== 0) { throw new Error(`Rapport refuse par Test-ComplianceReport : ${validation.stderr.slice(0, 2000)}`); }
-            envelope = JSON.parse(validation.stdout.replace(/^\uFEFF/, ''));
-        } else {
-            // Rebranchement prioritaire sur le démon HTTP local
-            try {
-                const daemon = new DaemonClient();
-                await daemon.ensureDaemon(source);
-                envelope = await daemon.validateReport(raw, digest);
-            } catch {
-                // Repli si le démon ne peut pas démarrer
-                const invocation = planInvocation(source, source, snapshot);
-                invocation.arguments = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(source, 'scripts/compliance-adapter.ps1'), '-ValidateReportPath', snapshot];
-                const validation = await runner(invocation);
-                if (validation.code !== 0) { throw new Error(`Rapport refuse par Test-ComplianceReport : ${validation.stderr.slice(0, 2000)}`); }
-                envelope = JSON.parse(validation.stdout.replace(/^\uFEFF/, ''));
-            }
-        }
+        const daemon = client || new DaemonClient();
+        await daemon.ensureDaemon(source);
+        const envelope = await daemon.validateReport(raw, digest);
         if (!fields(envelope) || envelope.schema_version !== 1 || envelope.report_sha256 !== digest) { throw new Error('Validation non rattachee aux octets du rapport.'); }
         const displayed = displayReport(raw, envelope.presentations);
         if (reference && ((displayed.report.metadata as Fields).run_id !== reference.runId || displayed.report.repository !== reference.target)) { throw new Error('Identite run_id ou Target incoherente avec la session.'); }

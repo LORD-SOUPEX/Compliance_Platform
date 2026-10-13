@@ -47,3 +47,10 @@ crash.log
 
 # Go build outputs
 core/bin/
+core/*.exe
+.scratch_daemon_test/
+
+# VS Code extension build artifacts
+vscode-extension/dist/
+vscode-extension/node_modules/
+vscode-extension/.vscode-test/
