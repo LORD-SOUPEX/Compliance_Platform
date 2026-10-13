@@ -2,149 +2,125 @@
 
 ## Vue d'ensemble
 
-Compliance Platform est un outil local d'audit volontaire de dépôts. Il découvre les technologies, évalue les capacités disponibles et peut exécuter un plan de contrôles avec un rapport et un verdict consultatif. Il n'impose ni intégration à une forge ni blocage Git.
+Compliance Platform est un outil local d'audit autonome de dépôts. Il découvre les technologies présentes, évalue les capacités d'outillage disponibles et exécute un plan de contrôles de conformité selon un catalogue partagé, en générant un rapport JSON canonique et un verdict consultatif.
+
+Le moteur d'exécution autonome écrit en Go (`core/`) et son démon local HTTP/SSE constituent l'unique autorité et source de vérité du produit. Le projet fonctionne à **100 % en local**, sans dépendance envers une forge distante ni pipeline CI distante obligatoire.
 
 ## Fonctionnalités clés
 
-- Runtime partagé installé et vérifié par Bootstrap; roue Python, binaire et module PowerShell sont tracés dans l'index runtime.
-- Discovery en lecture seule, avec preuves, racines, ambiguïtés et erreurs de parcours.
-- Capability Matrix et Tool Resolver pour expliciter les outils disponibles et leurs limites.
-- Compliance Engine v1 et catalogue de 28 contrôles, avec plan, permissions, résultats normalisés et rapport JSON.
-- Quick/Full/Ci/Fix historiques maintenus pendant que les parcours historiques et Compliance coexistent.
-- Adaptateurs locaux PowerShell, Git Bash et VS Code, plus un job GitLab informatif opt-in.
-
-Une technologie détectée n'est pas nécessairement contrôlée ni qualifiée. Le catalogue comprend Python, PowerShell, Terraform/OpenTofu, Terragrunt, Ansible, Docker/Compose, Kubernetes, Helm, Shell, Markdown, JavaScript et TypeScript; les contrôles varient selon la technologie et la plateforme.
+- **Moteur Go autonome multi-OS** : Discovery, Capability Matrix, Tool Resolver, Compliance Engine, Reporting et serveur local (démon HTTP/SSE).
+- **Extension VS Code intégrée** : Interface TreeView locale connectée au démon local via HTTP et streaming d'événements temps réel (SSE), avec lecteur de rapports interactif natif et visualisations de findings.
+- **Sécurité et confinement stricts** : Démon éphémère ou persistant sur `127.0.0.1:0`, jeton Bearer 256 bits généré localement, validation stricte des en-têtes `Host` et `Origin`, approbation explicite des dossiers cibles (*workspace approval*), confinement des processus enfants et annulation immédiate sans processus orphelin.
+- **Résolution d'outils découplée** : Résolution ordonnée via binaires autonomes (`.tools/bin/`), environnement Python autonome (`.tools/python/`), cache runtime et PATH système, sans dépendance à un `.venv` local.
+- **Validation autonome (`compliance selftest`)** : Suite d'auto-test en 20 étapes vérifiant le cycle de vie du démon, la sécurité, l'exécution et l'annulation sur port éphémère.
+- **Catalogue de 28 contrôles** couvrant Python, PowerShell, Terraform/OpenTofu, Terragrunt, Ansible, Docker/Compose, Kubernetes, Helm, Shell et Markdown.
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-    Repo[Repository local] --> Discovery[Discovery]
+    Target[Dossier Target externe] --> Discovery[Discovery Go]
     Discovery --> Matrix[Capability Matrix]
-    Matrix --> Resolver[Tool Resolver]
+    Matrix --> Resolver[Tool Resolver autonome]
     Resolver --> Plan[Execution Plan]
-    Plan --> Engine[Compliance Engine]
-    Engine --> Report[Reporting]
+    Plan --> Engine[Compliance Engine Go]
+    Engine --> Report[Reporting JSON v1]
+    
+    subgraph Local Daemon & UI
+        Daemon[Démon Go HTTP/SSE 127.0.0.1] --> Engine
+        VSCode[Extension VS Code] -->|HTTP / SSE| Daemon
+    end
 ```
 
-Pour auditer votre projet externe, suivre le [tutoriel d'utilisation](docs/utilisation.md). Le parcours technique est décrit dans [l'architecture](docs/architecture-current.md). Les modes Quick/Full historiques conservent leur orchestration dédiée.
+Le parcours technique détaillé est documenté dans [l'architecture](docs/architecture-current.md) et la spécification de l'API locale dans [l'API du démon](docs/daemon-api.md).
 
-### Préparation Dans VS Code
+---
 
-Le MVP local [vscode-extension](vscode-extension/package.json) ajoute une TreeView dans l'Explorateur : sélection d'une Target externe, Pipeline source distincte, préparation puis audit global, permissions explicites, statuts, durées, sorties et annulation. Un lecteur local ouvre le rapport validé en fin d'audit et permet de consulter verdict, couverture, contrôles, findings et sorties, sans conversion Markdown. Le moteur PowerShell reste responsable du contrat et du verdict. Les sessions sont sous `.tools/state/runs/`, jamais dans la Target ; seuls leurs identifiants sont conservés pour les retrouver comme historiques. Les lancements partiels restent hors périmètre. Le [tutoriel](docs/utilisation.md#audit-vs-code-mvp-local) décrit son lancement en Extension Development Host.
+## Utilisation recommandée (Moteur Go & Démon)
 
-## Technologies reconnues
+### 1. Validation de l'environnement (Selftest)
 
-Les marqueurs de fichiers couvrent Python, PowerShell, Terraform/OpenTofu, Terragrunt, Ansible, Docker/Compose, Kubernetes, Helm, Shell, Markdown, JavaScript et TypeScript. Les ambiguïtés, racines et capacités sont détaillées dans [l'architecture](docs/architecture-current.md#discovery-et-capacités). La détection seule ne certifie ni la prise en charge ni la qualité sur des dépôts réels.
+Pour valider l'intégrité du moteur Go autonome, la sécurité HTTP/SSE et le confinement des processus sur port éphémère :
+
+```powershell
+.tools/bin/compliance.exe selftest
+```
+
+### 2. Démarrage du démon local
+
+Le démon expose l'API de pilotage locale sur `127.0.0.1` :
+
+```powershell
+.tools/bin/compliance.exe daemon --state-dir ~/.compliance
+```
+
+### 3. Exécution d'un audit en ligne de commande
+
+```powershell
+# Découverte seule (lecture seule, sans exécution d'outil)
+.tools/bin/compliance.exe discovery -repo "C:\chemin\du\projet"
+
+# Planification seule
+.tools/bin/compliance.exe run -repo "C:\chemin\du\projet" -plan-only
+
+# Audit complet
+.tools/bin/compliance.exe run -repo "C:\chemin\du\projet" -report reports/audit.json
+```
+
+### 4. Audit dans VS Code
+
+L'extension locale [vscode-extension](vscode-extension/package.json) s'installe via le package VSIX autonome multi-OS ou se lance en mode développement :
+- Sélection de la cible d'audit (Target externe).
+- Préparation et inspection du plan.
+- Demande explicite des permissions (réseau, exécution de code).
+- Déroulement en streaming temps réel avec progression visuelle des contrôles.
+- Visualisation du rapport final validé par le démon dans un panneau Webview dédié.
+
+Le moteur Go assure 100 % de la validation, du contrat et du verdict (aucun repli PowerShell).
+
+---
 
 ## Plateformes prises en charge
 
-La seule plateforme exécutée localement est Windows x64 avec Windows PowerShell 5.1 et Python 3.11. Windows x64 est `experimental` au niveau produit; Windows ARM64, Linux x64/ARM64 et macOS x64/ARM64 sont `targeted`, pas qualifiés. Le marqueur `qualified` de l'index runtime signifie que l'installation a terminé, pas que le produit est certifié.
+L'état de support est formalisé dans [`.config/platform-support.json`](.config/platform-support.json) :
 
-## Installation
+| Plateforme | Statut | Preuves de qualification |
+| :--- | :--- | :--- |
+| **Windows x64** | **Qualified** | Selftest Go 20/20 PASS sur port éphémère, tests unitaires Go validés, extension VS Code 34/34 PASS. |
+| **Linux x64** | Targeted | Binaires cross-compilés et distribués dans le package VSIX universel. |
+| **Linux ARM64** | Targeted | Prise en charge ciblée dans le catalogue et l'architecture multi-OS. |
+| **macOS x64 / ARM64** | Targeted | Binaires cross-compilés inclus dans le VSIX; selftest natif à qualifier sur hôte physique. |
 
-Depuis la racine du dépôt, utiliser Windows PowerShell 5.1. L'installation initiale nécessite les artefacts configurés et un accès HTTPS. Git Bash ne fournit qu'un relais vers PowerShell; il ne constitue pas un runtime Linux/macOS.
+---
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1
-```
+## État des validations actuelles
 
-## Bootstrap
+Dernière mesure locale effectuée sur le socle autonome :
 
-Bootstrap installe les outils épinglés dans les espaces locaux du dépôt, sans modifier le PATH système ni les dépôts analysés. Pour réutiliser les artefacts déjà en cache:
+| Composant | Résultat mesuré | Remarque |
+| :--- | :--- | :--- |
+| **Compliance Selftest (Go)** | **20/20 PASS** | Validation complète du démon éphémère, sécurité Bearer, Host/Origin et zéro processus orphelin |
+| **Tests unitaires Go (`core/`)** | **Tous les packages OK** | catalog, discovery, distribution, engine, matrix, osutil, report, server, toolchain |
+| **Tests extension VS Code** | **34/34 PASS** | Client démon, cycle de vie, validation de rapports, sessions isolées |
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -Offline -NoColor
-```
+---
 
-Le mode hors ligne ne qualifie pas un poste neuf. Voir [Maintenance](docs/maintenance.md).
+## Commandes historiques / Obsolètes
 
-## Doctor
+> [!WARNING]
+> Les scripts PowerShell ci-dessous sont conservés temporairement à des fins d'archive et de comparaison de parité. Le moteur Go est désormais l'unique source de vérité.
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor.ps1 -NoColor
-```
+- **`scripts/bootstrap.ps1`** : Remplacé par le runtime autonome et `compliance runtime sync`.
+- **`scripts/doctor.ps1`** : Remplacé par `compliance selftest`.
+- **`scripts/quality-gate.ps1`** : Remplacé par `compliance run` et `compliance discovery`.
+- **`scripts/compliance-adapter.ps1`** : Remplacé par le démon local Go.
 
-Doctor vérifie le snapshot Python, les versions, les hashes des roues, les binaires et PSScriptAnalyzer dans l'index local. Il n'est pas une qualification multi-plateforme.
-
-## Discovery
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -DiscoveryOnly -RepositoryPath "C:\chemin\du\depot"
-```
-
-Discovery n'exécute pas de contrôles. Il retourne les technologies, preuves, racines, ambiguïtés, matrice et résolution en JSON.
-
-## Mode Compliance
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Compliance -RepositoryPath "C:\chemin\du\depot" -PlanOnly
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Compliance -RepositoryPath "C:\chemin\du\depot"
-```
-
-`-PlanOnly` ne lance aucun contrôle et ne produit aucun verdict. Les contrôles nécessitant réseau ou exécution de code demandent explicitement `-AllowNetwork` et/ou `-AllowCodeExecution`. Ces permissions ne sont pas un sandbox. Le [tutoriel](docs/utilisation.md) explique comment auditer un dossier projet, lire le rapport, corriger les findings et relancer l'audit.
-
-## Quick
-
-Quick valide le socle et les contrôles applicables au dépôt plateforme. Son code 0 n'est pas une qualification produit ni une validation de couverture d'un dépôt consommateur.
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Mode Quick -NoColor
-```
-
-## Full
-
-Full exécute les contrôles approfondis et les tests du socle. Le dernier résultat est **11 PASS, 1 FAIL, 1 WARN, 6 SKIP**; le seul FAIL est pip-audit sur `asteval==1.0.6` et `ecdsa==0.19.2`. Aucun finding n'est exclu ou masqué.
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/quality-gate.ps1 -Mode Full -NoColor
-```
-
-## Runtime
-
-L'index runtime Windows x64 référence cinq binaires, le Python sélectionné, 154 packages/wheels et PSScriptAnalyzer. Les hashes et versions sont vérifiés par Bootstrap, Doctor et Resolver. La qualification du runtime ne lève pas le blocage de sécurité Full. Détails: [Runtime et intégrité](docs/architecture-current.md#runtime-et-intégrité).
-
-## Reporting
-
-Compliance émet le rapport JSON v1 avec résultats, findings, diagnostics, couverture, limitations, métriques et verdict. Les rapports historiques restent disponibles; voir [Reporting et verdict](docs/architecture-current.md#reporting-et-verdict). Les rapports peuvent contenir des chemins ou sorties sensibles; leur partage est à la charge de l'utilisateur.
-
-## Modèle de sécurité
-
-Réseau et exécution de code sont refusés par défaut en mode Compliance et doivent être autorisés explicitement. Les autorisations ne fournissent aucune isolation: n'exécuter que des contrôles et dépôts de confiance. Les rapports restent locaux; le moteur ne contacte pas une forge et n'exécute aucune opération Git de commit, push ou merge. Les hooks et la CI du dépôt peuvent néanmoins propager un code non nul.
-
-## État actuel
-
-Dernière validation locale consignée le 9 octobre 2026:
-
-| Contrôle | Résultat |
-| --- | --- |
-| Bootstrap Offline | Succès, code 0 |
-| Doctor | 71 PASS, 0 FAIL, 0 WARN, 3 SKIP |
-| Tests | 49 scénarios Quality Gate; suites unitaires et intégrations réussies |
-| Quick | 10 PASS, 0 FAIL, 1 WARN, 6 SKIP; code 0 |
-| Full | 11 PASS, 1 FAIL, 1 WARN, 6 SKIP; seul pip-audit échoue |
-| Hooks pre-commit | Succès |
-
-Aucun test Python métier n'est présent; ShellCheck n'est pas fourni sur Windows.
-
-## Blocages externes connus
-
-- Quatre lignes d'avis pip-audit héritées des pins Checkov/ecdsa; décision sécurité ou correction fournisseur nécessaire, sans exclusion autorisée.
-- Qualification sur poste neuf et runner GitLab réel non réalisée.
-- Linux, macOS et architectures ARM64 non disponibles pour une qualification native.
-- Aucun corpus consommateur autorisé pour mesurer précision, coût et utilité.
-- Les décisions d'override/politique et la désignation des responsables support relèvent de décisions humaines.
+---
 
 ## Documentation
 
-- [Tutoriel d'utilisation](docs/utilisation.md): auditer un projet externe et vérifier les corrections.
-- [Architecture et contrats techniques](docs/architecture-current.md): composants, technologies, permissions et rapports.
-- [Maintenance et qualification](docs/maintenance.md): installation, mises à jour, tests et blocages externes.
-
-## Contribution
-
-Les consignes projet sont dans [.github/copilot-instructions.md](.github/copilot-instructions.md) et le modèle de merge request dans [.github/merge_request_template.md](.github/merge_request_template.md). Toute modification des contrôles doit être suivie des tests, Quick et Full; les findings de sécurité ne doivent pas être masqués.
-
-## Licence
-
-Aucun fichier `LICENSE` n'est présent dans ce dépôt.
+- [Tutoriel d'utilisation](docs/utilisation.md) : Auditer un projet externe via l'extension ou la CLI.
+- [Architecture et contrats techniques](docs/architecture-current.md) : Description du moteur autonome, du résolveur et du modèle de sécurité.
+- [Spécification de l'API Démon](docs/daemon-api.md) : Endpoints HTTP, format des requêtes, authentification et flux SSE.
+- [Maintenance et packaging](docs/maintenance.md) : Packaging VSIX, gestion des outils et fonctionnement hors-ligne.
+- [Extension VS Code](vscode-extension/README.md) : Guide spécifique de l'extension et de son intégration.

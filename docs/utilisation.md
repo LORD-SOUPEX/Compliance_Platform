@@ -1,150 +1,153 @@
 # Tutoriel : auditer et corriger un projet externe
 
-Ce guide s'adresse à un développeur qui crée son projet dans un dossier puis appelle Compliance Platform depuis une installation séparée. La plateforme identifie des problèmes; vous appliquez les corrections et relancez l'audit. Elle ne réécrit pas automatiquement un projet en mode Compliance.
+Ce guide s'adresse à un développeur qui crée son projet dans un répertoire local puis appelle Compliance Platform depuis son installation ou via son extension VS Code. La plateforme audite la conformité du code, identifie les non-conformités, et vous permet d'itérer jusqu'à l'obtention d'un verdict conforme. Elle ne réécrit pas automatiquement vos fichiers métier.
 
-## Audit VS Code (MVP local)
+---
 
-Après Bootstrap de la plateforme, depuis sa racine sous Windows x64 :
+## 1. Audit dans VS Code (Recommandé)
+
+L'extension VS Code pilote l'audit au moyen du démon local autonome Go, garantissant une réactivité immédiate sans latence de démarrage et sans exécution de scripts PowerShell sous le capot.
+
+### Installation et Démarrage de l'Extension
+
+Depuis la racine de la plateforme (ou en installant le package VSIX) :
 
 ```powershell
+# Installation des dépendances et compilation
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/vscode-extension.ps1 -Action Install
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/vscode-extension.ps1 -Action Build
+
+# Lancement de VS Code en mode développement
 code --new-window --extensionDevelopmentPath="$((Resolve-Path .\vscode-extension).Path)" "$PWD"
 ```
 
-Dans le nouveau host, traiter d'abord l'écran d'initiation s'il apparaît : choisir ou conserver le thème, puis fermer l'onglet de prise en main. Approuver ensuite le workspace, sans confondre cette approbation avec les permissions d'audit. Lancer `Compliance: Selectionner une Target` dans la palette de commandes. Choisir un dossier externe de confiance et confirmer sa préparation. La vue `Compliance Pipelines` de l'Explorateur affiche séparément Target, Pipeline source, technologies, racines et contrôles proposés. `Pending` ne signifie pas qu'un contrôle a été exécuté ; les étapes indisponibles ou non applicables portent leur motif dans l'infobulle. Les ambiguïtés et scans incomplets restent bloqués.
-
-Lancer `Compliance: Lancer l'audit` depuis la palette ou le bouton de la vue. La commande exige une préparation complète, un runtime valide, un workspace approuvé et la Target confirmée ; une seule session peut être active. Le lancement revalide les dossiers, refait la préparation et propose uniquement les permissions nécessaires au plan : réseau et exécution de code sont indépendants, refusés par défaut et limités à cette session. Chaque dialogue liste les contrôles, technologies, racines et effets ; ces autorisations ne constituent pas un sandbox. Un refus donne `Skipped` avec le motif `permission_denied`, sans exécuter le contrôle protégé. Checkov conserve les exigences du catalogue.
-
-La TreeView affiche les contrôles `Pending`, puis `Running` avec durée écoulée, et les états terminaux `Succeeded`, `Failed`, `Error`, `Warning`, `Skipped`, `Blocked` ou `Not applicable`. `Failed` signifie un défaut détecté ; `Error` signifie un résultat techniquement non fiable. Les états d'omission, blocage et avertissement portent un motif structuré dans l'infobulle. La durée finale provient du moteur ; l'affichage du temps en cours est rafraîchi au maximum une fois par seconde. Une couverture partielle n'est pas présentée comme un succès complet.
-
-Cliquer sur la session finalisée, une pipeline ou un contrôle terminé ouvre ou focalise sa section du lecteur. L'action `Compliance: Ouvrir les sorties du controle` reste disponible : stdout, stderr et diagnostics s'ouvrent en texte brut, identifiés par session et contrôle. Les sorties deviennent accessibles à la fin du contrôle ; le streaming ligne par ligne n'est pas garanti. `Compliance: Ouvrir les messages de session` affiche le canal général et `Compliance: Ouvrir le dossier de la session` révèle les fichiers locaux. Le paramètre VS Code `compliance.reportRedactionPatterns` transmet des motifs de masquage au backend ; les rapports restent à relire avant partage.
-
-Le lecteur s'ouvre automatiquement après validation du rapport final. Son en-tête identifie session, Target, source, dates et catalogue ; résumé, verdict, couverture, omissions et limitations restent distincts. Les contrôles sont regroupés génériquement par technologie et racine, avec statut, durée, outil, diagnostics, findings et sorties. PASS avec couverture partielle garde un avertissement explicite ; `Failed` reste un défaut détecté, `Error` un résultat techniquement non fiable. Une session annulée reste incomplète. Les longs textes sont bornés à l'affichage ; les actions de sorties et de JSON brut donnent accès aux données validées.
-
-`Compliance: Ouvrir le rapport de la derniere session` n'utilise que la référence connue, jamais le fichier le plus récent d'un dossier. `Compliance: Ouvrir un rapport existant` demande un JSON explicitement choisi, validé par le backend et présenté comme « Rapport historique : aucune session active associée ». Les v1 sans métriques ou hash modernes restent acceptés. `Compliance: Actualiser le rapport` recharge et revalide ; `Compliance: Ouvrir le JSON brut` affiche les octets validés dans un document JSON, sans rapport Markdown parallèle. Un rapport absent, vide, modifié, incohérent ou non pris en charge produit une erreur, pas une page vide ni un ancien résultat.
-
-Après redémarrage, seule la référence de la dernière session valide est restaurée, comme historique ; aucune Target active, permission ou autorisation d'exécution n'est restaurée. Pour les findings, un bouton de navigation apparaît seulement si le backend fournit un fichier explicite, avec ligne/colonne uniquement si elles existent. Le chemin et ses liens de réanalyse sont vérifiés ; une sortie de la Target est refusée et aucune position n'est inventée. La navigation depuis un rapport historique exige une confirmation distincte, sans lancer de contrôle.
-
-Les audits créent `.tools/state/runs/<run_id>/session.json`, `execution-plan.json`, `compliance-report.json`, `events.ndjson` et `logs/` dans la Pipeline source, ignorés par Git et Discovery. Le même `run_id` identifie la session, le snapshot, les événements et le rapport. Le snapshot est reconstruit par le backend avec les permissions accordées ; un catalogue modifié après consentement est refusé. Le rapport final est validé contre la session et ses résultats ; aucun ancien rapport n'est réutilisé. Les préparations seules conservent leur dossier technique propre sans verdict.
-
-`Compliance: Annuler l'audit` demande l'arrêt coopératif au backend, termine l'arbre du contrôle actif et empêche les suivants. Les résultats déjà obtenus sont conservés ; les contrôles restants portent un motif d'annulation et le rapport reste incomplet avec FAIL, jamais PASS complet. La fermeture du host est détectée par absence de battement de vie après 15 secondes ; un délai de secours de 10 secondes termine l'arbre backend si une annulation explicite reste sans réponse. Une disparition ou erreur de transport laisse une session `incomplete` et des preuves locales, sans promettre un rapport final exploitable.
-
-`Compliance: Actualiser la preparation` invalide le plan précédent. Un changement de Target ou de catalogue/runtime invalide aussi préparation et consentements ; une sélection annulée conserve la Target. Les dossiers internes à la plateforme ou contenant celle-ci sont refusés. La préparation est limitée à 120 secondes et 32 Mio de sorties capturées ; les événements sont limités à 16 Mio et les contrôles conservent les budgets du moteur. Le lecteur refuse les rapports dépassant 32 Mio ou 5 000 contrôles planifiés, et les fichiers traversant des liens de réanalyse. Réseau et code autorisés ne garantissent pas l'absence d'effets de bord des outils. Les lancements par technologie/racine/étape, le streaming ligne par ligne et la publication Marketplace restent hors périmètre.
-
-## 1. Préparer la plateforme une fois
-
-Utiliser Windows x64 et Windows PowerShell 5.1. Les exemples emploient des chemins fictifs: remplacer les deux chemins suivants par les dossiers réels, en gardant les guillemets.
-
+*Alternative avec le VSIX autonome packagé :*
 ```powershell
-$plateforme = (Resolve-Path "C:\outils\Compliance_Platform").Path
-$projet = (Resolve-Path "C:\projets\mon-projet").Path
-$gate = Join-Path $plateforme 'scripts\quality-gate.ps1'
+code --install-extension vscode-extension/dist/compliance-pipelines-1.0.0.vsix
 ```
 
-Le dossier projet doit déjà exister et contenir vos fichiers. Il n'a pas besoin d'intégrer la plateforme, ses outils ou ses hooks. Ces variables restent disponibles dans le terminal PowerShell courant; les redéfinir si vous ouvrez un nouveau terminal.
+### Parcours utilisateur dans l'éditeur
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $plateforme 'scripts\bootstrap.ps1')
-powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $plateforme 'scripts\doctor.ps1') -NoColor
+1. **Approbation de l'Espace de Travail** :
+   - Au démarrage, VS Code ou l'extension peut vous demander d'approuver le workspace. Le démon local exige cette confirmation pour garantir qu'aucune opération n'est initiée sur un dossier non maîtrisé.
+2. **Sélection de la Cible (Target)** :
+   - Ouvrez la palette de commandes (`Ctrl+Shift+P` ou `F1`) et exécutez :  
+     `Compliance: Selectionner une Target`
+   - Sélectionnez le répertoire du projet à auditer.
+3. **Préparation & Découverte** :
+   - L'extension invoque le démon local (`POST /api/v1/discovery` puis `POST /api/v1/plans`).
+   - La vue **Compliance Pipelines** dans l'Explorateur affiche la cible, les technologies détectées, les racines analysées et les contrôles applicables ordonnés par le plan d'exécution.
+   - Les contrôles `Pending` attendent le lancement ; les étapes indisponibles ou non applicables explicitent leur motif dans une infobulle dédiée.
+4. **Lancement de l'Audit** :
+   - Cliquez sur l'icône de lecture dans la vue ou lancez `Compliance: Lancer l'audit`.
+   - Si certains contrôles nécessitent un accès réseau ou une exécution de code (ex. tests unitaires ou Checkov), une boîte de dialogue modale sollicite explicitement votre accord. Un refus place ces contrôles dans l'état `Skipped` (`permission_denied`) sans bloquer le reste de l'audit.
+   - La progression s'affiche en temps réel via Server-Sent Events (SSE) : passage de `Pending` à `Running`, puis aux états terminaux (`Succeeded`, `Failed`, `Error`, `Skipped`).
+5. **Exploration du Rapport et Navigation dans les Findings** :
+   - À l'issue de l'audit, le lecteur de rapport interactif s'ouvre automatiquement.
+   - Vous disposez d'une synthèse du verdict (`PASS`, `FAIL`), du taux de couverture, et de la liste détaillée des constats (*findings*).
+   - Cliquer sur un finding contenant un chemin et une position ouvre directement le fichier incriminé à la bonne ligne.
+   - Vous pouvez également afficher les sorties brutes (`Compliance: Ouvrir les sorties du controle`) ou le document JSON canonique (`Compliance: Ouvrir le JSON brut`).
+
+---
+
+## 2. Audit en Ligne de Commande (CLI Go autonome)
+
+Le moteur Go autonome peut être invoqué directement depuis n'importe quel shell (PowerShell, Command Prompt, Bash) sans nécessiter VS Code.
+
+### Commandes Fondamentales
+
+Assurez-vous que l'exécutable `compliance` est disponible (dans `.tools/bin/compliance.exe` ou dans votre `PATH`) :
+
+```bash
+# Vérifier la validité de l'installation et du démon
+compliance selftest
 ```
 
-Bootstrap est réservé à l'installation/mise à jour, pas à chaque audit. Il installe les hooks dans le dépôt plateforme uniquement. `-Offline` ne fonctionne qu'avec les artefacts requis déjà en cache. En cas d'échec Doctor, résoudre l'installation avant d'interpréter les résultats du projet; voir [Maintenance](maintenance.md).
+### Étape 1 : Découverte des technologies
 
-## 2. Détecter les technologies du projet
+Identifie les technologies, les cadres applicatifs et les répertoires d'intérêt de votre projet cible :
 
-Les commandes suivantes peuvent être lancées depuis n'importe quel dossier: `$gate` et `$projet` sont des chemins absolus.
+```bash
+compliance discovery -repo "C:\projets\mon-projet"
+```
+*Sortie : JSON structuré listant les langages, outils préconisés et erreurs éventuelles de scan.*
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File $gate -DiscoveryOnly -RepositoryPath $projet -ReportPath 'mon-projet-discovery.json'
-$codeDiscovery = $LASTEXITCODE
+### Étape 2 : Prévisualisation du plan d'audit
+
+Affiche les contrôles ordonnancés (graphe acyclique orienté / DAG) sans rien exécuter :
+
+```bash
+compliance run -repo "C:\projets\mon-projet" -plan-only
+```
+*Le rapport généré contient les contrôles applicables, les motifs d'omission et les permissions requises, sans verdict d'audit.*
+
+### Étape 3 : Exécution complète de l'audit
+
+Lancer l'audit de conformité :
+
+```bash
+# Audit standard (sans autorisations spéciales)
+compliance run -repo "C:\projets\mon-projet" -report "reports/mon-projet-audit.json"
 ```
 
-Le JSON est affiché dans le terminal et enregistré dans `reports/mon-projet-discovery.json` sous la plateforme. Examiner les technologies, preuves et racines. Une ambiguïté `.tf` Terraform/OpenTofu ou `hosts:` Ansible ne doit pas être interprétée comme un outil absent ni comme une conformité. Un projet vide ne donne aucune couverture utile. Les fichiers générés/caches sont exclus.
+Pour les projets nécessitant des contrôles dynamiques ou des vérifications d'infrastructures étendues (ex: Checkov, tests Python) :
 
-Discovery ne lance pas les contrôles, mais peut vérifier la disponibilité des outils avec des sondes de version. Code 2 signifie que le scan est incomplet ou qu'une erreur de préparation est survenue; lire `scan_errors` lorsqu'ils sont présents.
-
-## 3. Examiner le plan avant l'audit
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File $gate -Compliance -PlanOnly -RepositoryPath $projet -ReportPath 'mon-projet-plan.json' -HumanSummary
+```bash
+# Audit avec autorisation explicite d'exécution de code et d'accès réseau
+compliance run -repo "C:\projets\mon-projet" -allow-code -allow-network -report "reports/mon-projet-audit.json"
 ```
 
-Le rapport est sous `reports/mon-projet-plan.json`. Aucun contrôle n'est exécuté et `verdict` reste nul. Examiner `execution_plan.controls`, leurs racines, applicabilité et motifs d'omission. Certaines technologies détectées n'ont pas d'outil configuré (JavaScript/TypeScript), et ShellCheck n'est pas fourni sous Windows.
+---
 
-Si vous envisagez un audit avec permissions, vous pouvez prévisualiser le même plan en ajoutant `-AllowCodeExecution` et/ou `-AllowNetwork` avec `-PlanOnly`, sans exécuter les contrôles.
+## 3. Analyse du Rapport et Traitement des Écarts
 
-## 4. Lancer un premier audit
+Le rapport généré est strictement conforme au schéma JSON v1 (`.config/compliance-report.schema.json`).
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File $gate -Compliance -RepositoryPath $projet -ReportPath 'mon-projet-audit.json' -HumanSummary
-$codeAudit = $LASTEXITCODE
+### Structure du Rapport
+
+```json
+{
+  "version": "1.0.0",
+  "source_adapter": "Go",
+  "verdict": "fail",
+  "summary": { "passed": 18, "failed": 2, "skipped": 4, "error": 0 },
+  "coverage": { "percentage": 90.0, "complete": false },
+  "findings": [
+    {
+      "control_id": "python.lint.ruff",
+      "severity": "medium",
+      "status": "fail",
+      "message": "F401 'os' imported but unused",
+      "file_path": "src/app.py",
+      "line": 3
+    }
+  ]
+}
 ```
 
-Les contrôles soumis à une permission sont omis par défaut; vérifier la couverture, même en cas de PASS. Pour un projet de confiance, autoriser ensuite explicitement les contrôles nécessaires:
+### Guide de Décision
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File $gate -Compliance -RepositoryPath $projet -AllowCodeExecution -ReportPath 'mon-projet-audit.json' -HumanSummary
-$codeAudit = $LASTEXITCODE
-```
+| Statut du Contrôle | Signification | Action Requise |
+| :--- | :--- | :--- |
+| `fail` | Non-conformité détectée dans le projet. | Corriger le fichier selon les indications du diagnostic ou finding. |
+| `error` | Échec technique (ex. binaire défaillant, timeout, corruption). | Analyser les logs d'exécution du contrôle avant de modifier le code cible. |
+| `skipped` | Contrôle ignoré (technologie absente ou permission refusée). | Vérifier si l'omission est normale ou si une autorisation manquait (`-allow-code`). |
+| `PASS` avec couverture partielle | Les contrôles exécutés ont réussi, mais certains contrôles applicables ont été omis. | Ne pas considérer le projet comme 100 % conforme ; réexaminer les contrôles omis. |
 
-`-AllowCodeExecution` autorise notamment tests, Pylint, plugins/configurations chargées et Markdown via pre-commit. Ces processus ne sont pas isolés et peuvent avoir des effets de bord. Si l'audit exige aussi un accès réseau et que vous l'approuvez, utiliser:
+### Codes de Sortie CLI
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File $gate -Compliance -RepositoryPath $projet -AllowCodeExecution -AllowNetwork -ReportPath 'mon-projet-audit.json' -HumanSummary
-$codeAudit = $LASTEXITCODE
-```
+- `0` : Succès (`verdict: pass`) ou plan simulé valide.
+- `1` : Non-conformité (`verdict: fail`).
+- `2` : Erreur d'initialisation, scan incomplet ou défaillance critique.
 
-Checkov demande les deux autorisations. Ne les accorder ni automatiquement ni pour un dépôt inconnu. Aucun consentement ne rend disponibles des outils absents ou incompatibles.
+---
 
-## 5. Lire le rapport et prioriser les corrections
+## 4. Cycle d'Itération et Correction
 
-```powershell
-$rapportPath = Join-Path $plateforme 'reports\mon-projet-audit.json'
-$rapport = Get-Content -LiteralPath $rapportPath -Raw -Encoding UTF8 | ConvertFrom-Json
-$rapport.verdict
-$rapport.summary
-$rapport.coverage
-$rapport.findings | Select-Object control_id, severity, status, root
-$rapport.execution_results | Select-Object control_id, status, exit_code, stderr
-```
-
-Dans VS Code, ouvrir le fichier JSON puis rechercher le `control_id` concerné pour lire stdout, stderr et diagnostics. Les rapports peuvent contenir des chemins ou données sensibles; les relire avant partage.
-
-| Résultat | Action |
-| --- | --- |
-| `fail` | Un contrôle exécuté a relevé un problème; corriger les fichiers selon son diagnostic. |
-| `error` | Examiner outil manquant, incompatibilité, timeout, intégrité ou scan incomplet avant de modifier le code du projet. |
-| `skipped` | Lire le motif: technologie absente, alternative non retenue ou permission non accordée; ce n'est pas une réussite du contrôle. |
-| PASS avec couverture partielle | Ne pas conclure que tout le projet est conforme; examiner les contrôles requis omis. |
-
-Le code Compliance vaut 0 pour PASS ou plan seul valide, 1 pour FAIL et 2 pour scan/préparation incomplets. Une entrée invalide ou une impossibilité d'écrire peut empêcher la création du rapport: vérifier aussi le terminal et son code de sortie.
-
-## 6. Corriger puis refaire exactement le même audit
-
-Conserver vos changements dans Git ou une sauvegarde avant toute correction. Par exemple, corriger les espaces/formatages indiqués par Ruff dans un fichier Python, la syntaxe d'un script PowerShell ou un défaut documentaire signalé. Un diagnostic doit déterminer la modification, pas seulement le verdict global.
-
-Demander éventuellement à votre assistant de développement: « Corrige le finding de ce contrôle dans ce fichier, sans désactiver la règle ni supprimer le test, puis relance le même audit ». Ne lui transmettre que les extraits nécessaires, expurgés de secrets.
-
-Après correction, reprendre la commande de l'étape 4 avec les mêmes permissions et une autre destination pour conserver la comparaison:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File $gate -Compliance -RepositoryPath $projet -ReportPath 'mon-projet-apres-corrections.json' -HumanSummary
-$codeApres = $LASTEXITCODE
-```
-
-Si le premier audit utilisait des permissions, les ajouter également à cette commande. Comparer findings et couverture, pas seulement le nombre de PASS. Le moteur ne bloque ni commit ni push ni merge.
-
-## Ce qu'il ne faut pas confondre
-
-- `Quick`/`Full` servent les contrôles historiques du socle; Full audite les dépendances de la plateforme et lance ses tests, pas un audit complet de votre projet.
-- `-Mode Fix` est un mode historique à effets de bord, incompatible avec `-Compliance`. Il n'est pas recommandé comme correcteur générique d'un projet externe.
-- Un formatage ou une correction métier nécessite une modification ciblée de votre code; Compliance ne dispose pas d'un bouton « tout corriger ».
-- Python: l'audit consommateur des dépendances exige `requirements.txt`; la présence d'un pyproject seul ne suffit pas à ce contrôle.
-- Terraform/OpenTofu: un `.tf` seul est ambigu. Utiliser les marqueurs réellement appropriés au projet; ne pas en ajouter uniquement pour obtenir PASS.
-- La tâche VS Code `Compliance v1` fournie dans la plateforme cible son propre workspace. Pour votre projet externe, les commandes ci-dessus sont le point d'entrée explicite.
-
-## Où aller ensuite
-
-- [Architecture et contrats](architecture-current.md): technologies, résultats, permissions et limites.
-- [Maintenance et qualification](maintenance.md): installation, mises à jour, tests et sécurité du runtime.
+1. **Isolation des modifications** : Travaillez sur une branche Git dédiée.
+2. **Correction chirurgicale** : Corrigez précisément les écarts identifiés par les linters et scanners sans relâcher les règles de sécurité.
+3. **Ré-audit immédiat** :
+   ```bash
+   compliance run -repo "C:\projets\mon-projet" -report "reports/mon-projet-post-fix.json"
+   ```
+4. **Comparaison** : Vérifiez que le nombre de `failed` diminue sans apparition d'`error`. Le verdict final doit atteindre `pass` avec une couverture complète.

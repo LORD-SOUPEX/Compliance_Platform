@@ -24,7 +24,7 @@ param(
 
 # [DEPRECATED / HÉRITÉ] Ce script PowerShell 5.1 est déprécié.
 # Le moteur autonome Go (core/) et la CLI 'compliance' sont l'unique source de vérité.
-Write-Warning "[DEPRECATED] quality-gate.ps1 est déprécié. Utilisez la CLI Go 'compliance' (ex: compliance run / compliance selftest)."
+# Utiliser la CLI Go 'compliance' (ex: compliance run / compliance selftest).
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'

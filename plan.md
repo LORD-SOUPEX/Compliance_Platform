@@ -203,10 +203,10 @@ Autres fragilités constatées :
 
 ### Lot 2 : Réalignement documentaire et contrats
 
-- [ ] Réécrire `README.md`, `docs/architecture-current.md`, `docs/utilisation.md`, `docs/maintenance.md` (§ 3).
-- [ ] Mettre à jour `platform-support.json` après arbitrage ; faire évoluer `source_adapter` de façon compatible v1.
+- [x] Réécrire `README.md`, `docs/architecture-current.md`, `docs/utilisation.md`, `docs/maintenance.md` (§ 3).
+- [x] Mettre à jour `platform-support.json` après arbitrage ; faire évoluer `source_adapter` de façon compatible v1.
 - [ ] Réconcilier `phase4-report`, `phase4bis-report`, `phase5-report` ; marquer chaque chiffre « mesuré / non testé / hypothèse ».
-- [ ] Documenter le protocole du démon (endpoints, jeton, SSE) dans `docs/`.
+- [x] Documenter le protocole du démon (endpoints, jeton, SSE) dans `docs/daemon-api.md`.
 
 ### Lot 3 : Parité des tests et couverture Go
 

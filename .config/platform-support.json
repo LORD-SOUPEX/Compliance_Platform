@@ -5,9 +5,9 @@
       "id": "windows-x64",
       "os": "windows",
       "architecture": "x64",
-      "status": "experimental",
-      "evidence": ["Local PowerShell test suites pass", "Quality Gate Quick passes"],
-      "limitations": ["Quality Gate Full fails dependency audit", "GitLab remote runner and external consumers are not qualified"]
+      "status": "qualified",
+      "evidence": ["Selftest Go autonome valide (20/20 PASS sur port ephemere)", "Suite de tests unitaires Go validee", "Extension VS Code validee sur demon local (34/34 PASS)"],
+      "limitations": ["Environnement multi-OS physique non execute hors Windows (Linux et macOS cross-compiles uniquement)"]
     },
     {
       "id": "windows-arm64",

@@ -9,7 +9,7 @@
     "schema_version": { "const": 1 },
     "engine_version": { "type": "string", "minLength": 1 },
     "generated_at": { "type": "string", "format": "date-time" },
-    "metadata": { "type": "object", "required": ["run_id", "source_mode", "source_adapter", "platform", "catalog_schema_version", "network_authorized", "code_execution_authorized"], "properties": { "run_id": { "type": "string" }, "source_mode": { "type": "string" }, "source_adapter": { "enum": ["PowerShell", "Bash", "VSCode", "GitLab", "Legacy"] }, "catalog_sha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }, "platform_qualification_status": { "enum": ["targeted", "experimental", "qualified", null] }, "redaction_applied": { "type": "boolean" }, "network_authorized": { "type": "boolean" }, "code_execution_authorized": { "type": "boolean" } } },
+    "metadata": { "type": "object", "required": ["run_id", "source_mode", "source_adapter", "platform", "catalog_schema_version", "network_authorized", "code_execution_authorized"], "properties": { "run_id": { "type": "string" }, "source_mode": { "type": "string" }, "source_adapter": { "enum": ["PowerShell", "Bash", "VSCode", "GitLab", "Legacy", "Go", "Daemon"] }, "catalog_sha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }, "platform_qualification_status": { "enum": ["targeted", "experimental", "qualified", null] }, "redaction_applied": { "type": "boolean" }, "network_authorized": { "type": "boolean" }, "code_execution_authorized": { "type": "boolean" } } },
     "repository": { "type": "string", "minLength": 1 },
     "execution_status": { "enum": ["planned", "completed", "blocked", "error"] },
     "discovery": { "type": "object" },
