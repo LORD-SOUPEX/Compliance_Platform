@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"compliance/internal/report"
 )
 
 func TestRunCompliance_PlanOnly(t *testing.T) {
@@ -118,5 +121,127 @@ func TestRunCompliance_PermissionsDenied(t *testing.T) {
 
 	if !foundBlocked {
 		t.Errorf("expected permission_denied control when network/code execution disallowed")
+	}
+}
+
+// TestExecuteCompliancePlan_DependencyFailed vérifie la propagation stricte de dependency_failed
+func TestExecuteCompliancePlan_DependencyFailed(t *testing.T) {
+	plan := &report.ExecutionPlan{
+		SchemaVersion: 1,
+		Repository:    "C:/repo",
+		Budgets: report.Budgets{
+			TimeoutSeconds:          300,
+			MaxOutputBytesPerStream: 1048576,
+			MaxControls:             5,
+		},
+	}
+
+	controls := []*PlannedControl{
+		{
+			ID:            "ctrl.parent",
+			Name:          "Parent Control",
+			Applicability: "not_applicable",
+			ReasonCode:    "tool_unavailable",
+			Required:      true,
+		},
+		{
+			ID:            "ctrl.child",
+			Name:          "Child Control",
+			Applicability: "applicable",
+			Dependencies:  []string{"ctrl.parent"},
+			Required:      true,
+		},
+	}
+
+	results, err := ExecuteCompliancePlan(context.Background(), plan, controls, ExecutionOptions{})
+	if err != nil {
+		t.Fatalf("ExecuteCompliancePlan failed: %v", err)
+	}
+
+	if len(results) != 2 {
+		t.Fatalf("Nombre de résultats attendu 2, obtenu %d", len(results))
+	}
+
+	childRes := results[1]
+	if childRes.Status != "error" {
+		t.Errorf("Statut attendu 'error' pour contrôle requis avec dépendance échouée, obtenu '%s'", childRes.Status)
+	}
+	if !childRes.Critical {
+		t.Errorf("Contrôle requis avec dépendance échouée doit être marqué Critical=true")
+	}
+
+	foundDiag := false
+	for _, d := range childRes.Diagnostics {
+		if d.Code == "dependency_failed" {
+			foundDiag = true
+			break
+		}
+	}
+	if !foundDiag {
+		t.Errorf("Diagnostic 'dependency_failed' manquant dans le résultat du contrôle enfant")
+	}
+}
+
+// TestExecuteCompliancePlan_GlobalTimeout vérifie le basculement en erreur lorsque le budget global est dépassé
+func TestExecuteCompliancePlan_GlobalTimeout(t *testing.T) {
+	tempRepo := t.TempDir()
+	plan := &report.ExecutionPlan{
+		SchemaVersion: 1,
+		Repository:    tempRepo,
+		Budgets: report.Budgets{
+			TimeoutSeconds:          1,
+			MaxOutputBytesPerStream: 1048576,
+			MaxControls:             5,
+		},
+	}
+
+	controls := []*PlannedControl{
+		{
+			ID:            "ctrl.first",
+			Name:          "First Control",
+			Applicability: "not_applicable",
+			ReasonCode:    "tool_unavailable",
+			Root:          ".",
+			Required:      false,
+		},
+		{
+			ID:            "ctrl.slow",
+			Name:          "Slow Control",
+			Applicability: "applicable",
+			Root:          ".",
+			Required:      true,
+		},
+	}
+
+	opts := ExecutionOptions{
+		GlobalTimeout: 5 * time.Millisecond,
+		OnControlDone: func(ctrl *PlannedControl, res *report.ExecutionResult) {
+			if ctrl.ID == "ctrl.first" {
+				time.Sleep(10 * time.Millisecond) // Provoquer le dépassement du budget global de 5ms
+			}
+		},
+	}
+	results, err := ExecuteCompliancePlan(context.Background(), plan, controls, opts)
+	if err != nil {
+		t.Fatalf("ExecuteCompliancePlan failed: %v", err)
+	}
+
+	if len(results) != 2 {
+		t.Fatalf("Nombre de résultats attendu 2, obtenu %d", len(results))
+	}
+
+	res := results[1]
+	if res.Status != "error" {
+		t.Errorf("Statut attendu 'error' après timeout global, obtenu '%s'", res.Status)
+	}
+	foundDiag := false
+	for _, d := range res.Diagnostics {
+		if d.Code == "global_timeout" {
+			foundDiag = true
+			break
+		}
+	}
+	if !foundDiag {
+		t.Errorf("Diagnostic 'global_timeout' manquant, diagnostics recus: %+v (status: %s)", res.Diagnostics, res.Status)
 	}
 }

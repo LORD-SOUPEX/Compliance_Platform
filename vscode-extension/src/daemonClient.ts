@@ -59,8 +59,12 @@ export class DaemonClient {
 
     constructor(private stateDir?: string) {
         if (!this.stateDir) {
-            const home = os.homedir();
-            this.stateDir = path.join(home, '.compliance');
+            if (process.env.COMPLIANCE_STATE_DIR) {
+                this.stateDir = process.env.COMPLIANCE_STATE_DIR;
+            } else {
+                const home = os.homedir();
+                this.stateDir = path.join(home, '.compliance');
+            }
         }
     }
 

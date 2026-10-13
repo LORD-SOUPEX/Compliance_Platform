@@ -2,6 +2,7 @@ package report
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -252,15 +253,23 @@ func BuildComplianceReport(opts ReportOptions) *Report {
 		}
 	}
 
+	// Traiter les contrôles planifiés et détecter omissions / doublons / manquants
+	planControlsMap := make(map[string]bool)
+	requiredPlanControls := make(map[string]bool)
 	nonApplicableIds := make(map[string]bool)
+
 	for _, raw := range opts.Plan.Controls {
 		var id, applicability string
+		var required bool
 		if m, ok := raw.(map[string]interface{}); ok {
 			if s, ok := m["id"].(string); ok {
 				id = s
 			}
 			if s, ok := m["applicability"].(string); ok {
 				applicability = s
+			}
+			if r, ok := m["required"].(bool); ok {
+				required = r
 			}
 		} else if b, err := json.Marshal(raw); err == nil {
 			var m map[string]interface{}
@@ -271,31 +280,79 @@ func BuildComplianceReport(opts ReportOptions) *Report {
 				if s, ok := m["applicability"].(string); ok {
 					applicability = s
 				}
+				if r, ok := m["required"].(bool); ok {
+					required = r
+				}
 			}
 		}
-		if id != "" && applicability == "not_applicable" {
-			nonApplicableIds[id] = true
-		}
-	}
-	blockingSkippedCount := 0
-	for _, r := range opts.Results {
-		if r.Status == "skipped" && !nonApplicableIds[r.ControlId] {
-			blockingSkippedCount++
+		if id != "" {
+			planControlsMap[id] = true
+			if required {
+				requiredPlanControls[id] = true
+			}
+			if applicability == "not_applicable" {
+				nonApplicableIds[id] = true
+			}
 		}
 	}
 
+	blockingSkippedCount := 0
+	omittedRequiredCount := 0
+	seenResultIds := make(map[string]int)
+
+	for _, r := range opts.Results {
+		seenResultIds[r.ControlId]++
+		if r.Status == "skipped" && !nonApplicableIds[r.ControlId] {
+			blockingSkippedCount++
+			if requiredPlanControls[r.ControlId] {
+				omittedRequiredCount++
+			}
+		}
+	}
+
+	// Détecter si des contrôles requis manquent complètement des résultats
+	hasDuplicates := false
+	for _, count := range seenResultIds {
+		if count > 1 {
+			hasDuplicates = true
+			break
+		}
+	}
+
+	missingResults := false
+	for id := range planControlsMap {
+		if seenResultIds[id] == 0 {
+			missingResults = true
+			if requiredPlanControls[id] {
+				omittedRequiredCount++
+			}
+		}
+	}
+
+	if hasDuplicates {
+		summary.CriticalErrors++
+		reasons = append(reasons, "Resultats d'execution dupliques pour au moins un controle.")
+	}
+	if missingResults && !opts.PlanOnly {
+		summary.CriticalErrors++
+		reasons = append(reasons, "Au moins un controle planifie n'a aucun resultat d'execution.")
+	}
+	if omittedRequiredCount > 0 && !opts.PlanOnly {
+		reasons = append(reasons, fmt.Sprintf("%d controle(s) requis omis de l'evaluation.", omittedRequiredCount))
+	}
+
 	coverage := Coverage{
-		Complete:                !opts.PlanOnly && opts.ScanComplete && len(opts.Results) == len(opts.Plan.Controls) && summary.Error == 0 && blockingSkippedCount == 0,
+		Complete:                !opts.PlanOnly && opts.ScanComplete && len(opts.Results) == len(opts.Plan.Controls) && summary.Error == 0 && blockingSkippedCount == 0 && omittedRequiredCount == 0 && !hasDuplicates && !missingResults,
 		PlannedControls:         len(opts.Plan.Controls),
 		ExecutedControls:        executedControls,
-		OmittedRequiredControls: 0,
+		OmittedRequiredControls: omittedRequiredCount,
 		DependencySkips:         dependencySkips,
 		Limitations:             make([]interface{}, 0),
 	}
 
 	var verdictPtr *string
 	if !opts.PlanOnly {
-		if summary.Fail > 0 || summary.CriticalErrors > 0 {
+		if summary.Fail > 0 || summary.CriticalErrors > 0 || omittedRequiredCount > 0 {
 			v := "FAIL"
 			verdictPtr = &v
 		} else {

@@ -208,13 +208,19 @@ Autres fragilités constatées :
 - [ ] Réconcilier `phase4-report`, `phase4bis-report`, `phase5-report` ; marquer chaque chiffre « mesuré / non testé / hypothèse ».
 - [x] Documenter le protocole du démon (endpoints, jeton, SSE) dans `docs/daemon-api.md`.
 
+### Directive Transverse : Rationalisation Documentaire et Anti-Prolifération Markdown
+- **Règle d'or** : **Zéro fichier Markdown créé en dehors du dossier `docs/`**. Les seules exceptions permanentes sont `README.md` à la racine et `vscode-extension/README.md` (requis pour le packaging VSIX). Tout compte-rendu, note de cadrage ou synthèse temporaire doit être consigné dans `plan.md` ou fusionné dans la documentation vivante existante.
+- **Factorisation des rapports d'étapes** : Consolider, archiver ou éliminer les rapports intermédiaires obsolètes sous `docs/` (`phase*-report.md`, `phase*-addendum.md`) au profit de la documentation de référence vivante (`architecture-current.md`, `utilisation.md`, `maintenance.md`, `daemon-api.md`).
+
 ### Lot 3 : Parité des tests et couverture Go
 
-- [ ] Établir la matrice scénario PowerShell → test Go (§ 5) ; implémenter les scénarios « non constatés », en priorité : couverture partielle, résultat manquant/dupliqué, timeouts, `dependency_failed`, validation de schéma, rétrocompatibilité v1.
-- [ ] Figer des **golden files** issus du moteur PowerShell (`ps_defect_report.json`, plan à 28 contrôles) avant archivage, et convertir les tests de parité (suppression du `t.Skip` silencieux).
-- [ ] Ajouter des tests Go pour `selftest`, `lock_*`, `process_*` sous les deux familles d'OS (build tags).
-- [ ] Isoler les tests TS (répertoire d'état temporaire, port éphémère) ; identifier la cause de la dépendance d'ordre.
-- [ ] Exécuter les tests Extension Host (`-Action TestHost`) et consigner le résultat.
+- [x] Figer des **golden files** issus du moteur PowerShell (`ps_defect_report.json`, plan à 28 contrôles) dans `core/testdata/` et convertir les tests de parité (`parity_test.go`, `parity_defect_test.go`, `discovery/parity_test.go`) pour s'appuyer sur ces fixtures statiques avec **suppression stricte des `t.Skip()` silencieux**.
+- [x] Implémenter en Go natif dans `core/internal/engine/` et `core/internal/report/` les scénarios critiques de `compliance-engine.Tests.ps1` :
+  - Couverture partielle (`omitted_required_controls`) et verdict FAIL en cas de résultat manquant/dupliqué.
+  - Gestion des timeouts stricts et propagation de statut `dependency_failed`.
+  - Validation stricte de conformité du rapport au schéma JSON v1 et cas limites de verdict.
+- [x] Fiabiliser et isoler les tests TypeScript (`vscode-extension/tests/`) avec répertoires temporaires dédiés pour éliminer tout conflit sur le verrou `~/.compliance` et corriger la dépendance d'ordre en exécution concurrente.
+- [x] Exécuter les suites de tests complètes (`go test ./...` dans `core/` et `scripts/vscode-extension.ps1 -Action Test`) à 100 % de réussite.
 
 ### Lot 4 : Qualification multi-OS (et CI optionnelle)
 
