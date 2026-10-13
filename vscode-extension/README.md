@@ -16,11 +16,13 @@ L'extension fonctionne selon une architecture découplée sans aucune exécution
 - **Zéro dépendance PowerShell** :
   - Tout le parsing, l'ordonnancement en graphe (DAG), la validation des schémas et l'exécution des contrôles sont assurés directement par le binaire Go.
 - **Support Multi-OS Natif** :
-  - Les binaires natifs du moteur Go sont directement embarqués dans le package VSIX :
+  - Les 6 binaires natifs du moteur Go sont directement compilés et embarqués dans le package VSIX universel :
     - `bin/compliance-windows-amd64.exe`
+    - `bin/compliance-windows-arm64.exe`
     - `bin/compliance-linux-amd64`
-    - `bin/compliance-darwin-arm64`
+    - `bin/compliance-linux-arm64`
     - `bin/compliance-darwin-amd64`
+    - `bin/compliance-darwin-arm64`
   - Aucun téléchargement additionnel n'est requis à l'installation.
 
 ---
@@ -57,18 +59,18 @@ L'extension fonctionne selon une architecture découplée sans aucune exécution
 
 ## Développement et Tests Locaux
 
-Depuis la racine du projet :
+Depuis le dossier `vscode-extension/` :
 
-```powershell
+```bash
 # Installation des dépendances npm
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/vscode-extension.ps1 -Action Install
+npm install
 
 # Compilation TypeScript
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/vscode-extension.ps1 -Action Build
+npm run compile
 
-# Lancement des tests de l'extension (34 scénarios)
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/vscode-extension.ps1 -Action Test
+# Lancement des tests de l'extension (34 scénarios) avec régénération automatique des binaires
+npm test
 
-# Packaging du VSIX universel
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/vscode-extension.ps1 -Action Package
+# Packaging du VSIX universel (compilation automatique des 6 binaires multi-OS Go)
+npm run package
 ```

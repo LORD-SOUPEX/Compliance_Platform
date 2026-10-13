@@ -33,11 +33,13 @@ npm run package
 ```
 
 Sous le capot, `vscode-extension/package_vsix.py` génère un conteneur conforme à la norme **Open Packaging Conventions (OPC)** :
-- Il compile et intègre les binaires natifs Go pour l'ensemble des cibles ciblées :
+- Il compile et intègre les binaires natifs Go pour l'ensemble des 6 cibles ciblées :
   - `bin/compliance-windows-amd64.exe`
+  - `bin/compliance-windows-arm64.exe`
   - `bin/compliance-linux-amd64`
-  - `bin/compliance-darwin-arm64`
+  - `bin/compliance-linux-arm64`
   - `bin/compliance-darwin-amd64`
+  - `bin/compliance-darwin-arm64`
 - Le VSIX produit (`vscode-extension/dist/compliance-local-pipelines-0.1.0.vsix`) est immédiatement installable sur n'importe quel système d'exploitation sans nécessiter de recompilation sur le poste utilisateur.
 
 ---
@@ -76,9 +78,11 @@ Conformément à `.config/platform-support.json` :
 | Plateforme | Statut | Preuves Actuelles |
 | :--- | :--- | :--- |
 | **windows-x64** | **Qualified** | Selftest Go 20/20 PASS, suite Go `core/` OK, extension VS Code 34/34 PASS. Confinement Job Objects validé. |
-| **linux-x64** | **Targeted** | Binaires cross-compilés validés (`GOOS=linux GOARCH=amd64`). Confinement POSIX (Process Groups + setrlimit) validé. |
-| **darwin-arm64** | **Targeted** | Binaires cross-compilés (`GOOS=darwin GOARCH=arm64`) embarqués dans le package VSIX. |
-| **darwin-amd64** | **Targeted** | Binaires cross-compilés embarqués dans le package VSIX. |
+| **windows-arm64** | **Targeted** | Binaire natif `compliance-windows-arm64.exe` cross-compilé et embarqué dans le VSIX universel. |
+| **linux-x64** | **Targeted** | Binaire natif `compliance-linux-amd64` cross-compilé (`GOOS=linux GOARCH=amd64`). Confinement POSIX validé. |
+| **linux-arm64** | **Targeted** | Binaire natif `compliance-linux-arm64` cross-compilé (`GOOS=linux GOARCH=arm64`) embarqué dans le VSIX. |
+| **darwin-amd64** | **Targeted** | Binaire natif `compliance-darwin-amd64` cross-compilé embarqué dans le package VSIX. |
+| **darwin-arm64** | **Targeted** | Binaire natif `compliance-darwin-arm64` cross-compilé (`GOOS=darwin GOARCH=arm64`) embarqué dans le VSIX. |
 
 ---
 

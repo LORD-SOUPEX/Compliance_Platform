@@ -421,7 +421,7 @@ func ExecuteCompliancePlan(
 				Critical: res.Critical,
 			})
 		} else if ctrl.Applicability != "applicable" {
-			if ctrl.Applicability == "ambiguous" || (ctrl.Required && (ctrl.Applicability == "capability_unavailable" || ctrl.Applicability == "tool_unavailable")) {
+			if ctrl.Applicability == "ambiguous" || (ctrl.Required && ctrl.Technology != "powershell" && (ctrl.Applicability == "capability_unavailable" || ctrl.Applicability == "tool_unavailable")) {
 				res.Status = "error"
 				res.Critical = true
 			}

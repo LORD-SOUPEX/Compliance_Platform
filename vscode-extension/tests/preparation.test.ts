@@ -233,6 +233,7 @@ test('Sessions backend isolees', async context => {
             const cancellation = new AbortController();
             try {
                 await fs.writeFile(path.join(target, 'main.ps1'), "Write-Output 'ok'\n");
+                await fs.writeFile(path.join(target, 'app.py'), 'value = 1\n');
                 await audit(source, state, async () => ({ network: false, code_execution: false }), () => {
                     if ([...state.controls.values()].some(control => control.status === 'Running')) { cancellation.abort(); }
                 }, cancellation.signal);

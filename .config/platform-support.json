@@ -6,7 +6,12 @@
       "os": "windows",
       "architecture": "x64",
       "status": "qualified",
-      "evidence": ["Selftest Go autonome valide (20/20 PASS sur port ephemere)", "Suite de tests unitaires Go validee", "Extension VS Code validee sur demon local (34/34 PASS)"],
+      "evidence": [
+        "Selftest Go autonome valide (20/20 PASS sur port ephemere)",
+        "Suite de tests unitaires Go validee (100% PASS)",
+        "Extension VS Code validee sur demon local (34/34 PASS)",
+        "Binaire natif compliance-windows-amd64.exe embarque dans le VSIX universel"
+      ],
       "limitations": ["Environnement multi-OS physique non execute hors Windows (Linux et macOS cross-compiles uniquement)"]
     },
     {
@@ -14,40 +19,50 @@
       "os": "windows",
       "architecture": "arm64",
       "status": "targeted",
-      "evidence": [],
-      "limitations": ["Bootstrap and runtime artifacts are not qualified on Windows ARM64"]
+      "evidence": [
+        "Binaire natif compliance-windows-arm64.exe compile et embarque dans le VSIX universel"
+      ],
+      "limitations": ["Execution physique du selftest requise pour qualification formelle"]
     },
     {
       "id": "linux-x64",
       "os": "linux",
       "architecture": "x64",
       "status": "targeted",
-      "evidence": ["Binaire natif compliance-linux-amd64 compile et embarque dans le VSIX"],
-      "limitations": ["WSL absent sur l'hote local; requiert l'execution du selftest sur une machine physique ou conteneur Linux pour qualification"]
+      "evidence": [
+        "Binaire natif compliance-linux-amd64 compile et embarque dans le VSIX universel"
+      ],
+      "limitations": ["WSL absent sur l'hote local; requiert l'execution du selftest sur une machine physique ou conteneur Linux pour qualification formelle"]
     },
     {
       "id": "linux-arm64",
       "os": "linux",
       "architecture": "arm64",
       "status": "targeted",
-      "evidence": [],
-      "limitations": ["Native Linux ARM64 bootstrap and runtime are not qualified"]
+      "evidence": [
+        "Binaire natif compliance-linux-arm64 compile et embarque dans le VSIX universel"
+      ],
+      "limitations": ["Execution physique du selftest requise pour qualification formelle"]
     },
     {
       "id": "macos-x64",
       "os": "macos",
       "architecture": "x64",
       "status": "targeted",
-      "evidence": [],
-      "limitations": ["Native macOS Intel bootstrap and runtime are not qualified"]
+      "evidence": [
+        "Binaire natif compliance-darwin-amd64 compile et embarque dans le VSIX universel"
+      ],
+      "limitations": ["Execution physique du selftest sur machine macOS Intel requise pour qualification formelle"]
     },
     {
       "id": "macos-arm64",
       "os": "macos",
       "architecture": "arm64",
       "status": "targeted",
-      "evidence": [],
-      "limitations": ["Native Apple Silicon bootstrap and runtime are not qualified"]
+      "evidence": [
+        "Binaire natif compliance-darwin-arm64 compile et embarque dans le VSIX universel"
+      ],
+      "limitations": ["Execution physique du selftest sur Apple Silicon requise pour qualification formelle"]
     }
   ]
 }

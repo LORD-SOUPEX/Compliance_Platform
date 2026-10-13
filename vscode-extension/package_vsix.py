@@ -10,6 +10,7 @@ import sys
 import json
 import zipfile
 import shutil
+import subprocess
 from pathlib import Path
 
 CONTENT_TYPES_XML = """<?xml version="1.0" encoding="utf-8"?>
@@ -49,6 +50,79 @@ VSIX_MANIFEST_TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
 </PackageManifest>
 """
 
+TARGETS = [
+    ("windows", "amd64", "compliance-windows-amd64.exe"),
+    ("windows", "arm64", "compliance-windows-arm64.exe"),
+    ("linux", "amd64", "compliance-linux-amd64"),
+    ("linux", "arm64", "compliance-linux-arm64"),
+    ("darwin", "amd64", "compliance-darwin-amd64"),
+    ("darwin", "arm64", "compliance-darwin-arm64"),
+]
+
+def find_go_binary(root: Path) -> str:
+    tool_go = root / ".tools" / "go" / "bin" / ("go.exe" if sys.platform == "win32" else "go")
+    if tool_go.exists():
+        return str(tool_go)
+    which_go = shutil.which("go")
+    if which_go:
+        return which_go
+    return ""
+
+def get_latest_core_mtime(core_dir: Path) -> float:
+    latest = 0.0
+    for path in core_dir.rglob("*.go"):
+        try:
+            mtime = path.stat().st_mtime
+            if mtime > latest:
+                latest = mtime
+        except OSError:
+            pass
+    return latest
+
+def ensure_binaries(ext_dir: Path, force: bool = False):
+    root = ext_dir.parent
+    core_dir = root / "core"
+    bin_dir = ext_dir / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+
+    go_bin = find_go_binary(root)
+    latest_src_mtime = get_latest_core_mtime(core_dir)
+
+    for goos, goarch, binary_name in TARGETS:
+        dest_path = bin_dir / binary_name
+        needs_build = force or (not dest_path.exists()) or (dest_path.stat().st_mtime < latest_src_mtime)
+        if needs_build:
+            if not go_bin:
+                if dest_path.exists():
+                    print(f"[WARN] Go compiler not found, using existing binary: {dest_path}")
+                    continue
+                raise RuntimeError(f"Go compiler not found and required binary is missing: {dest_path}")
+
+            print(f"[BUILD] Compiling Go engine for {goos}/{goarch} -> {binary_name}...")
+            env = dict(os.environ)
+            env["CGO_ENABLED"] = "0"
+            env["GOOS"] = goos
+            env["GOARCH"] = goarch
+
+            cmd = [
+                go_bin, "build",
+                "-ldflags=-s -w",
+                "-o", str(dest_path),
+                "./cmd/compliance"
+            ]
+            res = subprocess.run(cmd, cwd=str(core_dir), env=env, capture_output=True, text=True)
+            if res.returncode != 0:
+                raise RuntimeError(f"Failed to build binary for {goos}/{goarch}: {res.stderr}")
+            print(f"  + Built {binary_name} ({dest_path.stat().st_size} bytes)")
+
+    # Synchronize local CLI in .tools/bin/ if directory exists
+    tools_bin = root / ".tools" / "bin"
+    if tools_bin.exists():
+        cli_name = "compliance.exe" if sys.platform == "win32" else "compliance"
+        src_candidate = bin_dir / ("compliance-windows-amd64.exe" if sys.platform == "win32" else "compliance-linux-amd64")
+        if src_candidate.exists():
+            shutil.copy2(src_candidate, tools_bin / cli_name)
+
 def package_vsix():
     ext_dir = Path(__file__).resolve().parent
     root = ext_dir.parent
@@ -72,6 +146,9 @@ def package_vsix():
         description=description,
         engine=engine,
     )
+
+    # 1. Compile missing or outdated multi-OS binaries
+    ensure_binaries(ext_dir)
 
     dist_dir = ext_dir / "dist"
     dist_dir.mkdir(parents=True, exist_ok=True)
@@ -100,7 +177,7 @@ def package_vsix():
     bin_dir = ext_dir / "bin"
     if not bin_dir.exists():
         raise RuntimeError("Embedded binaries in bin/ missing. Run build_go_binaries first.")
-    for file in bin_dir.iterdir():
+    for file in sorted(bin_dir.iterdir()):
         if file.is_file():
             extension_files.append((file, f"extension/bin/{file.name}"))
 
@@ -119,4 +196,8 @@ def package_vsix():
     return vsix_path
 
 if __name__ == "__main__":
+    ext_dir = Path(__file__).resolve().parent
+    if len(sys.argv) > 1 and sys.argv[1] == "--ensure-binaries":
+        ensure_binaries(ext_dir)
+        sys.exit(0)
     package_vsix()

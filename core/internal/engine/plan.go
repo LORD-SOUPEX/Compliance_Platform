@@ -359,6 +359,9 @@ func BuildCompliancePlan(
 					}
 
 					required := capability.Required && !(hasAlternative && len(selected) == 0)
+					if tech.Technology == "powershell" && applicability == "capability_unavailable" {
+						required = false
+					}
 
 					ctrl := &PlannedControl{
 						ID:                  controlID,

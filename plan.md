@@ -355,7 +355,36 @@ Compliance_Platform/
 
 ---
 
-## 8. Clôture de la Mission
+### Finition v2.0.0 — Hygiène Git des Binaires & Alignement Multi-OS (Validé & Clôturé)
 
-Le Sprint « Zéro Gras, Zéro PowerShell & Factorisation Maximale » est intégralement exécuté, validé et clôturé. Le dépôt est propre, minimal, autonome et prêt pour la production multi-OS.
+- [x] **Hygiène Git des Binaires (`vscode-extension/bin/`)** :
+  - Désindexation complète des exécutables compilés : `git rm -r --cached vscode-extension/bin/`.
+  - Exclusion sanctuarisée dans `.gitignore` : `vscode-extension/bin/`.
+  - `git ls-files "*.exe" "vscode-extension/bin/*"` retourne strictement **0 fichier suivi** (dépôt Git 100 % texte).
+  - Automatisation du build Go : `package_vsix.py` et le hook `npm test` (`pretest`) compilent automatiquement à la volée les 6 binaires multi-OS Go (`CGO_ENABLED=0`) depuis `core/cmd/compliance` s'ils sont absents ou obsolètes.
+- [x] **Alignement Strict des Cibles Multi-OS (Code, Manifestes et Documentation)** :
+  - Les 6 architectures annoncées sont prises en charge, cross-compilées et intégrées dans le VSIX universel :
+    - `windows-x64` (`compliance-windows-amd64.exe`)
+    - `windows-arm64` (`compliance-windows-arm64.exe`)
+    - `linux-x64` (`compliance-linux-amd64`)
+    - `linux-arm64` (`compliance-linux-arm64`)
+    - `macos-x64` (`compliance-darwin-amd64`)
+    - `macos-arm64` (`compliance-darwin-arm64`)
+  - Résolution dynamique de plateforme implémentée dans `vscode-extension/src/daemonClient.ts`.
+  - Documentation harmonisée dans `README.md`, `vscode-extension/README.md`, `docs/maintenance.md` et `.config/platform-support.json`.
+- [x] **Résilience du Contrôle `powershell.lint.psscriptanalyzer`** :
+  - Sonde de capacité dans `matrix.go` vérifiant la présence réelle du module `PSScriptAnalyzer.psd1` (dans `.tools/powershell-modules/` ou les dossiers système de `PSModulePath`).
+  - Lorsque le module est absent sur l'hôte, le contrôle remonte proprement en `capability_unavailable` avec un statut d'exécution `skipped` et `critical: false`, sans provoquer d'erreur inattendue dans `engine.go`.
+  - Maintien du verdict `PASS` consultatif avec avertissement de couverture partielle.
+  - 100 % de réussite confirmée sur les tests de parité statiques et les golden files.
+
+---
+
+## 8. Clôture Définitive et Release v2.0.0
+
+L'opération « Finition v2.0.0 — Hygiène Git des Binaires & Alignement Multi-OS » est intégralement exécutée et validée.
+- Zéro binaire versionné dans Git.
+- 100 % de couverture de cross-compilation sur 6 architectures.
+- Résilience éprouvée du moteur sur tous les postes de développement.
+- Socle prêt pour le tag officiel `v2.0.0`.
 

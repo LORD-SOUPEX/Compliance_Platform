@@ -303,30 +303,69 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 				Reason:         "Module trouvé dans les modules PowerShell gérés par Compliance_Platform.",
 			}
 		}
-		if psPath, err := exec.LookPath("powershell.exe"); err == nil {
-			norm := filepath.ToSlash(psPath)
-			return CandidateToolState{
-				Name:           name,
-				Command:        command,
-				Status:         "available",
-				Source:         &norm,
-				Version:        nil,
-				RuntimeManaged: false,
-				Platform:       platform.ID,
-				Reason:         "Hôte PowerShell disponible pour l'analyse de conformité.",
+
+		// Check system PSModulePath and standard locations for PSScriptAnalyzer
+		psModPathEnv := os.Getenv("PSModulePath")
+		var candidateDirs []string
+		if psModPathEnv != "" {
+			candidateDirs = filepath.SplitList(psModPathEnv)
+		} else if platform.OS == "windows" {
+			candidateDirs = []string{
+				filepath.Join(os.Getenv("ProgramFiles"), "WindowsPowerShell", "Modules"),
+				filepath.Join(os.Getenv("SystemRoot"), "System32", "WindowsPowerShell", "v1.0", "Modules"),
 			}
-		} else if pwshPath, err := exec.LookPath("pwsh"); err == nil {
-			norm := filepath.ToSlash(pwshPath)
-			return CandidateToolState{
-				Name:           name,
-				Command:        command,
-				Status:         "available",
-				Source:         &norm,
-				Version:        nil,
-				RuntimeManaged: false,
-				Platform:       platform.ID,
-				Reason:         "Hôte PowerShell Core (pwsh) disponible pour l'analyse de conformité.",
+			if userProfile := os.Getenv("USERPROFILE"); userProfile != "" {
+				candidateDirs = append(candidateDirs,
+					filepath.Join(userProfile, "Documents", "WindowsPowerShell", "Modules"),
+					filepath.Join(userProfile, "Documents", "PowerShell", "Modules"),
+				)
 			}
+		}
+
+		for _, baseDir := range candidateDirs {
+			if baseDir == "" {
+				continue
+			}
+			modDir := filepath.Join(baseDir, "PSScriptAnalyzer")
+			if fi, err := os.Stat(modDir); err == nil && fi.IsDir() {
+				manifest := filepath.Join(modDir, "PSScriptAnalyzer.psd1")
+				if _, err := os.Stat(manifest); os.IsNotExist(err) {
+					entries, _ := os.ReadDir(modDir)
+					for _, e := range entries {
+						if e.IsDir() {
+							subManifest := filepath.Join(modDir, e.Name(), "PSScriptAnalyzer.psd1")
+							if _, err := os.Stat(subManifest); err == nil {
+								manifest = subManifest
+								break
+							}
+						}
+					}
+				}
+				if _, err := os.Stat(manifest); err == nil {
+					norm := filepath.ToSlash(manifest)
+					return CandidateToolState{
+						Name:           name,
+						Command:        command,
+						Status:         "available",
+						Source:         &norm,
+						Version:        nil,
+						RuntimeManaged: false,
+						Platform:       platform.ID,
+						Reason:         "Module PSScriptAnalyzer système disponible.",
+					}
+				}
+			}
+		}
+
+		return CandidateToolState{
+			Name:           name,
+			Command:        command,
+			Status:         "not_installed",
+			Source:         nil,
+			Version:        nil,
+			RuntimeManaged: false,
+			Platform:       platform.ID,
+			Reason:         "Module PSScriptAnalyzer introuvable sur le système hôte.",
 		}
 	}
 

@@ -157,9 +157,11 @@ export class DaemonClient {
 
     private async findComplianceBinary(platformRoot: string): Promise<string | null> {
         const exeName = process.platform === 'win32' ? 'compliance.exe' : 'compliance';
-        const platformExe = process.platform === 'win32' ? 'compliance-windows-amd64.exe'
-            : (process.platform === 'darwin' ? (process.arch === 'arm64' ? 'compliance-darwin-arm64' : 'compliance-darwin-amd64')
-            : 'compliance-linux-amd64');
+        const platformExe = process.platform === 'win32'
+            ? (process.arch === 'arm64' ? 'compliance-windows-arm64.exe' : 'compliance-windows-amd64.exe')
+            : (process.platform === 'darwin'
+                ? (process.arch === 'arm64' ? 'compliance-darwin-arm64' : 'compliance-darwin-amd64')
+                : (process.arch === 'arm64' ? 'compliance-linux-arm64' : 'compliance-linux-amd64'));
 
         const candidates = [
             path.join(__dirname, '..', 'bin', exeName),

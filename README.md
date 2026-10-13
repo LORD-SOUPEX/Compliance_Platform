@@ -86,10 +86,12 @@ L'état de support est formalisé dans [`.config/platform-support.json`](.config
 
 | Plateforme | Statut | Preuves de qualification |
 | :--- | :--- | :--- |
-| **Windows x64** | **Qualified** | Selftest Go 20/20 PASS sur port éphémère, tests unitaires Go validés, extension VS Code 34/34 PASS. |
-| **Linux x64** | Targeted | Binaires cross-compilés et distribués dans le package VSIX universel. |
-| **Linux ARM64** | Targeted | Prise en charge ciblée dans le catalogue et l'architecture multi-OS. |
-| **macOS x64 / ARM64** | Targeted | Binaires cross-compilés inclus dans le VSIX; selftest natif à qualifier sur hôte physique. |
+| **Windows x64** | **Qualified** | Selftest Go 20/20 PASS sur port éphémère, tests Go 100 % PASS, extension VS Code 34/34 PASS. Binaire natif embarqué dans le VSIX. |
+| **Windows ARM64** | Targeted | Binaire natif `compliance-windows-arm64.exe` cross-compilé et embarqué dans le package VSIX universel. |
+| **Linux x64** | Targeted | Binaire natif `compliance-linux-amd64` cross-compilé et embarqué dans le package VSIX universel. |
+| **Linux ARM64** | Targeted | Binaire natif `compliance-linux-arm64` cross-compilé et embarqué dans le package VSIX universel. |
+| **macOS x64** | Targeted | Binaire natif `compliance-darwin-amd64` cross-compilé et embarqué dans le package VSIX universel. |
+| **macOS ARM64** | Targeted | Binaire natif `compliance-darwin-arm64` cross-compilé et embarqué dans le package VSIX universel. |
 
 ---
 
