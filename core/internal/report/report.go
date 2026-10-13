@@ -158,26 +158,47 @@ func ComputeVerdict(results []ExecutionResult) (string, Summary, []string) {
 	return verdict, summary, reasons
 }
 
-// BuildReport builds a complete Report object.
-func BuildReport(
-	repo string,
-	runID string,
-	platform string,
-	discoveryData interface{},
-	plan ExecutionPlan,
-	results []ExecutionResult,
-	metrics *Metrics,
-) *Report {
-	verdictStr, summary, reasons := ComputeVerdict(results)
+// ReportOptions provides all parameters to build a fully compliant report.
+type ReportOptions struct {
+	Repository                  string
+	RunID                       string
+	Platform                    string
+	DiscoveryData               interface{}
+	MatrixData                  interface{}
+	ResolverData                interface{}
+	Plan                        ExecutionPlan
+	Results                     []ExecutionResult
+	Metrics                     *Metrics
+	CatalogSHA256               *string
+	PlatformQualificationStatus string
+	RedactionApplied            bool
+	PlanOnly                    bool
+	ScanComplete                bool
+	ScanErrors                  []discoveryScanErrorRef
+}
 
-	findings := []Finding{}
-	allDiagnostics := []Diagnostic{}
+type discoveryScanErrorRef struct {
+	Path      string `json:"path"`
+	Operation string `json:"operation"`
+	Message   string `json:"message"`
+}
 
-	for _, r := range results {
+// BuildComplianceReport builds a complete Report matching New-ComplianceReport in PowerShell.
+func BuildComplianceReport(opts ReportOptions) *Report {
+	_, summary, reasons := ComputeVerdict(opts.Results)
+
+	findings := make([]Finding, 0)
+	allDiagnostics := make([]Diagnostic, 0)
+
+	for _, r := range opts.Results {
 		allDiagnostics = append(allDiagnostics, r.Diagnostics...)
 		if r.Status == "fail" || r.Status == "error" {
+			findingID := r.ControlId
+			if r.ControlCatalogId != nil && *r.ControlCatalogId != "" {
+				findingID = *r.ControlCatalogId
+			}
 			findings = append(findings, Finding{
-				Id:          r.ControlId + "/finding",
+				Id:          findingID,
 				ControlId:   r.ControlId,
 				Name:        r.Name,
 				Technology:  r.Technology,
@@ -190,48 +211,150 @@ func BuildReport(
 		}
 	}
 
-	coverage := Coverage{
-		Complete:                len(results) == len(plan.Controls),
-		PlannedControls:         len(plan.Controls),
-		ExecutedControls:        len(results),
-		OmittedRequiredControls: 0,
-		DependencySkips:         0,
-		Limitations:             []interface{}{},
+	// Add discovery scan errors to findings and diagnostics if scan incomplete
+	if !opts.ScanComplete && len(opts.ScanErrors) > 0 {
+		summary.CriticalErrors++
+		reasons = append(reasons, "Scan incomplet: erreur critique de preparation.")
+		for _, se := range opts.ScanErrors {
+			diag := Diagnostic{
+				Code:     "scan_" + se.Operation + "_failed",
+				Message:  se.Message,
+				Critical: true,
+			}
+			allDiagnostics = append(allDiagnostics, diag)
+			findings = append(findings, Finding{
+				Id:          "engine/discovery/" + se.Operation + "/" + se.Path,
+				ControlId:   "engine/discovery",
+				Name:        "Discovery scan error",
+				Technology:  "engine",
+				Capability:  "discovery",
+				Root:        se.Path,
+				Severity:    "critical",
+				Status:      "error",
+				Diagnostics: []Diagnostic{diag},
+			})
+		}
 	}
 
+	// Calculate executed controls (exit_code != nil)
+	executedControls := 0
+	dependencySkips := 0
+	for _, r := range opts.Results {
+		if r.ExitCode != nil {
+			executedControls++
+		}
+		for _, d := range r.Diagnostics {
+			if d.Code == "dependency_failed" {
+				dependencySkips++
+				break
+			}
+		}
+	}
+
+	coverage := Coverage{
+		Complete:                !opts.PlanOnly && opts.ScanComplete && len(opts.Results) == len(opts.Plan.Controls) && summary.Error == 0,
+		PlannedControls:         len(opts.Plan.Controls),
+		ExecutedControls:        executedControls,
+		OmittedRequiredControls: 0,
+		DependencySkips:         dependencySkips,
+		Limitations:             make([]interface{}, 0),
+	}
+
+	var verdictPtr *string
+	if !opts.PlanOnly {
+		if summary.Fail > 0 || summary.CriticalErrors > 0 {
+			v := "FAIL"
+			verdictPtr = &v
+		} else {
+			v := "PASS"
+			verdictPtr = &v
+		}
+	}
+
+	matrixList := make([]interface{}, 0)
+	if opts.MatrixData != nil {
+		if mSlice, ok := opts.MatrixData.([]interface{}); ok {
+			matrixList = mSlice
+		}
+	}
+
+	resolverList := make([]interface{}, 0)
+	if opts.ResolverData != nil {
+		if rSlice, ok := opts.ResolverData.([]interface{}); ok {
+			resolverList = rSlice
+		}
+	}
+
+	platformStatus := opts.PlatformQualificationStatus
+	if platformStatus == "" {
+		platformStatus = "experimental"
+	}
+
+	status := "completed"
+	if opts.PlanOnly {
+		status = "planned"
+	} else if !opts.ScanComplete {
+		status = "blocked"
+	}
+
+	engineVer := "0.1.0"
+
 	return &Report{
-		SchemaVersion:   1,
-		EngineVersion:   "0.1.0-phase0-go",
-		GeneratedAt:     time.Now().UTC().Format(time.RFC3339),
-		Repository:      repo,
-		ExecutionStatus: "completed",
-		Discovery:       discoveryData,
-		Matrix:          []interface{}{},
-		Resolver:        []interface{}{},
-		ExecutionPlan:   plan,
-		ExecutionResults: results,
-		Findings:        findings,
-		Diagnostics:     allDiagnostics,
-		Summary:         summary,
-		Coverage:        coverage,
-		Limitations:     []interface{}{},
-		Verdict:         &verdictStr,
-		VerdictReasons:  reasons,
-		Advisory:        true,
-		Metrics:         metrics,
+		SchemaVersion:    1,
+		EngineVersion:    engineVer,
+		GeneratedAt:      time.Now().UTC().Format(time.RFC3339),
+		Repository:       opts.Repository,
+		ExecutionStatus:  status,
+		Discovery:        opts.DiscoveryData,
+		Matrix:           matrixList,
+		Resolver:         resolverList,
+		ExecutionPlan:    opts.Plan,
+		ExecutionResults: opts.Results,
+		Findings:         findings,
+		Diagnostics:      allDiagnostics,
+		Summary:          summary,
+		Coverage:         coverage,
+		Limitations:      make([]interface{}, 0),
+		Verdict:          verdictPtr,
+		VerdictReasons:   reasons,
+		Advisory:         true,
+		Metrics:          opts.Metrics,
 		Metadata: Metadata{
-			RunId:                      runID,
-			SourceMode:                 "Compliance",
-			SourceAdapter:              "PowerShell", // For v1 schema enum compatibility
-			Platform:                   platform,
-			CatalogSchemaVersion:       1,
-			CatalogSha256:              nil,
-			PlatformQualificationStatus: "experimental",
-			RedactionApplied:           false,
-			NetworkAuthorized:          false,
-			CodeExecutionAuthorized:    false,
+			RunId:                       opts.RunID,
+			SourceMode:                  "Compliance",
+			SourceAdapter:               "PowerShell",
+			Platform:                    opts.Platform,
+			CatalogSchemaVersion:        1,
+			CatalogSha256:               opts.CatalogSHA256,
+			PlatformQualificationStatus: platformStatus,
+			RedactionApplied:            opts.RedactionApplied,
+			NetworkAuthorized:           opts.Plan.Permissions.Network,
+			CodeExecutionAuthorized:     opts.Plan.Permissions.CodeExecution,
 		},
 	}
+}
+
+// BuildReport maintains backward compatibility with Phase 0 callers.
+func BuildReport(
+	repo string,
+	runID string,
+	platform string,
+	discoveryData interface{},
+	plan ExecutionPlan,
+	results []ExecutionResult,
+	metrics *Metrics,
+) *Report {
+	return BuildComplianceReport(ReportOptions{
+		Repository:       repo,
+		RunID:            runID,
+		Platform:         platform,
+		DiscoveryData:    discoveryData,
+		Plan:             plan,
+		Results:          results,
+		Metrics:          metrics,
+		ScanComplete:     true,
+		RedactionApplied: false,
+	})
 }
 
 // ToJSON formats the report as JSON bytes.
