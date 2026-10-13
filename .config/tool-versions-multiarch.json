@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schema_version": 2,
+  "description": "Catalogue de référence multiplateforme des outils épinglés pour les 6 couples OS/Arch (Windows x64 certifié, autres cibles en cours de qualification).",
+  "status": "draft_in_progress",
+  "generated_at": "2026-10-13T11:17:00Z",
+  "enterprise_ca": {
+    "bundle_filename": "ca-bundle.pem",
+    "target_env_vars": [
+      "SSL_CERT_FILE",
+      "REQUESTS_CA_BUNDLE",
+      "PIP_CERT"
+    ],
+    "injected_technologies": [
+      "python",
+      "checkov",
+      "bandit"
+    ]
+  },
+  "certified_tools_windows_x64": {
+    "ruff": {
+      "version": "0.16.10",
+      "archive_name": "ruff-0.16.10-py3-none-win_amd64.whl",
+      "archive_sha256": "97f2015c92aa97105b0eab19eb5d224884399281cfc5da86a92db4ab5e7fb2ca",
+      "binary_in_archive": "ruff-0.16.10.data/scripts/ruff.exe",
+      "binary_sha256": "7663ebf1a11dfdad737f95a0952d9e893eb88bf0ab6a24e3c4e48d4c8b8156eb"
+    },
+    "gitleaks": {
+      "version": "8.30.1",
+      "archive_name": "gitleaks_8.30.1_windows_x64.zip",
+      "archive_sha256": "d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e",
+      "binary_in_archive": "gitleaks.exe",
+      "binary_sha256": "17157e2ee8b76fc8b1d8bee607a250e34b8a8023c8bc81822d4b5ee4d78fcb7c"
+    },
+    "tflint": {
+      "version": "0.64.0",
+      "archive_name": "tflint_windows_amd64.zip",
+      "archive_sha256": "fb42fb859d844b156a8ea9d3363078c4d8b85ca78782e60876b08c9b8e59f303",
+      "binary_in_archive": "tflint.exe",
+      "binary_sha256": "cd21f5cd4e29cb16e0e4e65c8cae11053d6f4461f2cf6a8b9a62d272d6a43a45"
+    },
+    "trivy": {
+      "version": "0.75.0",
+      "archive_name": "trivy_0.75.0_windows-64bit.zip",
+      "archive_sha256": "4e43bd71a30f51aee39525f60f2b47043af77eb8df8fe082aae4372b69c6660f",
+      "binary_in_archive": "trivy.exe",
+      "binary_sha256": "3b4fcf6fec53c4c73c325cfd518c7264100695b19e6c59c6a777e4a67dc9f0e6"
+    },
+    "python_core": {
+      "version": "3.11.9",
+      "archive_name": "python-3.11.9-amd64.zip",
+      "archive_sha256": "4ba90a4ab8990891033d37ff04d2047fdae8948d0d2729a68d3a6a17c585b681",
+      "binary_in_archive": "python.exe"
+    }
+  },
+  "targeted_platforms_status": {
+    "windows-arm64": "targeted_pending_qualification",
+    "linux-x64": "targeted_pending_qualification",
+    "linux-arm64": "targeted_pending_qualification",
+    "macos-x64": "targeted_pending_qualification",
+    "macos-arm64": "targeted_pending_qualification"
+  }
+}

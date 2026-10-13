@@ -44,3 +44,6 @@ crash.log
 .env
 .env.*
 !.env.example
+
+# Go build outputs
+core/bin/

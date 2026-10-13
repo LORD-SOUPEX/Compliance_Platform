@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://compliance-platform.local/schemas/runtime-manifest-v2.json",
+  "title": "Compliance Platform Runtime Manifest v2",
+  "description": "Schéma de validation du manifeste de distribution statique des outils multiplateformes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "manifest_version", "platforms"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 2,
+      "description": "Version du schéma de manifeste (v2 pour la distribution statique multiplateforme)"
+    },
+    "manifest_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Numéro de version sémantique du contenu du manifeste (ex: 2.0.0)"
+    },
+    "platforms": {
+      "type": "object",
+      "description": "Dictionnaire des plateformes cibles associées à leurs outils qualifiés.",
+      "additionalProperties": false,
+      "properties": {
+        "windows-x64": { "$ref": "#/$defs/platform_manifest" },
+        "windows-arm64": { "$ref": "#/$defs/platform_manifest" },
+        "linux-x64": { "$ref": "#/$defs/platform_manifest" },
+        "linux-arm64": { "$ref": "#/$defs/platform_manifest" },
+        "macos-x64": { "$ref": "#/$defs/platform_manifest" },
+        "macos-arm64": { "$ref": "#/$defs/platform_manifest" }
+      }
+    }
+  },
+  "$defs": {
+    "platform_manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "tools"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["qualified", "experimental", "targeted"],
+          "description": "Niveau de qualification opérationnelle pour ce couple OS/Arch"
+        },
+        "tools": {
+          "type": "object",
+          "description": "Catalogue des outils disponibles pour cette plateforme",
+          "additionalProperties": { "$ref": "#/$defs/tool_entry" }
+        }
+      }
+    },
+    "tool_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "archive_url",
+        "archive_sha256",
+        "binary_in_archive",
+        "binary_sha256"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Identifiant normalisé de l'outil (ex: ruff, gitleaks, hadolint)"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Version de l'outil épinglé"
+        },
+        "archive_url": {
+          "type": "string",
+          "minLength": 1,
+          "description": "URL de téléchargement HTTPS statique ou chemin relatif vers l'archive (.tar.gz, .zip, .exe)"
+        },
+        "archive_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "Empreinte SHA-256 en minuscules de l'archive téléchargée"
+        },
+        "binary_in_archive": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Chemin relatif de l'exécutable une fois l'archive décompressée (ex: ruff.exe, bin/ruff)"
+        },
+        "binary_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "Empreinte SHA-256 en minuscules du binaire extrait et rendu exécutable"
+        },
+        "version_args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Arguments passés pour vérifier l'intégrité opérationnelle (ex: ['--version'])"
+        }
+      }
+    }
+  }
+}

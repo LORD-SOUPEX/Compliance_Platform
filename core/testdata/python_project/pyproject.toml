@@ -1,0 +1,4 @@
+[project]
+name = "sample-app"
+version = "0.1.0"
+description = "Sample app for Phase 0 vertical slice testing"

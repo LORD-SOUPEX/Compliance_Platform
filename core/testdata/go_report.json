@@ -1,0 +1,175 @@
+{
+  "schema_version": 1,
+  "engine_version": "0.1.0-phase0-go",
+  "generated_at": "2026-10-13T08:57:29Z",
+  "metadata": {
+    "run_id": "000000000000000018de0b0c6225acb8",
+    "source_mode": "Compliance",
+    "source_adapter": "PowerShell",
+    "platform": "windows-x64",
+    "catalog_schema_version": 1,
+    "catalog_sha256": null,
+    "platform_qualification_status": "experimental",
+    "redaction_applied": false,
+    "network_authorized": false,
+    "code_execution_authorized": false
+  },
+  "repository": "M:\\Git\\Compliance_Platform\\core\\testdata\\python_project",
+  "execution_status": "completed",
+  "discovery": {
+    "schema_version": 1,
+    "repository": "M:\\Git\\Compliance_Platform\\core\\testdata\\python_project",
+    "technologies": [
+      {
+        "technology": "python",
+        "status": "detected",
+        "evidence": [
+          "app.py"
+        ],
+        "roots": [
+          "."
+        ],
+        "ambiguities": []
+      }
+    ],
+    "project_roots": [
+      "."
+    ],
+    "ambiguities": [],
+    "capability_matrix": [],
+    "tool_resolution": [],
+    "scan_complete": true,
+    "scan_errors": [],
+    "metrics": {
+      "discovery_ms": 0,
+      "resolver_ms": 0
+    }
+  },
+  "matrix": [],
+  "resolver": [],
+  "execution_plan": {
+    "schema_version": 1,
+    "repository": "M:\\Git\\Compliance_Platform\\core\\testdata\\python_project",
+    "budgets": {
+      "timeout_seconds": 300,
+      "max_output_bytes_per_stream": 1048576,
+      "max_controls": 3
+    },
+    "permissions": {
+      "network": false,
+      "code_execution": false
+    },
+    "controls": [
+      {
+        "capability": "formatting",
+        "id": "python.format.ruff",
+        "name": "Python format",
+        "required": true,
+        "technology": "python"
+      },
+      {
+        "capability": "linting",
+        "id": "python.lint.ruff",
+        "name": "Python Ruff lint",
+        "required": true,
+        "technology": "python"
+      },
+      {
+        "capability": "security",
+        "id": "python.security.bandit",
+        "name": "Python security",
+        "required": true,
+        "technology": "python"
+      }
+    ]
+  },
+  "execution_results": [
+    {
+      "control_id": "python.format.ruff",
+      "control_catalog_id": "python.format.ruff",
+      "name": "Python format",
+      "technology": "python",
+      "capability": "formatting",
+      "root": ".",
+      "severity": "medium",
+      "status": "success",
+      "execution_start": "2026-10-13T08:57:29Z",
+      "execution_end": "2026-10-13T08:57:29Z",
+      "duration_ms": 25,
+      "tool_version": null,
+      "stdout": "1 file already formatted",
+      "stderr": "",
+      "exit_code": 0,
+      "output_truncated": false,
+      "critical": false,
+      "diagnostics": []
+    },
+    {
+      "control_id": "python.lint.ruff",
+      "control_catalog_id": "python.lint.ruff",
+      "name": "Python Ruff lint",
+      "technology": "python",
+      "capability": "linting",
+      "root": ".",
+      "severity": "medium",
+      "status": "success",
+      "execution_start": "2026-10-13T08:57:29Z",
+      "execution_end": "2026-10-13T08:57:29Z",
+      "duration_ms": 24,
+      "tool_version": null,
+      "stdout": "All checks passed!",
+      "stderr": "",
+      "exit_code": 0,
+      "output_truncated": false,
+      "critical": false,
+      "diagnostics": []
+    },
+    {
+      "control_id": "python.security.bandit",
+      "control_catalog_id": "python.security.bandit",
+      "name": "Python security",
+      "technology": "python",
+      "capability": "security",
+      "root": ".",
+      "severity": "high",
+      "status": "success",
+      "execution_start": "2026-10-13T08:57:29Z",
+      "execution_end": "2026-10-13T08:57:29Z",
+      "duration_ms": 237,
+      "tool_version": null,
+      "stdout": "",
+      "stderr": "",
+      "exit_code": 0,
+      "output_truncated": false,
+      "critical": false,
+      "diagnostics": []
+    }
+  ],
+  "findings": [],
+  "diagnostics": [],
+  "summary": {
+    "success": 3,
+    "fail": 0,
+    "error": 0,
+    "skipped": 0,
+    "critical_errors": 0
+  },
+  "coverage": {
+    "complete": true,
+    "planned_controls": 3,
+    "executed_controls": 3,
+    "omitted_required_controls": 0,
+    "dependency_skips": 0,
+    "limitations": []
+  },
+  "metrics": {
+    "discovery_ms": 0,
+    "resolver_ms": 0,
+    "compliance_ms": 287,
+    "reporting_ms": 1
+  },
+  "limitations": [],
+  "verdict": "PASS",
+  "verdict_reasons": [],
+  "advisory": true
+}
