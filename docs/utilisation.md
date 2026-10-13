@@ -70,7 +70,7 @@ compliance selftest
 Identifie les technologies, les cadres applicatifs et les répertoires d'intérêt de votre projet cible :
 
 ```bash
-compliance discovery -repo "C:\projets\mon-projet"
+compliance discovery -repo "/chemin/du/projet"
 ```
 *Sortie : JSON structuré listant les langages, outils préconisés et erreurs éventuelles de scan.*
 
@@ -79,7 +79,7 @@ compliance discovery -repo "C:\projets\mon-projet"
 Affiche les contrôles ordonnancés (graphe acyclique orienté / DAG) sans rien exécuter :
 
 ```bash
-compliance run -repo "C:\projets\mon-projet" -plan-only
+compliance run -repo "/chemin/du/projet" -plan-only
 ```
 *Le rapport généré contient les contrôles applicables, les motifs d'omission et les permissions requises, sans verdict d'audit.*
 
@@ -89,14 +89,14 @@ Lancer l'audit de conformité :
 
 ```bash
 # Audit standard (sans autorisations spéciales)
-compliance run -repo "C:\projets\mon-projet" -report "reports/mon-projet-audit.json"
+compliance run -repo "/chemin/du/projet" -report "reports/mon-projet-audit.json"
 ```
 
 Pour les projets nécessitant des contrôles dynamiques ou des vérifications d'infrastructures étendues (ex: Checkov, tests Python) :
 
 ```bash
 # Audit avec autorisation explicite d'exécution de code et d'accès réseau
-compliance run -repo "C:\projets\mon-projet" -allow-code -allow-network -report "reports/mon-projet-audit.json"
+compliance run -repo "/chemin/du/projet" -allow-code -allow-network -report "reports/mon-projet-audit.json"
 ```
 
 ---
@@ -150,6 +150,6 @@ Le rapport généré est strictement conforme au schéma JSON v1 (`.config/compl
 2. **Correction chirurgicale** : Corrigez précisément les écarts identifiés par les linters et scanners sans relâcher les règles de sécurité.
 3. **Ré-audit immédiat** :
    ```bash
-   compliance run -repo "C:\projets\mon-projet" -report "reports/mon-projet-post-fix.json"
+   compliance run -repo "/chemin/du/projet" -report "reports/mon-projet-post-fix.json"
    ```
 4. **Comparaison** : Vérifiez que le nombre de `failed` diminue sans apparition d'`error`. Le verdict final doit atteindre `pass` avec une couverture complète.

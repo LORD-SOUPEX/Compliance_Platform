@@ -81,7 +81,7 @@ func Run(platformRoot string) (bool, []TestStep) {
 			StateDir:     stateDir,
 			PlatformRoot: platformRoot,
 			CatalogPath:  catalogPath,
-			Version:      "0.5.0-selftest",
+			Version:      "2.0.0-selftest",
 		})
 		if sErr != nil {
 			return fmt.Errorf("StartDaemon a échoué: %w", sErr)

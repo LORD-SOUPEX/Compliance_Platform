@@ -69,7 +69,7 @@ export function isSameDirectory(a: string, b: string): boolean {
         const rb = fs.realpathSync.native ? fs.realpathSync.native(b) : fs.realpathSync(b);
         const rel = path.relative(ra, rb);
         if (rel === '') { return true; }
-        if (process.platform === 'win32' && rel.toLowerCase() === '') { return true; }
+        if ((process.platform === 'win32' || process.platform === 'darwin') && rel.toLowerCase() === '') { return true; }
     } catch {
         return false;
     }

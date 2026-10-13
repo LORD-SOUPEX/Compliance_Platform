@@ -40,7 +40,7 @@ Sous le capot, `vscode-extension/package_vsix.py` génère un conteneur conforme
   - `bin/compliance-linux-arm64`
   - `bin/compliance-darwin-amd64`
   - `bin/compliance-darwin-arm64`
-- Le VSIX produit (`vscode-extension/dist/compliance-local-pipelines-0.1.0.vsix`) est immédiatement installable sur n'importe quel système d'exploitation sans nécessiter de recompilation sur le poste utilisateur.
+- Le VSIX produit (`vscode-extension/dist/compliance-local-pipelines-2.0.0.vsix`) est immédiatement installable sur n'importe quel système d'exploitation sans nécessiter de recompilation sur le poste utilisateur.
 
 ---
 
@@ -64,7 +64,7 @@ go test -count=1 ./...
 Depuis le dossier `vscode-extension/` :
 
 ```bash
-# Compilation et suite de tests unitaires/intégration TypeScript (34 scénarios)
+# Vérification TypeScript (tsc --noEmit) et validation autonome (compliance selftest)
 npm test
 
 # Compilation TypeScript seule
@@ -77,7 +77,7 @@ Conformément à `.config/platform-support.json` :
 
 | Plateforme | Statut | Preuves Actuelles |
 | :--- | :--- | :--- |
-| **windows-x64** | **Qualified** | Selftest Go 20/20 PASS, suite Go `core/` OK, extension VS Code 34/34 PASS. Confinement Job Objects validé. |
+| **windows-x64** | **Qualified** | Selftest Go 20/20 PASS, extension VS Code qualifiée. Confinement Job Objects validé. |
 | **windows-arm64** | **Targeted** | Binaire natif `compliance-windows-arm64.exe` cross-compilé et embarqué dans le VSIX universel. |
 | **linux-x64** | **Targeted** | Binaire natif `compliance-linux-amd64` cross-compilé (`GOOS=linux GOARCH=amd64`). Confinement POSIX validé. |
 | **linux-arm64** | **Targeted** | Binaire natif `compliance-linux-arm64` cross-compilé (`GOOS=linux GOARCH=arm64`) embarqué dans le VSIX. |

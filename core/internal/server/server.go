@@ -145,6 +145,14 @@ type SessionEvent struct {
 // WorkspaceApprovalRequest represents request to approve a workspace path.
 type WorkspaceApprovalRequest struct {
 	WorkspacePath string `json:"workspace_path"`
+	Path          string `json:"path"`
+}
+
+func (w WorkspaceApprovalRequest) Target() string {
+	if w.WorkspacePath != "" {
+		return w.WorkspacePath
+	}
+	return w.Path
 }
 
 // ValidateReportRequest represents request to POST /api/v1/reports/validate.
@@ -341,10 +349,16 @@ func (sm *SecurityManager) ValidateTargetPath(targetPath string) (string, error)
 		return "", ErrWorkspaceUntrusted
 	}
 
-	targetLower := strings.ToLower(canonicalTarget)
 	for _, ws := range sm.ApprovedWorkspaces {
-		wsLower := strings.ToLower(ws)
-		if targetLower == wsLower || strings.HasPrefix(targetLower, wsLower+string(filepath.Separator)) {
+		matches := false
+		if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+			targetLower := strings.ToLower(canonicalTarget)
+			wsLower := strings.ToLower(ws)
+			matches = (targetLower == wsLower || strings.HasPrefix(targetLower, wsLower+string(filepath.Separator)))
+		} else {
+			matches = (canonicalTarget == ws || strings.HasPrefix(canonicalTarget, ws+string(filepath.Separator)))
+		}
+		if matches {
 			return canonicalTarget, nil
 		}
 	}
@@ -897,7 +911,7 @@ func StartDaemon(cfg DaemonConfig) (*DaemonServer, error) {
 		cfg.StateDir = filepath.Join(home, ".compliance")
 	}
 	if cfg.Version == "" {
-		cfg.Version = "0.4.0-phase4"
+		cfg.Version = "2.0.0"
 	}
 
 	lockPath := filepath.Join(cfg.StateDir, "daemon.lock")
@@ -1031,7 +1045,7 @@ func (s *DaemonServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/runs/{id}/events", s.handleEvents)
 	mux.HandleFunc("POST /api/v1/runs/{id}/cancel", s.handleCancel)
 	mux.HandleFunc("GET /api/v1/runs/{id}/report", s.handleReport)
-	mux.HandleFunc("GET /api/v1/runs/{id}/logs/{control_id}", s.handleControlLogs)
+	mux.HandleFunc("GET /api/v1/runs/{id}/logs/{control_id...}", s.handleControlLogs)
 	mux.HandleFunc("POST /api/v1/reports/validate", s.handleValidateReport)
 	mux.HandleFunc("POST /api/v1/shutdown", s.handleShutdown)
 }
@@ -1053,13 +1067,19 @@ func (s *DaemonServer) handleApproveWorkspace(w http.ResponseWriter, r *http.Req
 		http.Error(w, "Requête JSON invalide", http.StatusBadRequest)
 		return
 	}
-	if err := s.security.AddApprovedWorkspace(req.WorkspacePath); err != nil {
+	targetPath := req.Target()
+	if targetPath == "" {
+		http.Error(w, "Chemin de workspace manquant", http.StatusBadRequest)
+		return
+	}
+	if err := s.security.AddApprovedWorkspace(targetPath); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":    "approved",
-		"workspace": req.WorkspacePath,
+		"workspace": targetPath,
+		"path":      targetPath,
 	})
 }
 
@@ -1289,7 +1309,13 @@ func (s *DaemonServer) handleReport(w http.ResponseWriter, r *http.Request) {
 
 func (s *DaemonServer) handleControlLogs(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
-	controlID := r.PathValue("control_id")
+	rawControlID := r.PathValue("control_id")
+
+	controlID := rawControlID
+	if unescaped, err := url.PathUnescape(rawControlID); err == nil && unescaped != "" {
+		controlID = unescaped
+	}
+	controlID = strings.TrimPrefix(controlID, "/")
 
 	session, err := s.sessions.GetSession(runID)
 	if err != nil {
@@ -1299,6 +1325,15 @@ func (s *DaemonServer) handleControlLogs(w http.ResponseWriter, r *http.Request)
 
 	session.mu.RLock()
 	logs, ok := session.Logs[controlID]
+	if !ok {
+		logs, ok = session.Logs[rawControlID]
+	}
+	if !ok {
+		logs, ok = session.Logs[controlID+"/."]
+	}
+	if !ok && strings.HasSuffix(controlID, "/.") {
+		logs, ok = session.Logs[strings.TrimSuffix(controlID, "/.")]
+	}
 	session.mu.RUnlock()
 
 	if !ok {
@@ -1365,7 +1400,7 @@ func (s *DaemonServer) handleValidateReport(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-// ComputePresentations produces the visual presentation array for reportReader display.
+// ComputePresentations produces the visual presentation array for UI / ReportPanel display.
 func ComputePresentations(rep map[string]interface{}) ([]PresentationItem, error) {
 	var presentations []PresentationItem
 	results, _ := rep["execution_results"].([]interface{})

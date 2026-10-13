@@ -388,7 +388,7 @@ func BuildComplianceReport(opts ReportOptions) *Report {
 		status = "blocked"
 	}
 
-	engineVer := "0.1.0"
+	engineVer := "2.0.0"
 	resultsList := opts.Results
 	if resultsList == nil {
 		resultsList = make([]ExecutionResult, 0)
@@ -396,7 +396,7 @@ func BuildComplianceReport(opts ReportOptions) *Report {
 
 	adapter := opts.Adapter
 	if adapter == "" {
-		adapter = "PowerShell"
+		adapter = "Go"
 	}
 
 	return &Report{

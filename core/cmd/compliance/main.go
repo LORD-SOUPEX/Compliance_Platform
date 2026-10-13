@@ -16,12 +16,13 @@ import (
 	"compliance/internal/discovery"
 	"compliance/internal/distribution"
 	"compliance/internal/engine"
+	"compliance/internal/report"
 	"compliance/internal/selftest"
 	"compliance/internal/server"
 	"os/signal"
 )
 
-const version = "0.5.0-phase5"
+const version = "2.0.0"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -129,15 +130,24 @@ func runDaemon(args []string) {
 
 func runDiscovery(args []string) {
 	fs := flag.NewFlagSet("discovery", flag.ExitOnError)
+	repo := fs.String("repo", "", "Répertoire cible à analyser")
 	indent := fs.Bool("indent", true, "Formater la sortie JSON")
-	_ = fs.Parse(args)
+	_ = fs.Parse(reorderFlags(args))
 
 	target := "."
-	if fs.NArg() > 0 {
+	if *repo != "" {
+		target = *repo
+	} else if fs.NArg() > 0 {
 		target = fs.Arg(0)
 	}
 
-	res, err := discovery.DiscoverAll(target)
+	absTarget, err := filepath.Abs(target)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] Chemin invalide: %v\n", err)
+		os.Exit(2)
+	}
+
+	res, err := discovery.DiscoverAll(absTarget)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ERROR] Erreur de découverte: %v\n", err)
 		os.Exit(2)
@@ -192,15 +202,21 @@ func runRuntimeSync(args []string) {
 
 func runPipeline(args []string) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
+	repo := fs.String("repo", "", "Répertoire cible à auditer")
 	outputPath := fs.String("output", "", "Chemin où écrire le rapport JSON (défaut: stdout)")
-	ruffPath := fs.String("ruff", "", "Chemin vers l'exécutable ruff (auto-détecté si omis)")
-	banditPath := fs.String("bandit", "", "Chemin vers l'exécutable bandit (auto-détecté si omis)")
-	caBundle := fs.String("ca-bundle", defaultCABundle(), "Bundle de certificats d'entreprise pour les outils Python")
+	reportPath := fs.String("report", "", "Chemin où écrire le rapport JSON (alias pour -output)")
+	planOnly := fs.Bool("plan-only", false, "Générer uniquement le plan ordonnancé DAG sans exécuter les contrôles")
+	allowCode := fs.Bool("allow-code", false, "Autoriser l'exécution de code")
+	allowNetwork := fs.Bool("allow-network", false, "Autoriser les accès réseau")
 	timeoutSec := fs.Int("timeout", 300, "Délai maximum par contrôle en secondes")
+	platformRootFlag := fs.String("platform-root", "", "Racine du dépôt Compliance Platform")
+	catalogFlag := fs.String("catalog", "", "Chemin vers control-catalog.json")
 	_ = fs.Parse(reorderFlags(args))
 
 	target := "."
-	if fs.NArg() > 0 {
+	if *repo != "" {
+		target = *repo
+	} else if fs.NArg() > 0 {
 		target = fs.Arg(0)
 	}
 
@@ -210,40 +226,48 @@ func runPipeline(args []string) {
 		os.Exit(2)
 	}
 
-	resolvedRuff := resolveTool("ruff", *ruffPath)
-	resolvedBandit := resolveTool("bandit", *banditPath)
-
-	if resolvedRuff.Executable == "" {
-		fmt.Fprintf(os.Stderr, "[ERROR] Outil introuvable : ruff (exécutez 'compliance runtime sync' ou fournissez --ruff)\n")
-		os.Exit(2)
-	}
-	if resolvedBandit.Executable == "" {
-		fmt.Fprintf(os.Stderr, "[ERROR] Outil introuvable : bandit (fournissez --bandit)\n")
-		os.Exit(2)
+	platformRoot := *platformRootFlag
+	if platformRoot == "" {
+		platformRoot = findPlatformRoot()
 	}
 
-	opts := engine.PipelineOptions{
-		RepoRoot:     absTarget,
-		RuffPath:     resolvedRuff.Executable,
-		BanditPath:   resolvedBandit.Executable,
-		BanditArgs:   resolvedBandit.Args,
-		BanditEnv:    resolvedBandit.Env,
-		CABundlePath: *caBundle,
-		Timeout:      time.Duration(*timeoutSec) * time.Second,
-		ProgressHandler: func(controlID, status string) {
-			fmt.Fprintf(os.Stderr, "  [%-8s] %s\n", strings.ToUpper(status), controlID)
+	catalogPath := *catalogFlag
+	if catalogPath == "" {
+		catalogPath = filepath.Join(platformRoot, ".config", "control-catalog.json")
+	}
+
+	outReport := *outputPath
+	if outReport == "" {
+		outReport = *reportPath
+	}
+
+	opts := engine.ComplianceOptions{
+		RepoRoot:           absTarget,
+		PlatformRoot:       platformRoot,
+		CatalogPath:        catalogPath,
+		AllowNetwork:       *allowNetwork,
+		AllowCodeExecution: *allowCode,
+		PlanOnly:           *planOnly,
+		TimeoutSeconds:     *timeoutSec,
+		SourceAdapter:      "CLI",
+		OnControlStart: func(ctrl *engine.PlannedControl) {
+			fmt.Fprintf(os.Stderr, "  [%-8s] %s\n", "RUNNING", ctrl.ID)
+		},
+		OnControlDone: func(ctrl *engine.PlannedControl, res *report.ExecutionResult) {
+			fmt.Fprintf(os.Stderr, "  [%-8s] %s (%d ms)\n", strings.ToUpper(res.Status), ctrl.ID, res.DurationMs)
 		},
 	}
 
-	fmt.Fprintf(os.Stderr, "[INFO] Lancement du pipeline Python sur: %s\n", absTarget)
-	if *caBundle != "" {
-		fmt.Fprintf(os.Stderr, "[INFO] Bundle CA entreprise configuré pour Bandit: %s\n", *caBundle)
+	if *planOnly {
+		fmt.Fprintf(os.Stderr, "[INFO] Planification des contrôles (plan-only) sur: %s\n", absTarget)
+	} else {
+		fmt.Fprintf(os.Stderr, "[INFO] Lancement de l'audit complet Compliance Platform sur: %s\n", absTarget)
 	}
 
 	ctx := context.Background()
-	rep, err := engine.RunPythonPipeline(ctx, opts)
+	rep, err := engine.RunCompliance(ctx, opts)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[ERROR] Échec d'exécution du pipeline: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[ERROR] Échec de la session de conformité: %v\n", err)
 		os.Exit(2)
 	}
 
@@ -253,17 +277,25 @@ func runPipeline(args []string) {
 		os.Exit(2)
 	}
 
-	if *outputPath != "" {
-		if err := os.WriteFile(*outputPath, jsonBytes, 0644); err != nil {
-			fmt.Fprintf(os.Stderr, "[ERROR] Écriture du rapport sur %s: %v\n", *outputPath, err)
+	if outReport != "" {
+		dir := filepath.Dir(outReport)
+		if dir != "" && dir != "." {
+			_ = os.MkdirAll(dir, 0755)
+		}
+		if err := os.WriteFile(outReport, jsonBytes, 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] Écriture du rapport sur %s: %v\n", outReport, err)
 			os.Exit(2)
 		}
-		fmt.Fprintf(os.Stderr, "[INFO] Rapport enregistré dans: %s\n", *outputPath)
+		fmt.Fprintf(os.Stderr, "[INFO] Rapport enregistré dans: %s\n", outReport)
 	} else {
 		fmt.Println(string(jsonBytes))
 	}
 
-	// Print summary
+	if *planOnly {
+		fmt.Fprintf(os.Stderr, "\n[PLAN] Plan généré avec succès (%d contrôles planifiés)\n", len(rep.ExecutionPlan.Controls))
+		os.Exit(0)
+	}
+
 	verdict := "UNKNOWN"
 	if rep.Verdict != nil {
 		verdict = *rep.Verdict
@@ -277,6 +309,36 @@ func runPipeline(args []string) {
 	os.Exit(1)
 }
 
+func findPlatformRoot() string {
+	cwd, _ := os.Getwd()
+	curr := cwd
+	for {
+		if _, err := os.Stat(filepath.Join(curr, ".config", "control-catalog.json")); err == nil {
+			return curr
+		}
+		parent := filepath.Dir(curr)
+		if parent == curr {
+			break
+		}
+		curr = parent
+	}
+	exe, err := os.Executable()
+	if err == nil {
+		curr = filepath.Dir(exe)
+		for {
+			if _, err := os.Stat(filepath.Join(curr, ".config", "control-catalog.json")); err == nil {
+				return curr
+			}
+			parent := filepath.Dir(curr)
+			if parent == curr {
+				break
+			}
+			curr = parent
+		}
+	}
+	return cwd
+}
+
 func defaultCacheDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -286,7 +348,6 @@ func defaultCacheDir() string {
 }
 
 func defaultCABundle() string {
-	// Look for windows-root-ca.pem in .tools/cache if present in repo
 	candidate := filepath.Join(".tools", "cache", "windows-root-ca.pem")
 	if _, err := os.Stat(candidate); err == nil {
 		abs, _ := filepath.Abs(candidate)
@@ -310,7 +371,6 @@ func resolveTool(name, override string) ToolInvocation {
 		return ToolInvocation{Executable: override}
 	}
 
-	// 1. Check ~/.compliance/tools/bin/<platform>/<name>
 	plat := distribution.DetectPlatform()
 	cached := filepath.Join(defaultCacheDir(), "bin", plat, name)
 	if runtime.GOOS == "windows" {
@@ -320,7 +380,6 @@ func resolveTool(name, override string) ToolInvocation {
 		return ToolInvocation{Executable: cached}
 	}
 
-	// 2. Check standalone python runtime .tools/python/Scripts or .tools/python/bin
 	pyCandidate := filepath.Join(".tools", "python", "Scripts", name+".exe")
 	if runtime.GOOS != "windows" {
 		pyCandidate = filepath.Join(".tools", "python", "bin", name)
@@ -337,12 +396,21 @@ func resolveTool(name, override string) ToolInvocation {
 		}
 	}
 
-	// 3. Check system PATH
 	if p, err := exec.LookPath(name); err == nil {
 		return ToolInvocation{Executable: p}
 	}
 
 	return ToolInvocation{}
+}
+
+func isBoolFlag(arg string) bool {
+	clean := strings.TrimLeft(arg, "-")
+	switch clean {
+	case "plan-only", "allow-code", "allow-network", "indent", "confirm_apply_destroy":
+		return true
+	default:
+		return false
+	}
 }
 
 func reorderFlags(args []string) []string {
@@ -352,7 +420,7 @@ func reorderFlags(args []string) []string {
 		arg := args[i]
 		if strings.HasPrefix(arg, "-") {
 			flags = append(flags, arg)
-			if !strings.Contains(arg, "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			if !strings.Contains(arg, "=") && !isBoolFlag(arg) && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				i++
 				flags = append(flags, args[i])
 			}
@@ -369,8 +437,7 @@ func runSelftest(args []string) {
 	_ = fs.Parse(args)
 
 	if *platformRoot == "" {
-		cwd, _ := os.Getwd()
-		*platformRoot = cwd
+		*platformRoot = findPlatformRoot()
 	}
 
 	passed, steps := selftest.Run(*platformRoot)

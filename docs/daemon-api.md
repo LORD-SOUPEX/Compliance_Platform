@@ -12,7 +12,7 @@ Le démon Compliance Platform expose une API REST et un flux Server-Sent Events 
 
 ### Fichier d'état (`daemon.json`)
 
-À son démarrage, le démon enregistre ses paramètres d'accès dans `<state_dir>/daemon.json` (permissions `0600`) :
+À son démarrage, le démon enregistre ses paramètres d'accès dans `<state_dir>/daemon.json` (permissions `0600` sur systèmes POSIX, isolation par profil utilisateur et descripteurs de sécurité restreints sous Windows) :
 
 ```json
 {
@@ -21,8 +21,8 @@ Le démon Compliance Platform expose une API REST et un flux Server-Sent Events 
   "host": "127.0.0.1",
   "token_path": "<state_dir>/token.txt",
   "state_dir": "<state_dir>",
-  "started_at": "2026-10-13T18:00:00Z",
-  "version": "0.5.0-phase5"
+  "started_at": "2026-10-14T00:00:00Z",
+  "version": "2.0.0"
 }
 ```
 
@@ -39,10 +39,10 @@ Le démon Compliance Platform expose une API REST et un flux Server-Sent Events 
   ```json
   {
     "status": "ok",
-    "version": "0.5.0-phase5",
+    "version": "2.0.0",
     "pid": 12345,
     "port": 54321,
-    "started_at": "2026-10-13T18:00:00Z"
+    "started_at": "2026-10-14T00:00:00Z"
   }
   ```
 
@@ -56,14 +56,14 @@ Le démon Compliance Platform expose une API REST et un flux Server-Sent Events 
 - **Corps de requête** :
   ```json
   {
-    "path": "C:\\chemin\\du\\projet"
+    "path": "/chemin/du/projet"
   }
   ```
 - **Réponse (200 OK)** :
   ```json
   {
     "status": "approved",
-    "path": "C:\\chemin\\du\\projet"
+    "path": "/chemin/du/projet"
   }
   ```
 
@@ -77,7 +77,7 @@ Le démon Compliance Platform expose une API REST et un flux Server-Sent Events 
 - **Corps de requête** :
   ```json
   {
-    "target_path": "C:\\chemin\\du\\projet"
+    "target_path": "/chemin/du/projet"
   }
   ```
 - **Réponse (200 OK)** : Enveloppe JSON conforme au schéma v1 décrivant les technologies détectées, preuves, racines et erreurs éventuelles.
@@ -92,7 +92,7 @@ Le démon Compliance Platform expose une API REST et un flux Server-Sent Events 
 - **Corps de requête** :
   ```json
   {
-    "target_path": "C:\\chemin\\du\\projet"
+    "target_path": "/chemin/du/projet"
   }
   ```
 - **Réponse (200 OK)** : Rapport d'état `planned` contenant `discovery`, `matrix`, `resolver` et `execution_plan` (ordonnancement DAG des 28 contrôles).
@@ -107,9 +107,9 @@ Le démon Compliance Platform expose une API REST et un flux Server-Sent Events 
 - **Corps de requête** :
   ```json
   {
-    "target_path": "C:\\chemin\\du\\projet",
+    "target_path": "/chemin/du/projet",
     "run_id": "a1b2c3d4e5f6...",
-    "output_dir": "C:\\chemin\\vers\\session",
+    "output_dir": "/chemin/vers/session",
     "plan_only": false,
     "allow_network": false,
     "allow_code_execution": false,
@@ -178,8 +178,14 @@ Le démon Compliance Platform expose une API REST et un flux Server-Sent Events 
 ### 9. Consultation des journaux d'un contrôle
 
 - **Méthode** : `GET`
-- **Chemin** : `/api/v1/runs/{id}/logs/{control_id}`
+- **Chemin** : `/api/v1/runs/{id}/logs/{control_id}` (ou `/api/v1/runs/{id}/logs/{control_id...}`)
 - **Authentification** : Bearer obligatoire
+- **Gestion des slashs et points dans `control_id`** :
+  - Les identifiants de contrôles contiennent structurellement des barres obliques et un point de racine (ex. `python/linting/ruff/.`, `terraform/linting/tflint/infra`).
+  - Le serveur supporte nativement deux modes d'appel sans risque d'erreur 404 :
+    1. **Format encodé URL (Recommandé côté clients HTTP / TypeScript)** : `encodeURIComponent(control_id)` (ex: `/api/v1/runs/{id}/logs/python%2Flinting%2Fruff%2F.`).
+    2. **Format multi-segments brut (CLI / curl)** : transmission directe avec slashs (ex: `/api/v1/runs/{id}/logs/python/linting/ruff/.`).
+  - **Résilience RFC 3986** : Si un proxy ou un client HTTP normalise automatiquement les segments de chemin (éliminant le segment `/.` final en application de la RFC 3986 section 5.2.4), le serveur Go résout automatiquement le contrôle par repli résilient sur sa racine par défaut `/.`.
 - **Réponse (200 OK)** :
   ```json
   {
