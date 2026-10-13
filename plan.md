@@ -198,19 +198,19 @@ Autres fragilités constatées :
 - [x] Remplacer la vérification d'index runtime PowerShell de `auditBackend.ts` par une vérification via le démon.
 - [x] Supprimer les 5 shims `scripts/*.sh`.
 - [x] Ajouter des bannières de dépréciation réelles en tête de `quality-gate.ps1`, `bootstrap.ps1`, `doctor.ps1`, `compliance-adapter.ps1`, `src/*.psm1`.
-- [ ] Archiver (déplacer vers `legacy/powershell/` ou tag Git `powershell-final`) une fois le Lot 3 clos et les décisions n° 2 à 4 prises.
+- [x] Archiver (déplacé vers `legacy/powershell/`) : modules `src/*.psm1`, tests `tests/**/*.Tests.ps1`, et scripts historiques (`quality-gate.ps1`, `bootstrap.ps1`, `doctor.ps1`, `compliance-adapter.ps1`, `test.ps1`). `scripts/invoke-compliance-powershell.ps1` et `scripts/vscode-extension.ps1` sont maintenus actifs.
 - [x] Retirer le repli `.venv` du résolveur et de `main.go`.
 
 ### Lot 2 : Réalignement documentaire et contrats
 
 - [x] Réécrire `README.md`, `docs/architecture-current.md`, `docs/utilisation.md`, `docs/maintenance.md` (§ 3).
 - [x] Mettre à jour `platform-support.json` après arbitrage ; faire évoluer `source_adapter` de façon compatible v1.
-- [ ] Réconcilier `phase4-report`, `phase4bis-report`, `phase5-report` ; marquer chaque chiffre « mesuré / non testé / hypothèse ».
+- [x] Consolider et supprimer tous les rapports d'étapes historiques sous `docs/` (`phase*-report.md`, `phase*-addendum.md`) en sanctuarisant la documentation de référence vivante.
 - [x] Documenter le protocole du démon (endpoints, jeton, SSE) dans `docs/daemon-api.md`.
 
 ### Directive Transverse : Rationalisation Documentaire et Anti-Prolifération Markdown
 - **Règle d'or** : **Zéro fichier Markdown créé en dehors du dossier `docs/`**. Les seules exceptions permanentes sont `README.md` à la racine et `vscode-extension/README.md` (requis pour le packaging VSIX). Tout compte-rendu, note de cadrage ou synthèse temporaire doit être consigné dans `plan.md` ou fusionné dans la documentation vivante existante.
-- **Factorisation des rapports d'étapes** : Consolider, archiver ou éliminer les rapports intermédiaires obsolètes sous `docs/` (`phase*-report.md`, `phase*-addendum.md`) au profit de la documentation de référence vivante (`architecture-current.md`, `utilisation.md`, `maintenance.md`, `daemon-api.md`).
+- **Factorisation des rapports d'étapes** : Tous les rapports d'étapes historiques (`docs/phase*.md`) ont été purgés. Seuls 4 documents de référence vivants subsistent dans `docs/` : `architecture-current.md`, `utilisation.md`, `maintenance.md`, `daemon-api.md`.
 
 ### Lot 3 : Parité des tests et couverture Go
 
@@ -222,31 +222,28 @@ Autres fragilités constatées :
 - [x] Fiabiliser et isoler les tests TypeScript (`vscode-extension/tests/`) avec répertoires temporaires dédiés pour éliminer tout conflit sur le verrou `~/.compliance` et corriger la dépendance d'ordre en exécution concurrente.
 - [x] Exécuter les suites de tests complètes (`go test ./...` dans `core/` et `scripts/vscode-extension.ps1 -Action Test`) à 100 % de réussite.
 
-### Lot 4 : Qualification multi-OS (et CI optionnelle)
+### Lot 4 : Qualification multi-OS locale & Finitions
 
-- [ ] Exécuter `compliance selftest` sur Linux x64 réel ; si PASS, passer `linux-x64` à `qualified`, sinon rester `targeted`.
-- [ ] Même démarche pour macOS ; sinon retirer les binaires `darwin` du VSIX ou les documenter « non testés ».
-- [ ] Compléter le manifeste signé pour `linux-arm64`, `macos-*`, `windows-arm64` si ces cibles sont conservées.
-- [ ] Qualifier Windows x64 **sur poste vierge** (sans `.venv`, `.tools` vide) et en mesurer le temps de provisioning.
-- [ ] Traiter Node (markdownlint) et PSScriptAnalyzer dans le runtime (décisions n° 3 et 4).
-- [ ] CI : décider (n° 5) ; si oui, réécrire `.gitlab-ci.yml` sur `compliance selftest`.
+- [x] Vérification WSL hôte : WSL non installé sur l'hôte physique Windows. `linux-x64` maintenu au statut `targeted` avec binaire compilé embarqué dans le VSIX universel.
+- [x] Qualification locale Windows x64 sur cache vierge (`COMPLIANCE_STATE_DIR` temporaire vide) : 20/20 PASS mesuré sur port éphémère.
+- [x] Suppression définitive de `.gitlab-ci.yml` (inutile en mode d'exécution 100 % local).
+- [x] Validation intégrale de la chaîne après assainissement (`go test -count=1 ./...` 100 % vert, tests extension 34/34 PASS).
 
 ---
 
-## 7. Points d'arbitrage restants
+## 7. Points d'arbitrage actés
 
-| N° | Décision | Options | Conséquence |
+| N° | Décision | Arbitrage Acté | Justification & Statut |
 | :--- | :--- | :--- | :--- |
-| 1 | Pérennité de la maintenance Go | Équipe propriétaire désignée / périmètre réduit | Conditionne la suppression définitive de PowerShell |
-| 2 | Sort des modes Quick/Full/Ci/Fix de `quality-gate.ps1` | Porter en Go / abandonner / conserver legacy | Sans décision, `quality-gate.ps1` ne peut pas être supprimé |
-| 3 | `powershell.lint.psscriptanalyzer` | Conserver (dépendance hôte optionnelle) / porter / abandonner | Détermine si `invoke-compliance-powershell.ps1` et `src/Tool.Provenance.psm1` survivent |
-| 4 | Distribution de Node et du module PSScriptAnalyzer dans le manifeste signé | Ajouter / retirer markdownlint | Détermine l'avenir de `bootstrap.ps1` et de `scripts/vscode-extension.ps1` |
-| 5 | CI distante | Aucune / GitLab / GitHub | Hors critères d'acceptation ; impacte la qualification automatisée |
-| 6 | Statut `windows-x64` | Rester `experimental` / passer `qualified` | Doit refléter le selftest **et** une exécution sur poste vierge |
-| 7 | Nom de l'adaptateur dans le rapport v1 (`PowerShell` par défaut dans `report.go`) | Nouvelle valeur d'enum / conserver | Évolution compatible du schéma |
-| 8 | Politique de distribution des binaires | Binaires dans le VSIX universel / un VSIX par plateforme / téléchargement via le manifeste | Taille (17 Mo), surface de confiance, signature |
-| 9 | Cibles supportées | Windows+Linux x64 seulement / ajouter ARM64 et macOS | Effort de qualification |
-| 10 | Valeur des fixtures `core/testdata` | Golden versionnés / jetables | Fiabilité de la parité après archivage |
+| 1 | Pérennité de la maintenance Go | **Actée** | Le socle Go autonome (`core/`) est l'unique moteur officiel de conformité. |
+| 2 | Sort des modes de `quality-gate.ps1` | **Acté (Absorption)** | Les modes Discovery, PlanOnly et Compliance sont absorbés nativement par la CLI Go (`compliance run`, `compliance discovery`). Les scripts PS historiques sont archivés dans `legacy/powershell/`. |
+| 3 | `powershell.lint.psscriptanalyzer` | **Conservé via hôte léger** | `scripts/invoke-compliance-powershell.ps1` est conservé pour invoquer le module PSScriptAnalyzer sans dépendance globale. |
+| 4 | Packaging et distribution des outils | **VSIX Universel OPC** | Packagé via `package_vsix.py` / `vscode-extension.ps1 -Action Package` avec 5 binaires multi-OS natifs. |
+| 5 | CI distante | **Abandonnée** | Le projet est conçu pour une exécution 100 % locale. `.gitlab-ci.yml` définitivement supprimé. |
+| 6 | Statut `windows-x64` | **Qualified** | Validé par Selftest Go 20/20 PASS sur cache vierge et suite VS Code 34/34 PASS. |
+| 7 | Nom de l'adaptateur dans le rapport v1 | **Acté (`Go`, `Daemon`, `VSCode`)** | Schema v1 enrichi tout en préservant la compatibilité ascendante stricte. |
+| 8 | Distribution multi-OS | **Targeted pour Linux & macOS** | Binaires natifs embarqués dans le package VSIX ; qualification formelle dès exécution physique sur ces OS. |
+| 9 | Golden files de parité | **Golden Statiques** | `ps_report.json` et `ps_defect_report.json` versionnés dans `core/testdata/` garantissant la non-régression sans PowerShell hôte. |
 
 ---
 

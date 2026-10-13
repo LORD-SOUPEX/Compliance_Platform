@@ -22,8 +22,8 @@
       "os": "linux",
       "architecture": "x64",
       "status": "targeted",
-      "evidence": [],
-      "limitations": ["Native Linux bootstrap and runtime are not qualified"]
+      "evidence": ["Binaire natif compliance-linux-amd64 compile et embarque dans le VSIX"],
+      "limitations": ["WSL absent sur l'hote local; requiert l'execution du selftest sur une machine physique ou conteneur Linux pour qualification"]
     },
     {
       "id": "linux-arm64",
