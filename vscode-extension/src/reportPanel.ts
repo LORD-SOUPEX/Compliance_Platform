@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { controlOutputText } from './model';
-import { fields, Fields, findingLocation, LoadedReport, loadReport, readSession, readStable, ReportReference, reportMessage, targetFile, text } from './reportReader';
+import { fields, Fields, findingLocation, LoadedReport, loadReport, readSession, readStable, ReportReference, reportMessage, targetFile, text } from './daemonClient';
 
 export function escaped(value: unknown, limit = 50000): string {
     const original = text(value);

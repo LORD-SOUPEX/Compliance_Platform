@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/tls"
@@ -24,11 +25,66 @@ import (
 )
 
 var (
-	ErrArchiveHashMismatch = errors.New("somme SHA-256 de l'archive téléchargée non conforme")
-	ErrBinaryHashMismatch  = errors.New("somme SHA-256 du binaire extrait non conforme")
-	ErrPlatformUnsupported = errors.New("plateforme non présente dans le manifeste")
-	ErrToolNotFound        = errors.New("binaire introuvable dans l'archive")
+	ErrInvalidSignature       = errors.New("signature du manifeste invalide ou corrompue")
+	ErrSignatureLengthMismatch = errors.New("longueur de signature cryptographique invalide")
+	ErrArchiveHashMismatch    = errors.New("somme SHA-256 de l'archive téléchargée non conforme")
+	ErrBinaryHashMismatch     = errors.New("somme SHA-256 du binaire extrait non conforme")
+	ErrPlatformUnsupported    = errors.New("plateforme non présente dans le manifeste")
+	ErrToolNotFound           = errors.New("binaire introuvable dans l'archive")
+	ErrToolNotInManifest      = errors.New("outil absent du manifeste pour cette plateforme")
+	ErrToolUnavailableOffline = errors.New("outil indisponible hors-ligne (archive absente du cache local)")
+	ErrIntegrityViolation     = errors.New("intégrité binaire compromise : somme SHA-256 divergente")
 )
+
+// DefaultPhase0PublicKey is a dedicated Ed25519 public key for platform distribution.
+// (Hex-encoded 32 bytes)
+const DefaultPhase0PublicKeyHex = "c59fd4e179c55a3dd2110785d9ae7a9b4adafc1e54ca3dcde54e2f3c3458645f"
+
+// ToolEntry describes a tool artifact within the runtime manifest.
+type ToolEntry struct {
+	Name            string   `json:"name"`
+	Version         string   `json:"version"`
+	ArchiveURL      string   `json:"archive_url"`
+	ArchiveSHA256   string   `json:"archive_sha256"`
+	BinaryInArchive string   `json:"binary_in_archive"`
+	BinarySHA256    string   `json:"binary_sha256"`
+	VersionArgs     []string `json:"version_args,omitempty"`
+}
+
+// PlatformManifest maps tools for a specific OS-arch tuple.
+type PlatformManifest struct {
+	Status string               `json:"status"` // qualified, experimental, targeted
+	Tools  map[string]ToolEntry `json:"tools"`
+}
+
+// RuntimeManifest represents the signed multi-platform distribution manifest.
+type RuntimeManifest struct {
+	SchemaVersion   int                         `json:"schema_version"`
+	ManifestVersion string                      `json:"manifest_version"`
+	Platforms       map[string]PlatformManifest `json:"platforms"`
+}
+
+// SignManifest creates an Ed25519 signature over manifest bytes and returns it in hex.
+func SignManifest(manifestBytes []byte, privKey ed25519.PrivateKey) string {
+	sig := ed25519.Sign(privKey, manifestBytes)
+	return hex.EncodeToString(sig)
+}
+
+// VerifyManifest verifies that sigHex matches manifestBytes using pubKey.
+func VerifyManifest(manifestBytes []byte, sigHex string, pubKey ed25519.PublicKey) error {
+	sigHex = strings.TrimSpace(sigHex)
+	sig, err := hex.DecodeString(sigHex)
+	if err != nil {
+		return ErrInvalidSignature
+	}
+	if len(sig) != ed25519.SignatureSize {
+		return ErrSignatureLengthMismatch
+	}
+	if !ed25519.Verify(pubKey, manifestBytes, sig) {
+		return ErrInvalidSignature
+	}
+	return nil
+}
 
 // DetectPlatform returns the standard platform ID (e.g. windows-x64, linux-x64, macos-arm64).
 func DetectPlatform() string {
@@ -189,6 +245,166 @@ func SyncRuntime(opts SyncOptions) (*SyncResult, error) {
 	}
 
 	return result, nil
+}
+
+// ResolverOptions configures the toolchain resolver.
+type ResolverOptions struct {
+	ManifestPath    string
+	SigPath         string
+	CacheDir        string // Base cache dir, e.g. ~/.compliance/tools
+	LocalBinDir     string // Fallback local bin dir, e.g. .tools/bin
+	ArchiveCacheDir string // Directory for cached archives, e.g. .tools/cache
+	Platform        string // Defaults to DetectPlatform()
+	PublicKey       ed25519.PublicKey
+	CABundlePath    string
+	OfflineOnly     bool
+}
+
+// ResolvedTool provides details on a successfully resolved executable.
+type ResolvedTool struct {
+	Name           string `json:"name"`
+	Version        string `json:"version"`
+	ExecutablePath string `json:"executable_path"`
+	SHA256         string `json:"sha256"`
+	Source         string `json:"source"` // "local_bin", "cache", "extracted", "synced"
+}
+
+// Resolver resolves tool binaries deterministically.
+type Resolver struct {
+	opts     ResolverOptions
+	manifest RuntimeManifest
+}
+
+// NewResolver initializes a Tool Resolver, validating the signed distribution manifest.
+func NewResolver(opts ResolverOptions) (*Resolver, error) {
+	if opts.Platform == "" {
+		opts.Platform = DetectPlatform()
+	}
+
+	if len(opts.PublicKey) == 0 {
+		pubBytes, err := hex.DecodeString(DefaultPhase0PublicKeyHex)
+		if err != nil {
+			return nil, fmt.Errorf("clé publique par défaut invalide: %w", err)
+		}
+		opts.PublicKey = ed25519.PublicKey(pubBytes)
+	}
+
+	manifestBytes, err := os.ReadFile(opts.ManifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("lecture du manifeste impossible (%s): %w", opts.ManifestPath, err)
+	}
+
+	sigBytes, err := os.ReadFile(opts.SigPath)
+	if err != nil {
+		return nil, fmt.Errorf("lecture de la signature impossible (%s): %w", opts.SigPath, err)
+	}
+
+	if err := VerifyManifest(manifestBytes, string(sigBytes), opts.PublicKey); err != nil {
+		return nil, fmt.Errorf("vérification cryptographique du manifeste échouée: %w", err)
+	}
+
+	var m RuntimeManifest
+	if err := json.Unmarshal(manifestBytes, &m); err != nil {
+		return nil, fmt.Errorf("désérialisation JSON du manifeste: %w", err)
+	}
+
+	return &Resolver{
+		opts:     opts,
+		manifest: m,
+	}, nil
+}
+
+// ResolveTool locates or fetches the tool executable and verifies its SHA-256.
+func (r *Resolver) ResolveTool(ctx context.Context, toolName string) (*ResolvedTool, error) {
+	plat, ok := r.manifest.Platforms[r.opts.Platform]
+	if !ok {
+		return nil, fmt.Errorf("%w: plateforme %s non déclarée", ErrPlatformUnsupported, r.opts.Platform)
+	}
+
+	toolEntry, ok := plat.Tools[toolName]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s sur %s", ErrToolNotInManifest, toolName, r.opts.Platform)
+	}
+
+	exeName := toolName
+	if runtime.GOOS == "windows" && !strings.HasSuffix(exeName, ".exe") {
+		exeName += ".exe"
+	}
+
+	// 1. Check local bin directory (.tools/bin)
+	if r.opts.LocalBinDir != "" {
+		candidate := filepath.Join(r.opts.LocalBinDir, exeName)
+		if verifyFileSHA256(candidate, toolEntry.BinarySHA256) {
+			absPath, _ := filepath.Abs(candidate)
+			return &ResolvedTool{
+				Name:           toolName,
+				Version:        toolEntry.Version,
+				ExecutablePath: absPath,
+				SHA256:         toolEntry.BinarySHA256,
+				Source:         "local_bin",
+			}, nil
+		}
+	}
+
+	// 2. Check cache directory (CacheDir/bin/<platform>/<exeName>)
+	cacheTarget := filepath.Join(r.opts.CacheDir, "bin", r.opts.Platform, exeName)
+	if verifyFileSHA256(cacheTarget, toolEntry.BinarySHA256) {
+		absPath, _ := filepath.Abs(cacheTarget)
+		return &ResolvedTool{
+			Name:           toolName,
+			Version:        toolEntry.Version,
+			ExecutablePath: absPath,
+			SHA256:         toolEntry.BinarySHA256,
+			Source:         "cache",
+		}, nil
+	}
+
+	// 3. Binary missing: trigger on-demand sync for THIS tool only
+	syncRes, err := SyncRuntime(SyncOptions{
+		ManifestPath:    r.opts.ManifestPath,
+		SigPath:         r.opts.SigPath,
+		CacheDir:        r.opts.CacheDir,
+		ArchiveCacheDir: r.opts.ArchiveCacheDir,
+		Platform:        r.opts.Platform,
+		PublicKey:       r.opts.PublicKey,
+		CABundlePath:    r.opts.CABundlePath,
+		ToolName:        toolName,
+		OfflineOnly:     r.opts.OfflineOnly,
+	})
+	if err != nil {
+		if r.opts.OfflineOnly {
+			return nil, fmt.Errorf("%w pour %s: %v", ErrToolUnavailableOffline, toolName, err)
+		}
+		return nil, fmt.Errorf("échec de la synchronisation à la demande pour %s: %w", toolName, err)
+	}
+
+	syncedPath, ok := syncRes.SyncedTools[toolName]
+	if !ok {
+		return nil, fmt.Errorf("l'outil %s n'a pas été produit par SyncRuntime", toolName)
+	}
+
+	if !verifyFileSHA256(syncedPath, toolEntry.BinarySHA256) {
+		return nil, fmt.Errorf("%w: binaire extrait pour %s invalide", ErrIntegrityViolation, toolName)
+	}
+
+	absPath, _ := filepath.Abs(syncedPath)
+	return &ResolvedTool{
+		Name:           toolName,
+		Version:        toolEntry.Version,
+		ExecutablePath: absPath,
+		SHA256:         toolEntry.BinarySHA256,
+		Source:         "synced",
+	}, nil
+}
+
+func verifyFileSHA256(path, expectedHash string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	h := sha256.Sum256(data)
+	actualHex := hex.EncodeToString(h[:])
+	return strings.EqualFold(actualHex, expectedHash)
 }
 
 func sha256Hex(data []byte) string {

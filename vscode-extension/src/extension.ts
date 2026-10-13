@@ -1,10 +1,8 @@
 import * as path from 'node:path';
 import { promises as fs } from 'node:fs';
 import * as vscode from 'vscode';
-import { prepare, validateTarget } from './backend';
-import { audit, Permissions, sessionArtifact, validateSource } from './auditBackend';
+import { audit, Permissions, prepare, sessionArtifact, SessionController, validateSource, validateTarget } from './daemonClient';
 import { controlOutputText, PlanNode, projectPlan, VisualStatus } from './model';
-import { SessionController } from './sessionController';
 import { ReportPanel } from './reportPanel';
 
 class PipelineTree implements vscode.TreeDataProvider<PlanNode> {

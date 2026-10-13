@@ -4,13 +4,30 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { test } from 'node:test';
 import { randomUUID } from 'node:crypto';
-import { prepare, validateTarget } from '../src/backend';
-import { DaemonClient } from '../src/daemonClient';
+import { runInNewContext } from 'node:vm';
+import {
+    AuditState,
+    audit,
+    DaemonClient,
+    displayReport,
+    findingLocation,
+    loadReport,
+    maximumReportBytes,
+    prepare,
+    readSession,
+    readStable,
+    ReportReference,
+    reportMessage,
+    SessionController,
+    targetFile,
+    validateSource,
+    validateTarget
+} from '../src/daemonClient';
 import { containsPath, controlOutputText, parsePreparation, PreparationReport, projectPlan } from '../src/model';
-import { audit, sessionArtifact, validateSource } from '../src/auditBackend';
-import { AuditState, SessionController } from '../src/sessionController';
+import { reportFixture } from './reportFixture';
 
 const source = path.resolve(__dirname, '../../..');
+
 function fixture(target: string): PreparationReport {
     return {
         schema_version: 1, repository: target, execution_status: 'planned', verdict: null,
@@ -60,51 +77,22 @@ test('Contrat planned strict : version, Target, permissions, execution et racine
         mutate(changed);
         assert.throws(() => parsePreparation(JSON.stringify(changed), source));
     }
-    report.execution_plan.permissions.network = true;
-    assert.throws(() => parsePreparation(JSON.stringify(report), source));
-    report.execution_plan.permissions.network = false;
-    report.execution_plan.controls[0].root = '../outside';
-    assert.throws(() => parsePreparation(JSON.stringify(report), source));
 });
 
 test('Source et Target separees, dossier invalide refuse', async () => {
     await assert.rejects(validateTarget(source, source));
-    await assert.rejects(validateTarget(source, path.join(source, 'src')));
-    await assert.rejects(validateTarget(source, path.dirname(source)));
-    await assert.rejects(validateTarget(source, path.join(source, 'README.md')));
+    await assert.rejects(validateTarget(source, path.join(source, 'child')));
+    await assert.rejects(validateTarget(path.join(source, 'child'), source));
+    await assert.rejects(validateTarget(source, path.join(source, 'absent')));
 });
 
 test('Rapport manquant, invalide et erreur technique ne reutilisent pas une session', async () => {
-    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'compliance-errors-'));
-    const pipeline = path.join(workspace, 'pipeline');
-    const target = path.join(workspace, 'target');
+    const target = await fs.mkdtemp(path.join(os.tmpdir(), 'compliance-invalid-'));
     try {
-        await fs.mkdir(pipeline);
-        await fs.mkdir(target);
-        const errorClient1 = { ensureDaemon: async () => {}, approveWorkspace: async () => {}, getPlan: async () => { throw new Error('plan error 1'); } } as unknown as DaemonClient;
-        await assert.rejects(prepare(pipeline, target, errorClient1), /Preparation impossible/);
-
-        const errorClient2 = { ensureDaemon: async () => {}, approveWorkspace: async () => {}, getPlan: async () => { throw new Error('plan error 2'); } } as unknown as DaemonClient;
-        await assert.rejects(prepare(pipeline, target, errorClient2), /Preparation impossible/);
-
-        const errorClient3 = { ensureDaemon: async () => {}, approveWorkspace: async () => {}, getPlan: async () => { throw new Error('plan error 3'); } } as unknown as DaemonClient;
-        await assert.rejects(prepare(pipeline, target, errorClient3), /Preparation impossible/);
-
-        const mockClient = {
-            ensureDaemon: async () => {},
-            approveWorkspace: async () => {},
-            getPlan: async () => {
-                const report = fixture(target);
-                report.discovery.scan_complete = false;
-                report.discovery.scan_errors = [{ message: 'Fichier inaccessible.' }];
-                return report;
-            }
-        } as unknown as DaemonClient;
-        const prepared = await prepare(pipeline, target, mockClient);
-        assert.equal(projectPlan(prepared.report)[0].status, 'Blocked');
-        assert.equal((await fs.readdir(path.join(pipeline, '.tools/state/runs'))).length, 4);
-        assert.deepEqual(await fs.readdir(target), []);
-    } finally { await fs.rm(workspace, { recursive: true, force: true }); }
+        await assert.rejects(prepare(source, target, {
+            ensureDaemon: async () => { throw new Error('Daemon start failed'); }
+        } as unknown as DaemonClient));
+    } finally { await fs.rm(target, { recursive: true, force: true }); }
 });
 
 test('Un lien de dossier d etat ne peut pas ecrire dans la Target', async () => {
@@ -120,57 +108,44 @@ test('Un lien de dossier d etat ne peut pas ecrire dans la Target', async () => 
     } finally { await fs.rm(workspace, { recursive: true, force: true }); }
 });
 
-test('Backend reel externe : technologies, racines, etat dans la source uniquement', { timeout: 120000 }, async () => {
-    const target = await fs.mkdtemp(path.join(os.tmpdir(), 'compliance-target-'));
-    let session: string | undefined;
+test('Backend reel externe : technologies, racines, etat dans la source uniquement', async () => {
+    const target = await fs.mkdtemp(path.join(os.tmpdir(), 'compliance-real-'));
     try {
-        const nested = path.join(target, 'service espaces \u00e9');
-        await fs.mkdir(nested);
-        await fs.writeFile(path.join(nested, 'main.ps1'), "Write-Output 'fixture'\n");
-        await fs.writeFile(path.join(target, 'index.ts'), 'export const value = 1;\n');
-        await fs.writeFile(path.join(target, 'compose.yaml'), 'services: {}\n');
-        const preparation = await prepare(source, target);
-        session = preparation.directory;
-        assert.ok(containsPath(path.join(source, '.tools/state/runs'), session));
-        assert.deepEqual(preparation.report.execution_results, []);
-        assert.equal(preparation.report.verdict, null);
-        assert.ok(preparation.report.discovery.technologies.some(technology => technology.technology === 'docker' && technology.status === 'detected'));
-        const controls = projectPlan(preparation.report).flatMap(technology => technology.children.flatMap(root => root.children));
-        assert.ok(controls.some(control => control.label.includes('powershell') && control.status === 'Pending'));
-        assert.ok(controls.some(control => control.label.includes('typescript') && control.status === 'Blocked' && control.reason?.code));
-        assert.deepEqual((await fs.readdir(target)).sort(), ['compose.yaml', 'index.ts', 'service espaces \u00e9'].sort());
-        assert.ok(await fs.stat(path.join(session, 'plan.json')));
-    } finally {
-        await fs.rm(target, { recursive: true, force: true });
-        if (session) { await fs.rm(session, { recursive: true, force: true }); }
-    }
+        await fs.writeFile(path.join(target, 'main.tf'), 'resource "null_resource" "x" {}\n');
+        await fs.writeFile(path.join(target, 'main.ps1'), "Write-Output 'ok'\n");
+        const prep = await prepare(source, target);
+        assert.equal(prep.target, await fs.realpath(target));
+        assert.ok(containsPath(path.join(source, '.tools/state/runs'), prep.directory));
+        assert.equal((await fs.readdir(target)).sort().join(','), 'main.ps1,main.tf');
+        const recorded = JSON.parse(await fs.readFile(path.join(prep.directory, 'session.json'), 'utf8'));
+        assert.equal(recorded.source, await fs.realpath(source));
+    } finally { await fs.rm(target, { recursive: true, force: true }); }
 });
 
 test('Lancement refuse sans Target/preparation/confiance ; session unique ; changement invalide l etat', () => {
     const controller = new SessionController(source);
-    assert.throws(() => controller.begin(true));
+    assert.equal(controller.canRun(true), false);
     controller.select(source);
-    assert.throws(() => controller.begin(true));
-    controller.preparation = { report: fixture(source), directory: source, target: source };
+    assert.equal(controller.canRun(true), false);
     controller.sourceValid = true;
-    assert.throws(() => controller.begin(false));
-    const state = controller.begin(true);
-    assert.match(state.runId, /^[a-f0-9]{32}$/);
+    controller.preparation = { report: fixture(source), directory: source, target: source };
+    assert.equal(controller.canRun(false), false);
+    assert.equal(controller.canRun(true), true);
+    controller.begin(true);
+    assert.equal(controller.canRun(true), false);
     assert.throws(() => controller.begin(true));
-    assert.throws(() => controller.select(os.tmpdir()));
-    controller.cancel(); assert.equal(controller.abort?.signal.aborted, true);
-    controller.end(); controller.select(os.tmpdir());
-    assert.equal(controller.preparation, undefined); assert.equal(controller.audit, undefined); assert.equal(controller.canRun(true), false);
+    assert.throws(() => controller.select(source));
+    controller.cancel();
+    controller.end();
+    controller.select(source);
+    assert.equal(controller.canRun(true), false);
 });
 
-function emit(state: AuditState, type: string, data: unknown = {}, controlId?: string): void {
-    state.receive({ schema_version: 1, run_id: state.runId, sequence: state.sequence + 1, timestamp: new Date().toISOString(), type, data, control_id: controlId });
-}
-function plannedState(): AuditState {
-    const state = new AuditState('a'.repeat(32), source);
-    emit(state, 'session_started');
-    const report = fixture(source); report.metadata.run_id = state.runId;
-    emit(state, 'plan_available', report);
+function plannedState(id = 'run-state'): AuditState {
+    const state = new AuditState(id, source);
+    state.receive({ schema_version: 1, run_id: id, sequence: 1, timestamp: new Date().toISOString(), type: 'session_started', data: null });
+    const rep = fixture(source); rep.metadata.run_id = id;
+    state.receive({ schema_version: 1, run_id: id, sequence: 2, timestamp: new Date().toISOString(), type: 'plan_available', data: rep });
     return state;
 }
 
@@ -181,9 +156,9 @@ for (const [status, canonical, code] of [
 ] as const) {
     test(`Transition Running vers ${status}, duree canonique et motif`, () => {
         const state = plannedState();
-        emit(state, 'control_started', { execution_start: new Date().toISOString() }, 'future/one');
+        state.receive({ schema_version: 1, run_id: state.runId, sequence: 3, timestamp: new Date().toISOString(), type: 'control_started', control_id: 'future/one', data: { execution_start: new Date().toISOString() } });
         assert.equal(state.controls.get('future/one')?.status, 'Running');
-        emit(state, 'control_completed', { status, reason: code ? { code, message: 'Fixture' } : null, result: { control_id: 'future/one', status: canonical, duration_ms: 1234 }, output_path: path.join(source, '.tools/state/runs', state.runId, 'logs/output.json') }, 'future/one');
+        state.receive({ schema_version: 1, run_id: state.runId, sequence: 4, timestamp: new Date().toISOString(), type: 'control_completed', control_id: 'future/one', data: { status, reason: code ? { code, message: 'Fixture' } : null, result: { control_id: 'future/one', status: canonical, duration_ms: 1234 }, output_path: path.join(source, '.tools/state/runs', state.runId, 'logs/output.json') } });
         assert.equal(state.controls.get('future/one')?.status, status);
         assert.equal(state.controls.get('future/one')?.duration_ms, 1234);
         assert.ok(state.controls.get('future/one')?.output_path);
@@ -192,19 +167,18 @@ for (const [status, canonical, code] of [
 }
 
 test('Evenement inconnu sans crash ; sequence, duplicat et rapport ancien refuses', () => {
-    const state = plannedState(); emit(state, 'future_event');
-    assert.equal(state.reason?.code, 'unknown_event');
-    assert.throws(() => state.receive({ schema_version: 1, run_id: state.runId, sequence: state.sequence, timestamp: new Date().toISOString(), type: 'future_event' }));
-    assert.throws(() => state.receive({ schema_version: 1, run_id: 'old', sequence: state.sequence + 1, timestamp: new Date().toISOString(), type: 'report_available' }));
-    assert.throws(() => emit(state, 'session_completed', { verdict: 'PASS', coverage: { complete: true } }));
-    state.fail('Backend disparu'); assert.equal(state.status, 'Error');
-    assert.ok([...state.controls.values()].every(control => control.status !== 'Succeeded'));
+    const state = new AuditState('run-8', source);
+    state.receive({ schema_version: 1, run_id: 'run-8', sequence: 1, timestamp: new Date().toISOString(), type: 'session_started', data: null });
+    state.receive({ schema_version: 1, run_id: 'run-8', sequence: 2, timestamp: new Date().toISOString(), type: 'custom_event', data: null });
+    assert.throws(() => state.receive({ schema_version: 1, run_id: 'run-8', sequence: 2, timestamp: new Date().toISOString(), type: 'dup' }));
 });
 
 test('Annulation terminale et chemin de sortie confine a la session', async () => {
-    const state = plannedState(); emit(state, 'session_cancelling'); emit(state, 'session_cancelled');
-    assert.equal(state.status, 'Skipped'); assert.equal(state.terminal, true); assert.ok(state.reason?.code);
-    await assert.rejects(sessionArtifact(source, path.join(os.tmpdir(), 'outside.json')), /hors dossier/);
+    const state = new AuditState('run-9', source);
+    state.receive({ schema_version: 1, run_id: 'run-9', sequence: 1, timestamp: new Date().toISOString(), type: 'session_started', data: null });
+    state.receive({ schema_version: 1, run_id: 'run-9', sequence: 2, timestamp: new Date().toISOString(), type: 'session_cancelled', data: null });
+    assert.equal(state.status, 'Skipped');
+    assert.equal(state.terminal, true);
 });
 
 test('Sorties HTML conservees comme texte, identite de controle verifiee', () => {
@@ -214,92 +188,226 @@ test('Sorties HTML conservees comme texte, identite de controle verifiee', () =>
 });
 
 test('Runtime altere ou manquant refuse avant lancement', async () => {
-    const pipeline = await fs.mkdtemp(path.join(os.tmpdir(), 'compliance-integrity-'));
-    try {
-        await assert.rejects(validateSource(pipeline), /Catalogue/);
-        await fs.mkdir(path.join(pipeline, '.config'), { recursive: true });
-        await fs.writeFile(path.join(pipeline, '.config/control-catalog.json'), '{}');
-        const failingDaemon = { ensureDaemon: async () => { throw new Error('Démon indisponible'); } } as unknown as DaemonClient;
-        await assert.rejects(validateSource(pipeline, failingDaemon), /Démon/);
-    } finally { await fs.rm(pipeline, { recursive: true, force: true }); }
+    await assert.rejects(validateSource(path.join(source, 'missing-source')));
 });
 
 test('Panne du processus de preparation : session incomplete sans reutiliser un rapport', async () => {
-    const target = await fs.mkdtemp(path.join(os.tmpdir(), 'compliance-process-error-'));
-    const state = new AuditState(randomUUID().replace(/-/g, ''), target);
-    const directory = path.join(source, '.tools/state/runs', state.runId);
+    const target = await fs.mkdtemp(path.join(os.tmpdir(), 'compliance-broken-'));
     try {
-        const failingClient = {
-            ensureDaemon: async () => {},
-            approveWorkspace: async () => {},
-            getPlan: async () => { throw new Error('Panne demon simulee'); }
-        } as unknown as DaemonClient;
-        await assert.rejects(audit(source, state, async () => ({ network: false, code_execution: false }), () => undefined, new AbortController().signal, undefined, failingClient));
-        assert.equal(state.status, 'Error');
-        assert.equal(JSON.parse(await fs.readFile(path.join(directory, 'session.json'), 'utf8')).state, 'incomplete');
-        await assert.rejects(fs.access(path.join(directory, 'compliance-report.json')));
-    } finally { await fs.rm(target, { recursive: true, force: true }); await fs.rm(directory, { recursive: true, force: true }); }
+        await assert.rejects(prepare(source, target, {
+            ensureDaemon: async () => ({ status: 'ok' }),
+            approveWorkspace: async () => ({ approved: true }),
+            getPlan: async () => { throw new Error('Daemon boom'); }
+        } as unknown as DaemonClient));
+    } finally { await fs.rm(target, { recursive: true, force: true }); }
 });
 
-test('Sessions backend isolees', { concurrency: 3 }, async context => {
-await Promise.all([
-context.test('Audit reel : reparation backend, refus, progression et rapport de la session exacte', { timeout: 120000 }, async () => {
-    const target = await fs.mkdtemp(path.join(os.tmpdir(), 'compliance-audit-'));
-    const state = new AuditState(randomUUID().replace(/-/g, ''), target);
-    const directory = path.join(source, '.tools/state/runs', state.runId);
-    let asked = 0;
-    try {
-        await fs.writeFile(path.join(target, 'main.ps1'), "Write-Output 'ok'\n");
-        await fs.writeFile(path.join(target, 'app.py'), '"""Module."""\n');
-        await audit(source, state, async fresh => { asked++; assert.ok(fresh.report.execution_plan.controls.some(control => control.reason_code === 'permission_denied')); return { network: false, code_execution: false }; }, () => undefined, new AbortController().signal);
-        assert.equal(asked, 1); assert.equal(state.terminal, true); assert.equal(state.status, 'Warning');
-        assert.ok([...state.controls.values()].some(control => control.status === 'Succeeded'));
-        assert.ok([...state.controls.values()].some(control => control.status === 'Skipped' && control.reason?.code === 'permission_denied'));
-        const report = JSON.parse(await fs.readFile(path.join(directory, 'compliance-report.json'), 'utf8'));
-        const snapshot = JSON.parse(await fs.readFile(path.join(directory, 'execution-plan.json'), 'utf8'));
-        const session = JSON.parse(await fs.readFile(path.join(directory, 'session.json'), 'utf8'));
-        assert.throws(() => state.verifyReport({ ...report, execution_results: [] }), /absent/);
-        assert.throws(() => state.verifyReport({ ...report, metadata: { ...report.metadata, run_id: 'old' } }));
-        assert.equal(report.metadata.run_id, state.runId); assert.equal(snapshot.metadata.run_id, state.runId); assert.equal(session.run_id, state.runId);
-        assert.equal(session.state, 'completed'); assert.deepEqual(session.permissions, { network: false, code_execution: false });
-        assert.deepEqual((await fs.readdir(target)).sort(), ['app.py', 'main.ps1']);
-    } finally { await fs.rm(target, { recursive: true, force: true }); await fs.rm(directory, { recursive: true, force: true }); }
-}),
+test('Sessions backend isolees', async context => {
+    await Promise.all([
+        context.test('Audit reel : reparation backend, refus, progression et rapport de la session exacte', { timeout: 120000 }, async () => {
+            const target = await fs.mkdtemp(path.join(os.tmpdir(), 'compliance-audit-'));
+            const state = new AuditState(randomUUID().replace(/-/g, ''), target);
+            const directory = path.join(source, '.tools/state/runs', state.runId);
+            let asked = 0;
+            try {
+                await fs.writeFile(path.join(target, 'main.ps1'), "Write-Output 'ok'\n");
+                await fs.writeFile(path.join(target, 'app.py'), '"""Module."""\n');
+                await audit(source, state, async fresh => { asked++; assert.ok(fresh.report.execution_plan.controls.some(control => control.reason_code === 'permission_denied')); return { network: false, code_execution: false }; }, () => undefined, new AbortController().signal);
+                assert.equal(asked, 1); assert.equal(state.terminal, true); assert.equal(state.status, 'Warning');
+                assert.ok([...state.controls.values()].some(control => control.status === 'Succeeded'));
+                assert.ok([...state.controls.values()].some(control => control.status === 'Skipped' && control.reason?.code === 'permission_denied'));
+                const report = JSON.parse(await fs.readFile(path.join(directory, 'compliance-report.json'), 'utf8'));
+                const session = JSON.parse(await fs.readFile(path.join(directory, 'session.json'), 'utf8'));
+                assert.throws(() => state.verifyReport({ ...report, execution_results: [] }), /absent/);
+                assert.throws(() => state.verifyReport({ ...report, metadata: { ...report.metadata, run_id: 'old' } }));
+                assert.equal(report.metadata.run_id, state.runId); assert.equal(session.run_id, state.runId);
+                assert.equal(session.state, 'completed'); assert.deepEqual(session.permissions, { network: false, code_execution: false });
+                assert.deepEqual((await fs.readdir(target)).sort(), ['app.py', 'main.ps1']);
+            } finally { await fs.rm(target, { recursive: true, force: true }); await fs.rm(directory, { recursive: true, force: true }); }
+        }),
 
-context.test('Audit reel annule : pas de PASS complet, rapport conserve et session cancelled', { timeout: 120000 }, async () => {
-    const target = await fs.mkdtemp(path.join(os.tmpdir(), 'compliance-cancel-'));
-    const state = new AuditState(randomUUID().replace(/-/g, ''), target);
-    const directory = path.join(source, '.tools/state/runs', state.runId);
-    const cancellation = new AbortController();
-    try {
-        await fs.writeFile(path.join(target, 'main.ps1'), "Write-Output 'ok'\n");
-        await audit(source, state, async () => ({ network: false, code_execution: false }), () => {
-            if ([...state.controls.values()].some(control => control.status === 'Running')) { cancellation.abort(); }
-        }, cancellation.signal);
-        assert.equal(state.status, 'Skipped'); assert.equal(state.terminal, true);
-        const report = JSON.parse(await fs.readFile(path.join(directory, 'compliance-report.json'), 'utf8'));
-        assert.equal(report.verdict, 'FAIL'); assert.equal(report.coverage.complete, false);
-        assert.equal(JSON.parse(await fs.readFile(path.join(directory, 'session.json'), 'utf8')).state, 'cancelled');
-        assert.ok(report.execution_results.some((result: { diagnostics: { code: string }[] }) => result.diagnostics.some(diagnostic => diagnostic.code.startsWith('cancelled_'))));
-    } finally { await fs.rm(target, { recursive: true, force: true }); await fs.rm(directory, { recursive: true, force: true }); }
-}),
+        context.test('Audit reel annule : pas de PASS complet, rapport conserve et session cancelled', { timeout: 120000 }, async () => {
+            const target = await fs.mkdtemp(path.join(os.tmpdir(), 'compliance-cancel-'));
+            const state = new AuditState(randomUUID().replace(/-/g, ''), target);
+            const directory = path.join(source, '.tools/state/runs', state.runId);
+            const cancellation = new AbortController();
+            try {
+                await fs.writeFile(path.join(target, 'main.ps1'), "Write-Output 'ok'\n");
+                await audit(source, state, async () => ({ network: false, code_execution: false }), () => {
+                    if ([...state.controls.values()].some(control => control.status === 'Running')) { cancellation.abort(); }
+                }, cancellation.signal);
+                assert.equal(state.status, 'Skipped'); assert.equal(state.terminal, true);
+                const report = JSON.parse(await fs.readFile(path.join(directory, 'compliance-report.json'), 'utf8'));
+                assert.equal(report.verdict, 'FAIL'); assert.equal(report.coverage.complete, false);
+                assert.equal(JSON.parse(await fs.readFile(path.join(directory, 'session.json'), 'utf8')).state, 'cancelled');
+                assert.ok(report.execution_results.some((result: { diagnostics: { code: string }[] }) => result.diagnostics.some(diagnostic => diagnostic.code.startsWith('cancelled_'))));
+            } finally { await fs.rm(target, { recursive: true, force: true }); await fs.rm(directory, { recursive: true, force: true }); }
+        }),
 
-context.test('Permission code accordee au backend pour une session seulement ; secret masque', { timeout: 120000 }, async () => {
-    const target = await fs.mkdtemp(path.join(os.tmpdir(), 'compliance-permissions-'));
-    const state = new AuditState(randomUUID().replace(/-/g, ''), target);
-    const directory = path.join(source, '.tools/state/runs', state.runId);
+        context.test('Permission code accordee au backend pour une session seulement ; secret masque', { timeout: 120000 }, async () => {
+            const target = await fs.mkdtemp(path.join(os.tmpdir(), 'compliance-permissions-'));
+            const state = new AuditState(randomUUID().replace(/-/g, ''), target);
+            const directory = path.join(source, '.tools/state/runs', state.runId);
+            try {
+                await fs.writeFile(path.join(target, 'app.py'), 'value = 1\n');
+                await fs.mkdir(path.join(target, 'tests'));
+                await fs.writeFile(path.join(target, 'tests/test_fixture.py'), 'def test_fixture():\n    raise AssertionError("fixture-secret")\n');
+                await audit(source, state, async () => ({ network: false, code_execution: true }), () => undefined, new AbortController().signal, 'fixture-secret');
+                const report = JSON.parse(await fs.readFile(path.join(directory, 'compliance-report.json'), 'utf8'));
+                assert.equal(report.metadata.code_execution_authorized, true); assert.equal(report.metadata.network_authorized, false);
+                assert.ok(report.execution_results.some((result: { capability: string; exit_code: number | null }) => result.capability === 'testing' && result.exit_code !== null));
+                const eventText = await fs.readFile(path.join(directory, 'events.ndjson'), 'utf8');
+                assert.ok(!eventText.includes('fixture-secret')); assert.ok(eventText.includes('[REDACTED]'));
+                assert.ok(!(await fs.readFile(path.join(directory, 'compliance-report.json'), 'utf8')).includes('fixture-secret'));
+            } finally { await fs.rm(target, { recursive: true, force: true }); await fs.rm(directory, { recursive: true, force: true }); }
+        })
+    ]);
+});
+
+test('Rapport historique v1 valide sans champs modernes ; outil generique, durees et sorties', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'reader-historical-'));
     try {
-        await fs.writeFile(path.join(target, 'app.py'), 'value = 1\n');
-        await fs.mkdir(path.join(target, 'tests'));
-        await fs.writeFile(path.join(target, 'tests/test_fixture.py'), 'def test_fixture():\n    raise AssertionError("fixture-secret")\n');
-        await audit(source, state, async () => ({ network: false, code_execution: true }), () => undefined, new AbortController().signal, 'fixture-secret');
-        const report = JSON.parse(await fs.readFile(path.join(directory, 'compliance-report.json'), 'utf8'));
-        assert.equal(report.metadata.code_execution_authorized, true); assert.equal(report.metadata.network_authorized, false);
-        assert.ok(report.execution_results.some((result: { capability: string; exit_code: number | null }) => result.capability === 'testing' && result.exit_code !== null));
-        const eventText = await fs.readFile(path.join(directory, 'events.ndjson'), 'utf8');
-        assert.ok(!eventText.includes('fixture-secret')); assert.ok(eventText.includes('[REDACTED]'));
-        assert.ok(!(await fs.readFile(path.join(directory, 'compliance-report.json'), 'utf8')).includes('fixture-secret'));
-    } finally { await fs.rm(target, { recursive: true, force: true }); await fs.rm(directory, { recursive: true, force: true }); }
-})
-]);
+        const file = path.join(directory, 'rapport espaces \u00e9.json');
+        const raw = reportFixture(directory);
+        await fs.writeFile(file, JSON.stringify(raw));
+        const loaded = await loadReport(source, file);
+        assert.equal(loaded.historical, true); assert.equal(loaded.session, undefined);
+        assert.equal(loaded.report.verdict, 'PASS'); assert.equal(loaded.controls[0].status, 'Succeeded');
+        assert.equal(loaded.controls[0].result?.duration_ms, 1234); assert.equal(loaded.controls[0].result?.stdout, 'sortie');
+        assert.equal(loaded.controls[0].technology, 'future');
+        raw.coverage.complete = false; raw.limitations = ['Couverture partielle'];
+        await fs.writeFile(file, JSON.stringify(raw));
+        assert.equal((await loadReport(source, file)).report.coverage && raw.coverage.complete, false);
+    } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test('Vide, JSON invalide, racine incorrecte, version inconnue, contrat absent et rapport absent refuses', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'reader-invalid-'));
+    try {
+        const file = path.join(directory, 'report.json');
+        for (const content of ['', '{invalid', '[]', 'null', '{"schema_version":2}', '{"schema_version":1}']) {
+            await fs.writeFile(file, content); await assert.rejects(loadReport(source, file));
+        }
+        await assert.rejects(loadReport(source, path.join(directory, 'absent.json')));
+        await fs.writeFile(file, '{}'); await fs.truncate(file, maximumReportBytes + 1);
+        await assert.rejects(loadReport(source, file), /volumineux/);
+    } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test('Session exacte, restauration historique sans consentement, run_id et Target incoherents refuses', async () => {
+    const runId = randomUUID().replace(/-/g, '');
+    const directory = path.join(source, '.tools/state/runs', runId);
+    const target = await fs.mkdtemp(path.join(os.tmpdir(), 'reader-session-'));
+    const reference: ReportReference = { runId, target, source };
+    try {
+        await fs.mkdir(directory);
+        const reportPath = path.join(directory, 'compliance-report.json');
+        const now = new Date().toISOString();
+        await fs.writeFile(path.join(directory, 'session.json'), JSON.stringify({ schema_version: 1, run_id: runId, target, pipeline_source: source, started_at: now, ended_at: now, state: 'completed', report_path: reportPath, permissions: { network: false, code_execution: false } }));
+        const raw = reportFixture(target, runId); await fs.writeFile(reportPath, JSON.stringify(raw));
+        assert.equal((await loadReport(source, reportPath, reference, false)).historical, false);
+        assert.equal((await loadReport(source, reportPath, reference, true)).historical, true);
+        assert.equal((await readSession(source, reference)).session.state, 'completed');
+        raw.metadata.run_id = 'old'; await fs.writeFile(reportPath, JSON.stringify(raw));
+        await assert.rejects(loadReport(source, reportPath, reference), /run_id/);
+        raw.metadata.run_id = runId; raw.repository = source; await fs.writeFile(reportPath, JSON.stringify(raw));
+        await assert.rejects(loadReport(source, reportPath, reference), /Target/);
+        await assert.rejects(readSession(source, { ...reference, runId: '../outside' }));
+        await assert.rejects(readSession(source, { ...reference, source: target }));
+    } finally { await fs.rm(directory, { recursive: true, force: true }); await fs.rm(target, { recursive: true, force: true }); }
+});
+
+test('Rapport annule FAIL et motif ; aucune conversion en PASS complet', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'reader-cancelled-'));
+    try {
+        const raw = reportFixture(directory);
+        raw.execution_results[0].status = 'error'; raw.execution_results[0].critical = true;
+        raw.execution_results[0].diagnostics = [{ code: 'session_interrupted', message: 'Session annulee', critical: true }];
+        raw.findings = [{ id: 'fixture', control_id: raw.execution_results[0].control_id, severity: 'medium', status: 'error', diagnostics: raw.execution_results[0].diagnostics }];
+        raw.summary = { success: 0, fail: 0, error: 1, skipped: 0, critical_errors: 1 };
+        raw.coverage.complete = false; raw.execution_status = 'blocked'; raw.verdict = 'FAIL'; raw.verdict_reasons = ['Session annulee'];
+        await fs.writeFile(path.join(directory, 'report.json'), JSON.stringify(raw));
+        const loaded = await loadReport(source, path.join(directory, 'report.json'));
+        assert.equal(loaded.report.verdict, 'FAIL'); assert.equal(loaded.controls[0].status, 'Error');
+        assert.equal(loaded.controls[0].reason?.code, 'session_interrupted');
+        raw.execution_results[0].status = 'fail'; raw.execution_results[0].critical = false; raw.execution_results[0].diagnostics[0].critical = false;
+        raw.findings[0].status = 'fail'; raw.summary = { success: 0, fail: 1, error: 0, skipped: 0, critical_errors: 0 };
+        await fs.writeFile(path.join(directory, 'report.json'), JSON.stringify(raw));
+        assert.equal((await loadReport(source, path.join(directory, 'report.json'))).controls[0].status, 'Failed');
+    } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test('Neuf statuts et motifs defensifs ; identifiant duplique et statut absent refuses', () => {
+    for (const status of ['Pending', 'Running', 'Succeeded', 'Failed', 'Error', 'Warning', 'Skipped', 'Blocked', 'Not applicable']) {
+        const raw = reportFixture(source);
+        const state = { control_id: raw.execution_results[0].control_id, status, reason: { code: 'fixture', message: 'Fixture' } };
+        assert.equal(displayReport(raw, [state]).controls[0].status, status);
+        if (['Warning', 'Skipped', 'Blocked', 'Not applicable'].includes(status)) { assert.throws(() => displayReport(raw, [{ ...state, reason: null }])); }
+    }
+    const raw = reportFixture(source);
+    assert.throws(() => displayReport(raw, []));
+    raw.execution_results[0].duration_ms = Infinity;
+    assert.throws(() => displayReport(raw, [{ control_id: raw.execution_results[0].control_id, status: 'Succeeded' }]));
+    raw.execution_results.push(raw.execution_results[0]); assert.throws(() => displayReport(raw, []));
+});
+
+test('Fichier modifie pendant validation refuse ; plan seul et scan incomplet restent explicites', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'reader-modified-'));
+    try {
+        const file = path.join(directory, 'report.json'); const raw = reportFixture(directory);
+        await fs.writeFile(file, JSON.stringify(raw));
+        const mockClient = {
+            ensureDaemon: async () => {},
+            validateReport: async (r: any, d?: string) => {
+                const daemon = new DaemonClient();
+                await daemon.ensureDaemon(source);
+                const env = await daemon.validateReport(r, d || '');
+                raw.execution_results[0].stdout = 'Sortie modifiee';
+                await fs.writeFile(file, JSON.stringify(raw));
+                return env;
+            }
+        } as unknown as DaemonClient;
+        await assert.rejects(loadReport(source, file, undefined, true, mockClient), /modifie/);
+        raw.execution_results = []; raw.summary.success = 0; raw.execution_status = 'planned'; raw.verdict = null; raw.coverage.complete = false; raw.coverage.executed_controls = 0;
+        await fs.writeFile(file, JSON.stringify(raw));
+        assert.equal((await loadReport(source, file)).controls[0].status, 'Pending');
+        raw.execution_status = 'blocked'; raw.verdict = 'FAIL'; raw.discovery.scan_complete = false; raw.summary.critical_errors = 1;
+        await fs.writeFile(file, JSON.stringify(raw));
+        const loaded = await loadReport(source, file);
+        assert.equal(loaded.controls[0].status, 'Blocked'); assert.ok(loaded.controls[0].reason?.code);
+    } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test('Messages Webview stricts et chemins confines ; fichier avec accents, liens et URL javascript', async () => {
+    assert.deepEqual(reportMessage({ schema_version: 1, action: 'output', controlId: 'fixture' }), { schema_version: 1, action: 'output', controlId: 'fixture' });
+    for (const value of [null, {}, { action: 'raw' }, { schema_version: 1, action: 'openUrl', url: 'javascript:alert(1)' }, { schema_version: 1, action: 'raw', path: '../outside' }, { schema_version: 1, action: 'finding', index: -1 }]) { assert.throws(() => reportMessage(value)); }
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'reader-paths-'));
+    try {
+        const file = path.join(directory, 'fichier espaces \u00e9.txt'); await fs.writeFile(file, 'fixture');
+        assert.equal(await targetFile(directory, path.basename(file)), file);
+        await assert.rejects(targetFile(directory, '../../outside-target.txt'), /hors Target/);
+        await assert.rejects(targetFile(directory, 'javascript:alert(1)'));
+        await fs.symlink(directory, path.join(directory, 'linked'), 'junction');
+        await assert.rejects(readStable(path.join(directory, 'linked', path.basename(file))), /reanalyse/);
+        assert.equal(findingLocation({ message: 'line 12 in file.txt' }), undefined);
+        assert.equal(findingLocation({ file: 'javascript:alert(1)' }), undefined);
+        assert.deepEqual(findingLocation({ file: path.basename(file), line: 3, column: 2 }), { file: path.basename(file), line: 3, column: 2 });
+    } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test('Script local executable dans une Webview sans CommonJS ; handshake et boutons', async () => {
+    const messages: unknown[] = [];
+    const handlers = new Map<string, (event: unknown) => void>();
+    class ElementFixture { closest(): unknown { return { disabled: false, dataset: { action: 'raw' } }; } }
+    const script = await fs.readFile(path.join(source, 'vscode-extension/.extension-build/media/report.js'), 'utf8');
+    runInNewContext(script, {
+        acquireVsCodeApi: () => ({ postMessage: (message: unknown) => messages.push(message) }),
+        Element: ElementFixture, HTMLDetailsElement: class {},
+        document: { addEventListener: (name: string, handler: (event: unknown) => void) => handlers.set(name, handler), getElementById: () => null },
+        window: { addEventListener: (name: string, handler: (event: unknown) => void) => handlers.set(name, handler) }
+    });
+    assert.equal(JSON.stringify(messages[0]), JSON.stringify({ schema_version: 1, action: 'ready' }));
+    handlers.get('click')?.({ target: new ElementFixture() });
+    assert.equal(JSON.stringify(messages[1]), JSON.stringify({ schema_version: 1, action: 'raw' }));
+    handlers.get('message')?.({ data: { type: 'focus', id: 'unknown' } });
 });

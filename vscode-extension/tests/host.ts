@@ -2,7 +2,7 @@ import { strict as assert } from 'node:assert';
 import * as vscode from 'vscode';
 import { PlanNode } from '../src/model';
 import { escaped, ReportPanel, reportHtml, sectionId } from '../src/reportPanel';
-import { fields } from '../src/reportReader';
+import { fields } from '../src/daemonClient';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';

@@ -2,15 +2,21 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
+	"os/user"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,7 +24,850 @@ import (
 
 	"compliance/internal/discovery"
 	"compliance/internal/engine"
+	"compliance/internal/matrix"
+	"compliance/internal/osutil"
+	"compliance/internal/report"
 )
+
+var (
+	ErrUnauthorized             = errors.New("authentification requise ou jeton Bearer invalide")
+	ErrForbiddenHost            = errors.New("en-tête Host non autorisé (rejet DNS Rebinding)")
+	ErrForbiddenOrigin          = errors.New("en-tête Origin externe ou non autorisé (rejet CSRF)")
+	ErrWorkspaceUntrusted       = errors.New("répertoire cible hors périmètre des espaces autorisés")
+	ErrRunNotFound             = errors.New("session d'audit introuvable")
+	ErrRunAlreadyFinished      = errors.New("la session d'audit est déjà terminée")
+	ErrApplyDestroyNeedsConfirm = errors.New("les étapes apply_destroy ne peuvent être exécutées que de manière unitaire avec confirmation explicite")
+)
+
+// DaemonConfig holds configuration for the compliance daemon.
+type DaemonConfig struct {
+	ListenAddr         string   // Default "127.0.0.1:0"
+	StateDir           string   // Directory for daemon.json, daemon.lock, daemon.token (e.g. ~/.compliance)
+	ApprovedWorkspaces []string // Whitelist of allowed workspace root paths
+	CatalogPath        string   // Path to control-catalog.json
+	PlatformRoot       string   // Platform repository root
+	Version            string   // Daemon version
+}
+
+// DaemonState is serialized to daemon.json upon successful startup.
+type DaemonState struct {
+	PID       int    `json:"pid"`
+	Port      int    `json:"port"`
+	Host      string `json:"host"`
+	TokenPath string `json:"token_path"`
+	StateDir  string `json:"state_dir"`
+	StartedAt string `json:"started_at"`
+	Version   string `json:"version"`
+}
+
+// HealthResponse represents response from GET /api/v1/health.
+type HealthResponse struct {
+	Status    string `json:"status"`
+	Version   string `json:"version"`
+	PID       int    `json:"pid"`
+	Port      int    `json:"port"`
+	StartedAt string `json:"started_at"`
+}
+
+// DiscoveryRequest represents request to POST /api/v1/discovery.
+type DiscoveryRequest struct {
+	TargetPath string `json:"target_path"`
+}
+
+// DiscoveryResponse represents response from POST /api/v1/discovery.
+type DiscoveryResponse struct {
+	TargetPath   string                       `json:"target_path"`
+	Technologies []discovery.TechnologyRecord `json:"technologies"`
+	ScanComplete bool                         `json:"scan_complete"`
+}
+
+// PlanRequest represents request to POST /api/v1/plans.
+type PlanRequest struct {
+	TargetPath          string `json:"target_path"`
+	AllowNetwork        bool   `json:"allow_network"`
+	AllowCodeExecution  bool   `json:"allow_code_execution"`
+	IncludeApplyDestroy bool   `json:"include_apply_destroy"`
+}
+
+// CreateRunRequest represents request to POST /api/v1/runs.
+type CreateRunRequest struct {
+	TargetPath          string   `json:"target_path"`
+	RunID               string   `json:"run_id,omitempty"`
+	OutputDir           string   `json:"output_dir,omitempty"`
+	PlanOnly            bool     `json:"plan_only"`
+	ControlID           string   `json:"control_id,omitempty"`   // Optional: run single control
+	AllowNetwork        bool     `json:"allow_network"`
+	AllowCodeExecution  bool     `json:"allow_code_execution"`
+	ConfirmApplyDestroy bool     `json:"confirm_apply_destroy"` // Required if running apply_destroy control
+	RedactionPatterns   []string `json:"redaction_patterns,omitempty"`
+}
+
+// RunCreationResponse represents response from POST /api/v1/runs.
+type RunCreationResponse struct {
+	RunID     string `json:"run_id"`
+	Status    string `json:"status"`
+	EventsURL string `json:"events_url"`
+	ReportURL string `json:"report_url"`
+}
+
+// CancelResponse represents response from POST /api/v1/runs/{id}/cancel.
+type CancelResponse struct {
+	RunID     string `json:"run_id"`
+	Status    string `json:"status"`
+	Cancelled bool   `json:"cancelled"`
+}
+
+// ControlLogsResponse represents response from GET /api/v1/runs/{id}/logs/{control_id}.
+type ControlLogsResponse struct {
+	RunID       string  `json:"run_id"`
+	ControlID   string  `json:"control_id"`
+	Status      string  `json:"status"`
+	ExitCode    *int    `json:"exit_code"`
+	Stdout      string  `json:"stdout"`
+	Stderr      string  `json:"stderr"`
+	DurationMs  int64   `json:"duration_ms"`
+	ToolVersion *string `json:"tool_version,omitempty"`
+}
+
+// SessionEvent represents an SSE event adhering strictly to compliance-session.schema.json.
+type SessionEvent struct {
+	SchemaVersion int         `json:"schema_version"`
+	RunID         string      `json:"run_id"`
+	Sequence      int         `json:"sequence"`
+	Timestamp     string      `json:"timestamp"`
+	Type          string      `json:"type"`
+	ControlID     *string     `json:"control_id"`
+	Technology    *string     `json:"technology"`
+	Root          *string     `json:"root"`
+	Data          interface{} `json:"data"`
+}
+
+// WorkspaceApprovalRequest represents request to approve a workspace path.
+type WorkspaceApprovalRequest struct {
+	WorkspacePath string `json:"workspace_path"`
+}
+
+// ValidateReportRequest represents request to POST /api/v1/reports/validate.
+type ValidateReportRequest struct {
+	ReportSHA256 string                 `json:"report_sha256"`
+	Report       map[string]interface{} `json:"report"`
+}
+
+// PresentationItem represents a control presentation state.
+type PresentationItem struct {
+	ControlID string      `json:"control_id"`
+	Status    string      `json:"status"`
+	Reason    interface{} `json:"reason"`
+}
+
+// ValidateReportResponse represents response from POST /api/v1/reports/validate.
+type ValidateReportResponse struct {
+	SchemaVersion int                `json:"schema_version"`
+	ReportSHA256  string             `json:"report_sha256"`
+	Presentations []PresentationItem `json:"presentations"`
+}
+
+// GenerateBearerToken generates a cryptographically secure 256-bit token (64 hex chars).
+func GenerateBearerToken() (string, error) {
+	bytes := make([]byte, 32)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", fmt.Errorf("génération du jeton cryptographique aléatoire: %w", err)
+	}
+	return hex.EncodeToString(bytes), nil
+}
+
+// WriteProtectedToken writes token to path with POSIX 0600 or Windows ACL.
+func WriteProtectedToken(path string, token string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("création du dossier du jeton: %w", err)
+	}
+
+	if err := os.WriteFile(path, []byte(token), 0600); err != nil {
+		return fmt.Errorf("écriture du fichier de jeton: %w", err)
+	}
+
+	if runtime.GOOS == "windows" {
+		grantTarget := ""
+		if u, err := user.Current(); err == nil && u.Uid != "" {
+			grantTarget = fmt.Sprintf("*%s:(F)", u.Uid)
+		} else if username := os.Getenv("USERNAME"); username != "" {
+			grantTarget = fmt.Sprintf("%s:(F)", username)
+		}
+		if grantTarget != "" {
+			cmd := exec.Command("icacls", path, "/inheritance:r", "/grant:r", grantTarget)
+			osutil.SetHideWindow(cmd)
+			_ = cmd.Run() // Best effort on Windows environments
+		}
+	}
+
+	return nil
+}
+
+// SecurityManager enforces authentication, host validation, origin checks, and workspace paths.
+type SecurityManager struct {
+	Token              string
+	Port               int
+	ApprovedWorkspaces []string
+}
+
+// NewSecurityManager creates a new SecurityManager.
+func NewSecurityManager(token string, port int, approvedWorkspaces []string) *SecurityManager {
+	canonicalWorkspaces := make([]string, 0, len(approvedWorkspaces))
+	for _, ws := range approvedWorkspaces {
+		c, err := CanonicalizePath(ws)
+		if err == nil {
+			canonicalWorkspaces = append(canonicalWorkspaces, c)
+		}
+	}
+	return &SecurityManager{
+		Token:              token,
+		Port:               port,
+		ApprovedWorkspaces: canonicalWorkspaces,
+	}
+}
+
+// ValidateHost checks if the Host header corresponds to 127.0.0.1 or localhost on the expected port.
+func (sm *SecurityManager) ValidateHost(hostHeader string) bool {
+	if hostHeader == "" {
+		return false
+	}
+	host, port, err := net.SplitHostPort(hostHeader)
+	if err != nil {
+		host = hostHeader
+		port = ""
+	}
+
+	if port != "" && sm.Port > 0 {
+		expectedPort := fmt.Sprintf("%d", sm.Port)
+		if port != expectedPort {
+			return false
+		}
+	}
+
+	h := strings.ToLower(host)
+	return h == "127.0.0.1" || h == "localhost" || h == "::1" || h == "[::1]"
+}
+
+// ValidateOrigin validates the Origin header.
+func (sm *SecurityManager) ValidateOrigin(originHeader string) bool {
+	if originHeader == "" {
+		return true
+	}
+
+	trimmed := strings.TrimSpace(originHeader)
+	if trimmed == "null" {
+		return true
+	}
+
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return false
+	}
+
+	if parsed.Scheme == "vscode-webview" || parsed.Scheme == "vscode-file" {
+		return true
+	}
+
+	if parsed.Scheme == "http" {
+		hostname := strings.ToLower(parsed.Hostname())
+		if hostname != "127.0.0.1" && hostname != "localhost" && hostname != "::1" {
+			return false
+		}
+		port := parsed.Port()
+		if sm.Port > 0 {
+			expectedPort := fmt.Sprintf("%d", sm.Port)
+			if port != expectedPort {
+				return false
+			}
+		}
+		if parsed.Path != "" && parsed.Path != "/" {
+			return false
+		}
+		return true
+	}
+
+	return false
+}
+
+// ValidateToken verifies the Authorization header contains the valid Bearer token.
+func (sm *SecurityManager) ValidateToken(authHeader string) bool {
+	if authHeader == "" {
+		return false
+	}
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return false
+	}
+	providedToken := strings.TrimSpace(parts[1])
+	return subtle.ConstantTimeCompare([]byte(providedToken), []byte(sm.Token)) == 1
+}
+
+// AddApprovedWorkspace registers a new approved workspace root.
+func (sm *SecurityManager) AddApprovedWorkspace(wsPath string) error {
+	c, err := CanonicalizePath(wsPath)
+	if err != nil {
+		return err
+	}
+	for _, existing := range sm.ApprovedWorkspaces {
+		if strings.EqualFold(existing, c) {
+			return nil
+		}
+	}
+	sm.ApprovedWorkspaces = append(sm.ApprovedWorkspaces, c)
+	return nil
+}
+
+// ValidateTargetPath resolves symlinks and verifies the path belongs to an approved workspace.
+func (sm *SecurityManager) ValidateTargetPath(targetPath string) (string, error) {
+	if targetPath == "" {
+		return "", errors.New("le chemin cible ne peut pas être vide")
+	}
+
+	canonicalTarget, err := CanonicalizePath(targetPath)
+	if err != nil {
+		return "", fmt.Errorf("résolution du chemin cible impossible (%s): %w", targetPath, err)
+	}
+
+	fi, err := os.Stat(canonicalTarget)
+	if err != nil {
+		return "", fmt.Errorf("chemin cible introuvable: %w", err)
+	}
+	if !fi.IsDir() {
+		return "", errors.New("le chemin cible doit être un répertoire")
+	}
+
+	if len(sm.ApprovedWorkspaces) == 0 {
+		return "", ErrWorkspaceUntrusted
+	}
+
+	targetLower := strings.ToLower(canonicalTarget)
+	for _, ws := range sm.ApprovedWorkspaces {
+		wsLower := strings.ToLower(ws)
+		if targetLower == wsLower || strings.HasPrefix(targetLower, wsLower+string(filepath.Separator)) {
+			return canonicalTarget, nil
+		}
+	}
+
+	return "", fmt.Errorf("%w: %s n'appartient à aucun workspace approuvé", ErrWorkspaceUntrusted, targetPath)
+}
+
+// CanonicalizePath cleans path and resolves all symlinks.
+func CanonicalizePath(p string) (string, error) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	real, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return filepath.Clean(abs), nil
+		}
+		return "", err
+	}
+	return filepath.Clean(real), nil
+}
+
+// Middleware creates an HTTP handler middleware enforcing Host, Origin, and Bearer authentication.
+func (sm *SecurityManager) Middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !sm.ValidateHost(r.Host) {
+			http.Error(w, "Forbidden: invalid Host header", http.StatusForbidden)
+			return
+		}
+
+		origin := r.Header.Get("Origin")
+		if origin != "" && !sm.ValidateOrigin(origin) {
+			http.Error(w, "Forbidden: untrusted Origin header", http.StatusForbidden)
+			return
+		}
+
+		auth := r.Header.Get("Authorization")
+		if auth == "" {
+			http.Error(w, "Unauthorized: missing Authorization header", http.StatusUnauthorized)
+			return
+		}
+		if !sm.ValidateToken(auth) {
+			http.Error(w, "Forbidden: invalid Bearer token", http.StatusForbidden)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// Session represents a compliance execution session with event history and SSE broadcasting.
+type Session struct {
+	mu          sync.RWMutex
+	ID          string
+	TargetPath  string
+	State       string // "preparing", "running", "cancelling", "completed", "cancelled", "failed"
+	StartedAt   time.Time
+	EndedAt     *time.Time
+	Report      *report.Report
+	Events      []SessionEvent
+	Subscribers map[chan SessionEvent]struct{}
+	Cancel      context.CancelFunc
+	Logs        map[string]*ControlLogsResponse
+	OutputDir   string
+	PlanOnly    bool
+	Advisory    bool
+	Permissions struct{ Network, CodeExecution bool }
+}
+
+// SessionManager manages active and persisted run sessions.
+type SessionManager struct {
+	mu           sync.RWMutex
+	sessions     map[string]*Session
+	stateDir     string
+	platformRoot string
+	catalogPath  string
+	version      string
+	resolver     *matrix.DefaultCandidateResolver
+}
+
+// NewSessionManager creates a new SessionManager.
+func NewSessionManager(stateDir, platformRoot, catalogPath, version string) *SessionManager {
+	sm := &SessionManager{
+		sessions:     make(map[string]*Session),
+		stateDir:     stateDir,
+		platformRoot: platformRoot,
+		catalogPath:  catalogPath,
+		version:      version,
+		resolver:     &matrix.DefaultCandidateResolver{PlatformRoot: platformRoot},
+	}
+	sm.CleanupStaleSessions()
+	return sm
+}
+
+// GenerateRunID produces a random 32-character hexadecimal run ID.
+func GenerateRunID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// CreateRun initializes and starts an execution run in background.
+func (sm *SessionManager) CreateRun(ctx context.Context, req CreateRunRequest) (*Session, error) {
+	runID := req.RunID
+	if runID == "" {
+		runID = GenerateRunID()
+	}
+	runDir := req.OutputDir
+	if runDir == "" {
+		runDir = filepath.Join(sm.stateDir, "runs", runID)
+	}
+	_ = os.MkdirAll(runDir, 0700)
+	_ = os.MkdirAll(filepath.Join(runDir, "logs"), 0700)
+
+	sessionPath := filepath.Join(runDir, "session.json")
+	initSession := map[string]interface{}{
+		"schema_version": 1,
+		"run_id":         runID,
+		"target":         req.TargetPath,
+		"state":          "preparing",
+		"permissions": map[string]bool{
+			"network":        req.AllowNetwork,
+			"code_execution": req.AllowCodeExecution,
+		},
+		"started_at": time.Now().UTC().Format(time.RFC3339),
+		"ended_at":   nil,
+	}
+	if b, err := json.MarshalIndent(initSession, "", "  "); err == nil {
+		_ = os.WriteFile(sessionPath, b, 0600)
+	}
+
+	runCtx, cancel := context.WithCancel(context.Background())
+
+	session := &Session{
+		ID:          runID,
+		TargetPath:  req.TargetPath,
+		State:       "preparing",
+		StartedAt:   time.Now().UTC(),
+		Events:      make([]SessionEvent, 0),
+		Subscribers: make(map[chan SessionEvent]struct{}),
+		Cancel:      cancel,
+		Logs:        make(map[string]*ControlLogsResponse),
+		OutputDir:   runDir,
+		PlanOnly:    req.PlanOnly,
+		Permissions: struct{ Network, CodeExecution bool }{
+			Network:       req.AllowNetwork,
+			CodeExecution: req.AllowCodeExecution,
+		},
+	}
+
+	sm.mu.Lock()
+	sm.sessions[runID] = session
+	sm.mu.Unlock()
+
+	session.emitEvent("session_started", nil, nil, nil, map[string]interface{}{
+		"target":          req.TargetPath,
+		"plan_only":       req.PlanOnly,
+		"pipeline_source": sm.platformRoot,
+	})
+
+	go sm.executeRun(runCtx, session, req)
+
+	return session, nil
+}
+
+func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req CreateRunRequest) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.mu.Lock()
+			s.State = "failed"
+			now := time.Now().UTC()
+			s.EndedAt = &now
+			s.mu.Unlock()
+			s.emitEvent("session_failed", nil, nil, nil, map[string]interface{}{
+				"error": fmt.Sprintf("panique interne: %v", r),
+			})
+		}
+	}()
+
+	s.emitEvent("preparation_started", nil, nil, nil, map[string]interface{}{
+		"target": req.TargetPath,
+	})
+
+	s.mu.Lock()
+	s.State = "running"
+	s.mu.Unlock()
+
+	s.emitEvent("preparation_completed", nil, nil, nil, map[string]interface{}{
+		"target": req.TargetPath,
+	})
+
+	opts := engine.ComplianceOptions{
+		RepoRoot:          req.TargetPath,
+		PlatformRoot:      sm.platformRoot,
+		CatalogPath:       sm.catalogPath,
+		AllowNetwork:      req.AllowNetwork,
+		AllowCodeExecution: req.AllowCodeExecution,
+		PlanOnly:          req.PlanOnly,
+		RedactionPatterns: req.RedactionPatterns,
+		RunID:             s.ID,
+		SourceAdapter:     "VSCode",
+		CandidateResolver: sm.resolver,
+		OnPlanReady: func(planRep *report.Report) {
+			if b, err := json.MarshalIndent(planRep, "", "  "); err == nil {
+				planPath := filepath.Join(s.OutputDir, "execution-plan.json")
+				_ = os.WriteFile(planPath, b, 0600)
+			}
+			s.emitEvent("plan_available", nil, nil, nil, planRep)
+		},
+		OnControlStart: func(ctrl *engine.PlannedControl) {
+			ctrlID := ctrl.ID
+			tech := ctrl.Technology
+			root := ctrl.Root
+			s.emitEvent("control_started", &ctrlID, &tech, &root, map[string]interface{}{
+				"name":            ctrl.Name,
+				"capability":      ctrl.Capability,
+				"severity":        ctrl.Severity,
+				"execution_start": time.Now().UTC().Format(time.RFC3339),
+			})
+		},
+		OnControlDone: func(ctrl *engine.PlannedControl, res *report.ExecutionResult) {
+			ctrlID := ctrl.ID
+			tech := ctrl.Technology
+			root := ctrl.Root
+
+			s.mu.Lock()
+			s.Logs[ctrl.ID] = &ControlLogsResponse{
+				RunID:       s.ID,
+				ControlID:   ctrl.ID,
+				Status:      res.Status,
+				ExitCode:    res.ExitCode,
+				Stdout:      res.Stdout,
+				Stderr:      res.Stderr,
+				DurationMs:  res.DurationMs,
+				ToolVersion: res.ToolVersion,
+			}
+			s.mu.Unlock()
+
+			presStatus := mapPresentationStatus(res)
+			var reasonObj map[string]interface{}
+			if len(res.Diagnostics) > 0 {
+				msg := res.Diagnostics[0].Message
+				if msg == "" {
+					msg = "Contrôle non exécuté selon le motif structuré du backend."
+				}
+				reasonObj = map[string]interface{}{
+					"code":    res.Diagnostics[0].Code,
+					"message": msg,
+				}
+			} else if presStatus == "Not applicable" || presStatus == "Skipped" || presStatus == "Blocked" || presStatus == "Warning" {
+				reasonObj = map[string]interface{}{
+					"code":    "not_applicable",
+					"message": "Contrôle non applicable selon le backend.",
+				}
+			}
+
+			logPath := filepath.Join(s.OutputDir, "logs", filepath.Base(ctrl.ID)+".log")
+			_ = os.WriteFile(logPath, []byte(res.Stdout+"\n"+res.Stderr), 0600)
+
+			s.emitEvent("control_completed", &ctrlID, &tech, &root, map[string]interface{}{
+				"status":      presStatus,
+				"reason":      reasonObj,
+				"result":      res,
+				"output_path": logPath,
+			})
+		},
+	}
+
+	rep, err := engine.RunCompliance(ctx, opts)
+
+	s.mu.Lock()
+	now := time.Now().UTC()
+	s.EndedAt = &now
+	if ctx.Err() != nil {
+		s.State = "cancelled"
+		if rep != nil {
+			rep.ExecutionStatus = "blocked"
+			failStr := "FAIL"
+			rep.Verdict = &failStr
+			rep.Coverage.Complete = false
+			s.Report = rep
+		}
+		s.mu.Unlock()
+
+		sessionPath := filepath.Join(s.OutputDir, "session.json")
+		sessionData := map[string]interface{}{
+			"schema_version": 1,
+			"run_id":         s.ID,
+			"target":         s.TargetPath,
+			"state":          "cancelled",
+			"permissions": map[string]bool{
+				"network":        s.Permissions.Network,
+				"code_execution": s.Permissions.CodeExecution,
+			},
+			"started_at": s.StartedAt.Format(time.RFC3339),
+			"ended_at":   now.Format(time.RFC3339),
+		}
+		if sessBytes, sErr := json.MarshalIndent(sessionData, "", "  "); sErr == nil {
+			_ = os.WriteFile(sessionPath, sessBytes, 0600)
+		}
+
+		reportPath := filepath.Join(s.OutputDir, "compliance-report.json")
+		if rep != nil {
+			if b, err := json.MarshalIndent(rep, "", "  "); err == nil {
+				_ = os.WriteFile(reportPath, b, 0600)
+			}
+		}
+
+		s.emitEvent("report_available", nil, nil, nil, map[string]interface{}{
+			"report_path": reportPath,
+			"verdict":     "FAIL",
+		})
+
+		s.emitEvent("session_cancelled", nil, nil, nil, map[string]interface{}{
+			"verdict": "FAIL",
+			"coverage": map[string]interface{}{
+				"complete": false,
+			},
+			"reason": map[string]interface{}{
+				"code":    "session_interrupted",
+				"message": "Annulation demandée par le client.",
+			},
+		})
+		return
+	}
+
+	if err != nil {
+		s.State = "failed"
+		s.mu.Unlock()
+		s.emitEvent("session_failed", nil, nil, nil, map[string]interface{}{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	s.Report = rep
+	s.State = "completed"
+	s.mu.Unlock()
+
+	reportPath := filepath.Join(s.OutputDir, "compliance-report.json")
+	if repBytes, mErr := json.MarshalIndent(rep, "", "  "); mErr == nil {
+		_ = os.WriteFile(reportPath, repBytes, 0600)
+	}
+
+	planPath := filepath.Join(s.OutputDir, "execution-plan.json")
+	if _, err := os.Stat(planPath); os.IsNotExist(err) {
+		if planBytes, pErr := json.MarshalIndent(rep, "", "  "); pErr == nil {
+			_ = os.WriteFile(planPath, planBytes, 0600)
+		}
+	}
+
+	sessionPath := filepath.Join(s.OutputDir, "session.json")
+	sessionData := map[string]interface{}{
+		"schema_version": 1,
+		"run_id":         s.ID,
+		"target":         s.TargetPath,
+		"state":          "completed",
+		"permissions": map[string]bool{
+			"network":        s.Permissions.Network,
+			"code_execution": s.Permissions.CodeExecution,
+		},
+		"started_at": s.StartedAt.Format(time.RFC3339),
+		"ended_at":   now.Format(time.RFC3339),
+	}
+	if sessBytes, sErr := json.MarshalIndent(sessionData, "", "  "); sErr == nil {
+		_ = os.WriteFile(sessionPath, sessBytes, 0600)
+	}
+
+	s.emitEvent("report_available", nil, nil, nil, map[string]interface{}{
+		"report_path": reportPath,
+		"verdict":     rep.Verdict,
+	})
+
+	s.emitEvent("session_completed", nil, nil, nil, map[string]interface{}{
+		"verdict":         rep.Verdict,
+		"verdict_reasons": rep.VerdictReasons,
+		"coverage": map[string]interface{}{
+			"complete": rep.Coverage.Complete,
+		},
+	})
+}
+
+func mapPresentationStatus(res *report.ExecutionResult) string {
+	if len(res.Diagnostics) > 0 {
+		code := res.Diagnostics[0].Code
+		switch code {
+		case "dependency_failed", "ambiguous", "capability_unavailable", "tool_unavailable":
+			return "Blocked"
+		case "permission_denied", "cancelled_before_start", "cancelled_during_execution":
+			return "Skipped"
+		}
+	}
+	switch res.Status {
+	case "success":
+		if res.OutputTruncated || len(res.Diagnostics) > 0 {
+			return "Warning"
+		}
+		return "Succeeded"
+	case "fail":
+		return "Failed"
+	case "error":
+		return "Error"
+	case "skipped":
+		return "Not applicable"
+	default:
+		return "Succeeded"
+	}
+}
+
+func (s *Session) emitEvent(eventType string, ctrlID, tech, root *string, data interface{}) {
+	s.mu.Lock()
+	seq := len(s.Events) + 1
+	event := SessionEvent{
+		SchemaVersion: 1,
+		RunID:         s.ID,
+		Sequence:      seq,
+		Timestamp:     time.Now().UTC().Format(time.RFC3339Nano),
+		Type:          eventType,
+		ControlID:     ctrlID,
+		Technology:    tech,
+		Root:          root,
+		Data:          data,
+	}
+	s.Events = append(s.Events, event)
+
+	if s.OutputDir != "" {
+		if b, err := json.Marshal(event); err == nil {
+			eventsPath := filepath.Join(s.OutputDir, "events.ndjson")
+			if f, err := os.OpenFile(eventsPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600); err == nil {
+				_, _ = f.Write(append(b, '\n'))
+				_ = f.Close()
+			}
+		}
+	}
+
+	for ch := range s.Subscribers {
+		select {
+		case ch <- event:
+		default:
+		}
+	}
+	s.mu.Unlock()
+}
+
+// SubscribeEvents registers a channel for SSE event streaming with replay of past events from lastSeq.
+func (s *Session) SubscribeEvents(lastSeq int) (chan SessionEvent, func()) {
+	ch := make(chan SessionEvent, 100)
+
+	s.mu.Lock()
+	for _, ev := range s.Events {
+		if ev.Sequence > lastSeq {
+			ch <- ev
+		}
+	}
+	s.Subscribers[ch] = struct{}{}
+	s.mu.Unlock()
+
+	unsubscribe := func() {
+		s.mu.Lock()
+		delete(s.Subscribers, ch)
+		close(ch)
+		s.mu.Unlock()
+	}
+
+	return ch, unsubscribe
+}
+
+// CancelSession cleanly cancels an ongoing run.
+func (s *Session) CancelSession() error {
+	s.mu.Lock()
+	if s.State != "running" && s.State != "preparing" {
+		s.mu.Unlock()
+		return ErrRunAlreadyFinished
+	}
+	s.State = "cancelling"
+	cancelFunc := s.Cancel
+	s.mu.Unlock()
+
+	s.emitEvent("session_cancelling", nil, nil, nil, map[string]interface{}{
+		"reason": "Annulation requise par le client HTTP.",
+	})
+
+	if cancelFunc != nil {
+		cancelFunc()
+	}
+	return nil
+}
+
+// GetSession retrieves a session by ID.
+func (sm *SessionManager) GetSession(id string) (*Session, error) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	session, ok := sm.sessions[id]
+	if !ok {
+		return nil, ErrRunNotFound
+	}
+	return session, nil
+}
+
+// CleanupStaleSessions purges sessions older than 7 days, retaining up to 20 recent sessions.
+func (sm *SessionManager) CleanupStaleSessions() {
+	runsDir := filepath.Join(sm.stateDir, "runs")
+	entries, err := os.ReadDir(runsDir)
+	if err != nil {
+		return
+	}
+
+	cutoff := time.Now().Add(-7 * 24 * time.Hour)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		path := filepath.Join(runsDir, e.Name())
+		fi, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if fi.ModTime().Before(cutoff) {
+			_ = os.RemoveAll(path)
+		}
+	}
+}
 
 // DaemonServer represents the running HTTP/SSE daemon.
 type DaemonServer struct {
@@ -55,25 +904,21 @@ func StartDaemon(cfg DaemonConfig) (*DaemonServer, error) {
 	tokenPath := filepath.Join(cfg.StateDir, "daemon.token")
 	statePath := filepath.Join(cfg.StateDir, "daemon.json")
 
-	// 1. Acquire single-instance lock (with crash recovery)
 	if err := AcquireLock(lockPath); err != nil {
 		return nil, err
 	}
 
-	// 2. Generate 256-bit cryptographically secure Bearer token
 	token, err := GenerateBearerToken()
 	if err != nil {
 		ReleaseLock(lockPath)
 		return nil, err
 	}
 
-	// 3. Write protected token (POSIX 0600 / Windows ACL)
 	if err := WriteProtectedToken(tokenPath, token); err != nil {
 		ReleaseLock(lockPath)
 		return nil, err
 	}
 
-	// 4. Bind strictly to local loopback
 	listener, err := net.Listen("tcp", cfg.ListenAddr)
 	if err != nil {
 		ReleaseLock(lockPath)
@@ -84,7 +929,6 @@ func StartDaemon(cfg DaemonConfig) (*DaemonServer, error) {
 	tcpAddr := listener.Addr().(*net.TCPAddr)
 	port := tcpAddr.Port
 
-	// 5. Initialize Security & Sessions
 	security := NewSecurityManager(token, port, cfg.ApprovedWorkspaces)
 	sessions := NewSessionManager(cfg.StateDir, cfg.PlatformRoot, cfg.CatalogPath, cfg.Version)
 
@@ -99,7 +943,6 @@ func StartDaemon(cfg DaemonConfig) (*DaemonServer, error) {
 		statePath:  statePath,
 	}
 
-	// 6. Write daemon.json state file
 	state := DaemonState{
 		PID:       os.Getpid(),
 		Port:      port,
@@ -116,18 +959,15 @@ func StartDaemon(cfg DaemonConfig) (*DaemonServer, error) {
 		return nil, err
 	}
 
-	// 7. Configure HTTP mux
 	mux := http.NewServeMux()
 	srv.registerRoutes(mux)
 
-	// Wrap entire mux with security middleware (Host & Origin validation)
 	srv.httpServer = &http.Server{
 		Handler:      security.Middleware(mux),
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 0, // SSE streams require no write timeout
+		WriteTimeout: 0,
 	}
 
-	// Start serving in background
 	go func() {
 		_ = srv.httpServer.Serve(listener)
 	}()
@@ -218,7 +1058,7 @@ func (s *DaemonServer) handleApproveWorkspace(w http.ResponseWriter, r *http.Req
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"status":   "approved",
+		"status":    "approved",
 		"workspace": req.WorkspacePath,
 	})
 }
@@ -270,7 +1110,6 @@ func (s *DaemonServer) handlePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Run compliance in PlanOnly mode
 	opts := engine.ComplianceOptions{
 		RepoRoot:           canonicalTarget,
 		PlatformRoot:       s.cfg.PlatformRoot,
@@ -289,7 +1128,6 @@ func (s *DaemonServer) handlePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Filter out apply_destroy if not requested
 	if !req.IncludeApplyDestroy {
 		filtered := make([]interface{}, 0, len(rep.ExecutionPlan.Controls))
 		for _, c := range rep.ExecutionPlan.Controls {
@@ -330,7 +1168,6 @@ func (s *DaemonServer) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 	}
 	req.TargetPath = canonicalTarget
 
-	// Guardrail: verify apply_destroy constraints
 	if req.ControlID != "" && (strings.Contains(strings.ToLower(req.ControlID), "apply") || strings.Contains(strings.ToLower(req.ControlID), "destroy")) {
 		if !req.ConfirmApplyDestroy {
 			http.Error(w, ErrApplyDestroyNeedsConfirm.Error(), http.StatusBadRequest)
@@ -360,7 +1197,6 @@ func (s *DaemonServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check Last-Event-ID for reconnection and replay
 	lastSeq := 0
 	if lastEventID := r.Header.Get("Last-Event-ID"); lastEventID != "" {
 		if seq, err := strconv.Atoi(lastEventID); err == nil {
@@ -395,7 +1231,6 @@ func (s *DaemonServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", ev.Sequence, ev.Type, string(dataBytes))
 			flusher.Flush()
 
-			// Close stream upon terminal event
 			if ev.Type == "session_completed" || ev.Type == "session_cancelled" || ev.Type == "session_failed" {
 				return
 			}
@@ -504,7 +1339,6 @@ func (s *DaemonServer) handleValidateReport(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Validate minimal report schema v1
 	v, ok := rep["schema_version"].(float64)
 	if !ok || int(v) != 1 {
 		http.Error(w, "Rapport v1 invalide ou version inconnue", http.StatusBadRequest)

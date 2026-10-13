@@ -50,8 +50,8 @@ VSIX_MANIFEST_TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
 """
 
 def package_vsix():
-    root = Path(__file__).resolve().parent.parent
-    ext_dir = root / "vscode-extension"
+    ext_dir = Path(__file__).resolve().parent
+    root = ext_dir.parent
     package_json_path = ext_dir / "package.json"
 
     with open(package_json_path, "r", encoding="utf-8") as f:

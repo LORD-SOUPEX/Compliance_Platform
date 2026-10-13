@@ -1,19 +1,11 @@
-# Local Python environment and caches
+# Local runtime and tools directory
+.tools/
 .venv/
-.tools/*
-!.tools/README.md
-.tools/bin/
-.tools/cache/
-.tools/python/
-.tools/powershell-modules/
-.tools/pre-commit/
-.tools/test-workspaces/
-vscode-extension/.extension-build/
+.ruff_cache/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
-.ruff_cache/
 .ansible/
 .cache/
 .tox/
@@ -22,8 +14,7 @@ coverage.xml
 htmlcov/
 
 # Generated reports and logs
-reports/*
-!reports/.gitkeep
+reports/
 *.log
 *.tmp
 *.bak
@@ -48,9 +39,12 @@ crash.log
 # Go build outputs
 core/bin/
 core/*.exe
+*.exe
 .scratch_daemon_test/
 
 # VS Code extension build artifacts
 vscode-extension/dist/
 vscode-extension/node_modules/
 vscode-extension/.vscode-test/
+vscode-extension/.extension-build/
+*.vsix

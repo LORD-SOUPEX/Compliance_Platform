@@ -42,29 +42,29 @@ Le parcours technique détaillé est documenté dans [l'architecture](docs/archi
 
 Pour valider l'intégrité du moteur Go autonome, la sécurité HTTP/SSE et le confinement des processus sur port éphémère :
 
-```powershell
-.tools/bin/compliance.exe selftest
+```bash
+compliance selftest
 ```
 
 ### 2. Démarrage du démon local
 
 Le démon expose l'API de pilotage locale sur `127.0.0.1` :
 
-```powershell
-.tools/bin/compliance.exe daemon --state-dir ~/.compliance
+```bash
+compliance daemon -state-dir ~/.compliance
 ```
 
 ### 3. Exécution d'un audit en ligne de commande
 
-```powershell
+```bash
 # Découverte seule (lecture seule, sans exécution d'outil)
-.tools/bin/compliance.exe discovery -repo "C:\chemin\du\projet"
+compliance discovery -repo "/chemin/du/projet"
 
 # Planification seule
-.tools/bin/compliance.exe run -repo "C:\chemin\du\projet" -plan-only
+compliance run -repo "/chemin/du/projet" -plan-only
 
 # Audit complet
-.tools/bin/compliance.exe run -repo "C:\chemin\du\projet" -report reports/audit.json
+compliance run -repo "/chemin/du/projet" -report reports/audit.json
 ```
 
 ### 4. Audit dans VS Code
@@ -100,20 +100,8 @@ Dernière mesure locale effectuée sur le socle autonome :
 | Composant | Résultat mesuré | Remarque |
 | :--- | :--- | :--- |
 | **Compliance Selftest (Go)** | **20/20 PASS** | Validation complète du démon éphémère, sécurité Bearer, Host/Origin et zéro processus orphelin |
-| **Tests unitaires Go (`core/`)** | **Tous les packages OK** | catalog, discovery, distribution, engine, matrix, osutil, report, server, toolchain |
+| **Tests unitaires Go (`core/`)** | **100 % PASS** | discovery, distribution, engine, matrix, osutil, report, selftest, server |
 | **Tests extension VS Code** | **34/34 PASS** | Client démon, cycle de vie, validation de rapports, sessions isolées |
-
----
-
-## Commandes historiques / Obsolètes
-
-> [!WARNING]
-> Les scripts PowerShell ci-dessous sont conservés temporairement à des fins d'archive et de comparaison de parité. Le moteur Go est désormais l'unique source de vérité.
-
-- **`scripts/bootstrap.ps1`** : Remplacé par le runtime autonome et `compliance runtime sync`.
-- **`scripts/doctor.ps1`** : Remplacé par `compliance selftest`.
-- **`scripts/quality-gate.ps1`** : Remplacé par `compliance run` et `compliance discovery`.
-- **`scripts/compliance-adapter.ps1`** : Remplacé par le démon local Go.
 
 ---
 

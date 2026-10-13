@@ -6,6 +6,11 @@
   "private": true,
   "publisher": "compliance-platform",
   "engines": { "vscode": "^1.81.0" },
+  "scripts": {
+    "compile": "tsc -p tsconfig.json",
+    "test": "node --test --test-concurrency=1 .extension-build/tests/*.test.js",
+    "package": "node -e \"const { spawnSync } = require('child_process'); const py = process.platform === 'win32' ? (spawnSync('where.exe', ['py']).status === 0 ? 'py' : 'python') : 'python3'; const res = spawnSync(py, ['package_vsix.py'], { stdio: 'inherit' }); process.exit(res.status || 0);\""
+  },
   "main": "./.extension-build/src/extension.js",
   "capabilities": {
     "untrustedWorkspaces": { "supported": "limited", "description": "La preparation des outils exige un workspace approuve." },

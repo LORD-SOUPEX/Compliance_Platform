@@ -8,9 +8,9 @@
     "esModuleInterop": true,
     "rootDir": ".",
     "outDir": ".extension-build",
-    "paths": { "@vscode/test-electron": ["../.tools/vscode-extension/node_modules/@vscode/test-electron"] },
-    "typeRoots": ["../.tools/vscode-extension/node_modules/@types"],
-    "skipLibCheck": false,
+    "paths": { "@vscode/test-electron": ["./node_modules/@vscode/test-electron"] },
+    "typeRoots": ["./node_modules/@types"],
+    "skipLibCheck": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },

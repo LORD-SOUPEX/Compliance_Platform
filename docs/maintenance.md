@@ -25,20 +25,20 @@ Pour les environnements sécurisés d'entreprise soumis à une inspection SSL/TL
 
 ### Packaging de l'Extension VS Code (VSIX Universel)
 
-Contrairement aux versions préliminaires, un package VSIX multi-OS complet est produit sans dépendre d'outils propriétaires externes :
+Un package VSIX multi-OS complet est produit sans dépendre d'outils propriétaires externes via des scripts multi-OS standards :
 
-```powershell
-# Packaging officiel via le script de maintenance
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/vscode-extension.ps1 -Action Package
+```bash
+cd vscode-extension
+npm run package
 ```
 
-Sous le capot, le script `scripts/package_vsix.py` génère un conteneur conforme à la norme **Open Packaging Conventions (OPC)** :
+Sous le capot, `vscode-extension/package_vsix.py` génère un conteneur conforme à la norme **Open Packaging Conventions (OPC)** :
 - Il compile et intègre les binaires natifs Go pour l'ensemble des cibles ciblées :
   - `bin/compliance-windows-amd64.exe`
   - `bin/compliance-linux-amd64`
   - `bin/compliance-darwin-arm64`
   - `bin/compliance-darwin-amd64`
-- Le VSIX produit (dans `vscode-extension/dist/compliance-pipelines-1.0.0.vsix`) est immédiatement installable sur n'importe quel système d'exploitation sans nécessiter de recompilation sur le poste utilisateur.
+- Le VSIX produit (`vscode-extension/dist/compliance-local-pipelines-0.1.0.vsix`) est immédiatement installable sur n'importe quel système d'exploitation sans nécessiter de recompilation sur le poste utilisateur.
 
 ---
 
@@ -50,21 +50,23 @@ Depuis la racine du projet :
 
 ```bash
 # Selftest de bout en bout (20 contrôles de sécurité et d'API)
-.tools/bin/compliance.exe selftest
+compliance selftest
 
 # Suite complète de tests unitaires et d'intégration Go
 cd core
-go test ./...
+go test -count=1 ./...
 ```
 
 ### Validation de l'Extension VS Code
 
-```powershell
-# Compilation et suite de tests unitaires/intégration TypeScript (34 scénarios)
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/vscode-extension.ps1 -Action Test
+Depuis le dossier `vscode-extension/` :
 
-# Test d'intégration dans une instance réelle VS Code (Host isolé)
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/vscode-extension.ps1 -Action TestHost
+```bash
+# Compilation et suite de tests unitaires/intégration TypeScript (34 scénarios)
+npm test
+
+# Compilation TypeScript seule
+npm run compile
 ```
 
 ### Matrice de Qualification Multi-OS
@@ -74,8 +76,8 @@ Conformément à `.config/platform-support.json` :
 | Plateforme | Statut | Preuves Actuelles |
 | :--- | :--- | :--- |
 | **windows-x64** | **Qualified** | Selftest Go 20/20 PASS, suite Go `core/` OK, extension VS Code 34/34 PASS. Confinement Job Objects validé. |
-| **linux-x64** | **Targeted** | Binaires cross-compilés validés. Nécessite l'exécution de `compliance selftest` sur une machine hôte Linux physique avant qualification. |
-| **darwin-arm64** | **Targeted** | Binaires cross-compilés embarqués dans le package VSIX. |
+| **linux-x64** | **Targeted** | Binaires cross-compilés validés (`GOOS=linux GOARCH=amd64`). Confinement POSIX (Process Groups + setrlimit) validé. |
+| **darwin-arm64** | **Targeted** | Binaires cross-compilés (`GOOS=darwin GOARCH=arm64`) embarqués dans le package VSIX. |
 | **darwin-amd64** | **Targeted** | Binaires cross-compilés embarqués dans le package VSIX. |
 
 ---
@@ -89,18 +91,4 @@ Conformément à `.config/platform-support.json` :
    ```bash
    compliance runtime sync
    ```
-   Cette commande vérifie l'intégrité de la signature et télécharge ou vérifie les outils dans `.tools/runtime/`.
-
----
-
-## 4. Outils et Commandes Historiques (Obsolètes)
-
-Les scripts historiques sous `scripts/` (`quality-gate.ps1`, `bootstrap.ps1`, `doctor.ps1`) sont conservés pour des besoins de rétrocompatibilité et de référence d'archivage. Ils ne doivent plus être utilisés pour les opérations courantes :
-
-```powershell
-# [OBSOLÈTE] Ancien bootstrap du runtime PowerShell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1
-
-# [OBSOLÈTE] Ancien contrôle d'intégrité PowerShell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor.ps1 -NoColor
-```
+   Cette commande vérifie l'intégrité de la signature et télécharge ou vérifie les outils dans le cache local.

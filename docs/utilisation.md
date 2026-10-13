@@ -12,18 +12,20 @@ L'extension VS Code pilote l'audit au moyen du démon local autonome Go, garanti
 
 Depuis la racine de la plateforme (ou en installant le package VSIX) :
 
-```powershell
+```bash
 # Installation des dépendances et compilation
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/vscode-extension.ps1 -Action Install
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/vscode-extension.ps1 -Action Build
+cd vscode-extension
+npm install
+npm run compile
 
 # Lancement de VS Code en mode développement
-code --new-window --extensionDevelopmentPath="$((Resolve-Path .\vscode-extension).Path)" "$PWD"
+code --new-window --extensionDevelopmentPath="./vscode-extension" .
 ```
 
 *Alternative avec le VSIX autonome packagé :*
-```powershell
-code --install-extension vscode-extension/dist/compliance-pipelines-1.0.0.vsix
+```bash
+npm run package
+code --install-extension dist/compliance-local-pipelines-0.1.0.vsix
 ```
 
 ### Parcours utilisateur dans l'éditeur
