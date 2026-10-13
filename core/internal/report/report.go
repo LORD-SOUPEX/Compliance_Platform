@@ -175,6 +175,7 @@ type ReportOptions struct {
 	PlanOnly                    bool
 	ScanComplete                bool
 	ScanErrors                  []discoveryScanErrorRef
+	Adapter                     string
 }
 
 type discoveryScanErrorRef struct {
@@ -251,8 +252,40 @@ func BuildComplianceReport(opts ReportOptions) *Report {
 		}
 	}
 
+	nonApplicableIds := make(map[string]bool)
+	for _, raw := range opts.Plan.Controls {
+		var id, applicability string
+		if m, ok := raw.(map[string]interface{}); ok {
+			if s, ok := m["id"].(string); ok {
+				id = s
+			}
+			if s, ok := m["applicability"].(string); ok {
+				applicability = s
+			}
+		} else if b, err := json.Marshal(raw); err == nil {
+			var m map[string]interface{}
+			if err := json.Unmarshal(b, &m); err == nil {
+				if s, ok := m["id"].(string); ok {
+					id = s
+				}
+				if s, ok := m["applicability"].(string); ok {
+					applicability = s
+				}
+			}
+		}
+		if id != "" && applicability == "not_applicable" {
+			nonApplicableIds[id] = true
+		}
+	}
+	blockingSkippedCount := 0
+	for _, r := range opts.Results {
+		if r.Status == "skipped" && !nonApplicableIds[r.ControlId] {
+			blockingSkippedCount++
+		}
+	}
+
 	coverage := Coverage{
-		Complete:                !opts.PlanOnly && opts.ScanComplete && len(opts.Results) == len(opts.Plan.Controls) && summary.Error == 0,
+		Complete:                !opts.PlanOnly && opts.ScanComplete && len(opts.Results) == len(opts.Plan.Controls) && summary.Error == 0 && blockingSkippedCount == 0,
 		PlannedControls:         len(opts.Plan.Controls),
 		ExecutedControls:        executedControls,
 		OmittedRequiredControls: 0,
@@ -298,6 +331,15 @@ func BuildComplianceReport(opts ReportOptions) *Report {
 	}
 
 	engineVer := "0.1.0"
+	resultsList := opts.Results
+	if resultsList == nil {
+		resultsList = make([]ExecutionResult, 0)
+	}
+
+	adapter := opts.Adapter
+	if adapter == "" {
+		adapter = "PowerShell"
+	}
 
 	return &Report{
 		SchemaVersion:    1,
@@ -309,7 +351,7 @@ func BuildComplianceReport(opts ReportOptions) *Report {
 		Matrix:           matrixList,
 		Resolver:         resolverList,
 		ExecutionPlan:    opts.Plan,
-		ExecutionResults: opts.Results,
+		ExecutionResults: resultsList,
 		Findings:         findings,
 		Diagnostics:      allDiagnostics,
 		Summary:          summary,
@@ -322,7 +364,7 @@ func BuildComplianceReport(opts ReportOptions) *Report {
 		Metadata: Metadata{
 			RunId:                       opts.RunID,
 			SourceMode:                  "Compliance",
-			SourceAdapter:               "PowerShell",
+			SourceAdapter:               adapter,
 			Platform:                    opts.Platform,
 			CatalogSchemaVersion:        1,
 			CatalogSha256:               opts.CatalogSHA256,

@@ -28,7 +28,9 @@ type ComplianceOptions struct {
 	RedactionReplacement   string
 	PlatformQualification   string
 	RunID                   string
+	SourceAdapter           string
 	CandidateResolver       matrix.CandidateToolResolver
+	OnPlanReady             func(planReport *report.Report)
 	OnControlStart          func(ctrl *PlannedControl)
 	OnControlDone           func(ctrl *PlannedControl, res *report.ExecutionResult)
 }
@@ -100,6 +102,28 @@ func RunCompliance(ctx context.Context, opts ComplianceOptions) (*report.Report,
 		return nil, fmt.Errorf("construction du plan de conformité échouée: %w", err)
 	}
 
+	if opts.OnPlanReady != nil {
+		sourceAdapter := opts.SourceAdapter
+		if sourceAdapter == "" {
+			sourceAdapter = "VSCode"
+		}
+		planRep := report.BuildComplianceReport(report.ReportOptions{
+			Repository:    absRepo,
+			RunID:         opts.RunID,
+			Platform:      plat.ID,
+			DiscoveryData: discResult,
+			MatrixData:    matrixEntries,
+			ResolverData:  resolutionEntries,
+			Plan:          *execPlan,
+			Results:       nil,
+			ScanComplete:  discResult.ScanComplete,
+			PlanOnly:      true,
+			Adapter:       sourceAdapter,
+		})
+		planRep.Metadata.SourceAdapter = sourceAdapter
+		opts.OnPlanReady(planRep)
+	}
+
 	// 5. Redactor
 	redactor, err := NewRedactor(opts.RedactionPatterns, opts.RedactionReplacement)
 	if err != nil {
@@ -162,6 +186,7 @@ func RunCompliance(ctx context.Context, opts ComplianceOptions) (*report.Report,
 		RedactionApplied:            redactor != nil && len(redactor.Patterns) > 0,
 		PlanOnly:                    opts.PlanOnly,
 		ScanComplete:                discResult.ScanComplete,
+		Adapter:                     opts.SourceAdapter,
 	})
 
 	return rep, nil

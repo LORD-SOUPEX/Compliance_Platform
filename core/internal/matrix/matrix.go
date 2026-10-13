@@ -9,10 +9,13 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	"compliance/internal/catalog"
 	"compliance/internal/discovery"
+	"compliance/internal/osutil"
 )
 
 var reVersion = regexp.MustCompile(`\b\d+\.\d+(?:\.\d+)?(?:[a-zA-Z0-9.+-]*)`)
@@ -136,6 +139,7 @@ type CandidateToolResolver interface {
 // DefaultCandidateResolver resolves candidate tools across local bin, venv, and PATH.
 type DefaultCandidateResolver struct {
 	PlatformRoot string
+	cache        sync.Map
 }
 
 func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platform PlatformInfo, repoRoot string) CandidateToolState {
@@ -165,18 +169,32 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 
 	probeCommand := func(exePath string, isVenv bool) CandidateToolState {
 		norm := filepath.ToSlash(exePath)
+		cacheKey := norm + ":" + command
+		if val, ok := r.cache.Load(cacheKey); ok {
+			st := val.(CandidateToolState)
+			st.Name = name
+			st.Command = command
+			return st
+		}
+
 		probeArgs := []string{"--version"}
 		if command == "terraform" || command == "tofu" || command == "opentofu" {
 			probeArgs = []string{"version"}
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		cmd := exec.CommandContext(ctx, exePath, probeArgs...)
+		var cmd *exec.Cmd
+		if strings.EqualFold(filepath.Ext(exePath), ".cmd") || strings.EqualFold(filepath.Ext(exePath), ".bat") {
+			cmd = exec.CommandContext(ctx, "cmd.exe", append([]string{"/c", exePath}, probeArgs...)...)
+		} else {
+			cmd = exec.CommandContext(ctx, exePath, probeArgs...)
+		}
+		osutil.SetHideWindow(cmd)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			return CandidateToolState{
+			st := CandidateToolState{
 				Name:           name,
 				Command:        command,
 				Status:         "runtime_error",
@@ -184,8 +202,10 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 				Version:        nil,
 				RuntimeManaged: isVenv,
 				Platform:       platform.ID,
-				Reason:         "Qualification d'execution impossible: La commande de qualification a retourné le code 1.",
+				Reason:         fmt.Sprintf("Qualification d'execution impossible: %v (sortie: %s)", err, string(out)),
 			}
+			r.cache.Store(cacheKey, st)
+			return st
 		}
 
 		verMatch := reVersion.FindString(string(out))
@@ -203,7 +223,7 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 			}
 		}
 
-		return CandidateToolState{
+		st := CandidateToolState{
 			Name:           name,
 			Command:        command,
 			Status:         "available",
@@ -213,6 +233,8 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 			Platform:       platform.ID,
 			Reason:         reason,
 		}
+		r.cache.Store(cacheKey, st)
+		return st
 	}
 
 	// 2. Check .tools/bin/<command>[.exe]
@@ -221,8 +243,38 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 		return probeCommand(toolBin, false)
 	}
 
-	// 3. Check .venv/Scripts/<command>[.exe / .cmd]
+	// 3. Check standalone python runtime (.tools/python/Scripts or .tools/python/bin)
+	pyScriptsDir := filepath.Join(root, ".tools", "python", "Scripts")
+	if platform.OS != "windows" {
+		pyScriptsDir = filepath.Join(root, ".tools", "python", "bin")
+	}
+	pyCandidates := []string{
+		filepath.Join(pyScriptsDir, command+".exe"),
+		filepath.Join(pyScriptsDir, command+".cmd"),
+		filepath.Join(pyScriptsDir, command),
+	}
+	for _, cand := range pyCandidates {
+		if _, err := os.Stat(cand); err == nil {
+			return probeCommand(cand, true)
+		}
+	}
+
+	// 4. Check .tools/runtime/<platform>/<command>/...
+	runtimeDir := filepath.Join(root, ".tools", "runtime", platform.ID, command)
+	if entries, err := os.ReadDir(runtimeDir); err == nil {
+		for _, e := range entries {
+			cand := filepath.Join(runtimeDir, e.Name(), command+ext)
+			if _, err := os.Stat(cand); err == nil {
+				return probeCommand(cand, true)
+			}
+		}
+	}
+
+	// 5. Legacy fallback: .venv/Scripts/<command>[.exe / .cmd]
 	venvScripts := filepath.Join(root, ".venv", "Scripts")
+	if platform.OS != "windows" {
+		venvScripts = filepath.Join(root, ".venv", "bin")
+	}
 	candidates := []string{
 		filepath.Join(venvScripts, command+".exe"),
 		filepath.Join(venvScripts, command+".cmd"),
@@ -239,6 +291,19 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 		psModule := filepath.Join(root, ".tools", "powershell-modules", "PSScriptAnalyzer")
 		if _, err := os.Stat(psModule); err == nil {
 			manifest := filepath.Join(psModule, "PSScriptAnalyzer.psd1")
+			if _, err := os.Stat(manifest); os.IsNotExist(err) {
+				// Check versioned subdirectories like 1.25.0
+				entries, _ := os.ReadDir(psModule)
+				for _, e := range entries {
+					if e.IsDir() {
+						subManifest := filepath.Join(psModule, e.Name(), "PSScriptAnalyzer.psd1")
+						if _, err := os.Stat(subManifest); err == nil {
+							manifest = subManifest
+							break
+						}
+					}
+				}
+			}
 			norm := filepath.ToSlash(manifest)
 			return CandidateToolState{
 				Name:           name,

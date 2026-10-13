@@ -16,9 +16,13 @@ import (
 	"compliance/internal/discovery"
 	"compliance/internal/distribution"
 	"compliance/internal/engine"
+	"compliance/internal/osutil"
+	"compliance/internal/selftest"
+	"compliance/internal/server"
+	"os/signal"
 )
 
-const version = "0.1.0-phase0-go"
+const version = "0.5.0-phase5"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -28,6 +32,10 @@ func main() {
 
 	command := os.Args[1]
 	switch command {
+	case "selftest":
+		runSelftest(os.Args[2:])
+	case "daemon":
+		runDaemon(os.Args[2:])
 	case "discovery":
 		runDiscovery(os.Args[2:])
 	case "runtime":
@@ -49,19 +57,75 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, `Compliance Platform - Cœur Multi-OS (Phase 0)
+	fmt.Fprintf(os.Stderr, `Compliance Platform - Cœur Multi-OS
 
 Usage:
   compliance <commande> [arguments]
 
 Sous-commandes disponibles:
+  selftest [options]      Exécute la suite complète de validation locale multi-OS
+  daemon [options]        Démarre le démon local HTTP/SSE sur 127.0.0.1
   discovery <chemin>      Découvre les sources et racines Python d'un répertoire
   runtime sync [options]  Télécharge et vérifie les outils depuis un manifeste statique signé
   run <chemin> [options]  Exécute le pipeline Python (Ruff + Bandit) et produit le rapport v1
 
 Options globales:
-  version                 Affiche la version du binaire
 `)
+}
+
+func runDaemon(args []string) {
+	fs := flag.NewFlagSet("daemon", flag.ExitOnError)
+	listenAddr := fs.String("listen", "127.0.0.1:0", "Adresse d'écoute du démon (boucle locale exclusivement)")
+	stateDir := fs.String("state-dir", "", "Répertoire d'état du démon (défaut: ~/.compliance)")
+	catalogPath := fs.String("catalog", "", "Chemin vers control-catalog.json")
+	platformRoot := fs.String("platform-root", "", "Racine du dépôt Compliance Platform")
+	workspacesStr := fs.String("workspaces", "", "Liste de chemins de workspaces approuvés (séparés par des virgules)")
+	_ = fs.Parse(args)
+
+	var approvedWorkspaces []string
+	if *workspacesStr != "" {
+		for _, w := range strings.Split(*workspacesStr, ",") {
+			if trimmed := strings.TrimSpace(w); trimmed != "" {
+				approvedWorkspaces = append(approvedWorkspaces, trimmed)
+			}
+		}
+	}
+
+	if *platformRoot == "" {
+		cwd, _ := os.Getwd()
+		*platformRoot = cwd
+	}
+	if *catalogPath == "" {
+		*catalogPath = filepath.Join(*platformRoot, ".config", "control-catalog.json")
+	}
+
+	srv, err := server.StartDaemon(server.DaemonConfig{
+		ListenAddr:         *listenAddr,
+		StateDir:           *stateDir,
+		ApprovedWorkspaces: approvedWorkspaces,
+		CatalogPath:        *catalogPath,
+		PlatformRoot:       *platformRoot,
+		Version:            version,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] Échec de démarrage du démon: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("[INFO] Démon compliance démarré sur %s (PID %d)\n", srv.URL(), os.Getpid())
+	fmt.Printf("[INFO] Jeton Bearer généré et protégé avec succès\n")
+
+	// Intercept termination signals
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+	<-sigCh
+
+	fmt.Println("\n[INFO] Arrêt du démon compliance en cours...")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = srv.Close(ctx)
+	fmt.Println("[INFO] Démon arrêté proprement.")
+	os.Exit(0)
 }
 
 func runDiscovery(args []string) {
@@ -257,7 +321,24 @@ func resolveTool(name, override string) ToolInvocation {
 		return ToolInvocation{Executable: cached}
 	}
 
-	// 2. Check repo .venv/Scripts or .venv/bin
+	// 2. Check standalone python runtime .tools/python/Scripts or .tools/python/bin
+	pyCandidate := filepath.Join(".tools", "python", "Scripts", name+".exe")
+	if runtime.GOOS != "windows" {
+		pyCandidate = filepath.Join(".tools", "python", "bin", name)
+	}
+	if _, err := os.Stat(pyCandidate); err == nil {
+		abs, _ := filepath.Abs(pyCandidate)
+		return ToolInvocation{Executable: abs}
+	}
+	if runtime.GOOS == "windows" {
+		pyCmdCandidate := filepath.Join(".tools", "python", "Scripts", name+".cmd")
+		if _, err := os.Stat(pyCmdCandidate); err == nil {
+			abs, _ := filepath.Abs(pyCmdCandidate)
+			return ToolInvocation{Executable: abs}
+		}
+	}
+
+	// 3. Fallback: check repo .venv/Scripts or .venv/bin
 	venvCandidate := filepath.Join(".venv", "Scripts", name+".exe")
 	if runtime.GOOS != "windows" {
 		venvCandidate = filepath.Join(".venv", "bin", name)
@@ -267,6 +348,7 @@ func resolveTool(name, override string) ToolInvocation {
 		// On Windows, test if this venv wrapper can actually run without crashing on pyvenv.cfg
 		if name == "bandit" {
 			testCmd := exec.Command(abs, "--version")
+			osutil.SetHideWindow(testCmd)
 			if testErr := testCmd.Run(); testErr != nil {
 				// Broken venv wrapper (relocated drive). Fallback to python -m bandit
 				return resolveBanditPythonModule()
@@ -344,5 +426,24 @@ func reorderFlags(args []string) []string {
 		}
 	}
 	return append(flags, pos...)
+}
+
+func runSelftest(args []string) {
+	fs := flag.NewFlagSet("selftest", flag.ExitOnError)
+	platformRoot := fs.String("platform-root", "", "Racine du dépôt Compliance Platform")
+	_ = fs.Parse(args)
+
+	if *platformRoot == "" {
+		cwd, _ := os.Getwd()
+		*platformRoot = cwd
+	}
+
+	passed, steps := selftest.Run(*platformRoot)
+	selftest.PrintResults(passed, steps)
+
+	if !passed {
+		os.Exit(1)
+	}
+	os.Exit(0)
 }
 

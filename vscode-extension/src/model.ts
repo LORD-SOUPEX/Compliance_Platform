@@ -60,10 +60,26 @@ export function controlOutputText(runId: string, controlId: string, value: unkno
     return `Session : ${runId}\nControle : ${controlId}\nStatut canonique : ${value.status}\nDuree : ${value.duration_ms} ms\n\nSTDOUT\n${value.stdout}\n\nSTDERR\n${value.stderr}\n\nDIAGNOSTICS\n${JSON.stringify(value.diagnostics, null, 2)}`;
 }
 
+import * as fs from 'node:fs';
+
+export function isSameDirectory(a: string, b: string): boolean {
+    if (path.relative(a, b) === '') { return true; }
+    try {
+        const ra = fs.realpathSync.native ? fs.realpathSync.native(a) : fs.realpathSync(a);
+        const rb = fs.realpathSync.native ? fs.realpathSync.native(b) : fs.realpathSync(b);
+        const rel = path.relative(ra, rb);
+        if (rel === '') { return true; }
+        if (process.platform === 'win32' && rel.toLowerCase() === '') { return true; }
+    } catch {
+        return false;
+    }
+    return false;
+}
+
 export function parsePreparation(text: string, target: string, allowPermissions = false): PreparationReport {
     const report: unknown = JSON.parse(text.replace(/^\uFEFF/, ''));
     if (!isRecord(report) || report.schema_version !== 1 || report.execution_status !== 'planned' || report.verdict !== null ||
-        typeof report.repository !== 'string' || path.relative(target, report.repository) !== '' ||
+        typeof report.repository !== 'string' || !isSameDirectory(target, report.repository) ||
         !Array.isArray(report.execution_results) || report.execution_results.length !== 0 ||
         !isRecord(report.metadata) || report.metadata.source_adapter !== 'VSCode' || typeof report.metadata.run_id !== 'string' ||
         !isRecord(report.discovery) || typeof report.discovery.scan_complete !== 'boolean' ||

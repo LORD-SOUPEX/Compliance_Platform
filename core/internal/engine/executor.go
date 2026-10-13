@@ -70,10 +70,6 @@ func ExecuteCompliancePlan(
 			Diagnostics:      make([]report.Diagnostic, 0),
 		}
 
-		if opts.OnControlStart != nil {
-			opts.OnControlStart(ctrl)
-		}
-
 		// Check cancellation
 		if ctx.Err() != nil {
 			res.Status = "skipped"
@@ -131,13 +127,20 @@ func ExecuteCompliancePlan(
 			if code == "" {
 				code = ctrl.Applicability
 			}
+			msg := ctrl.Reason
+			if msg == "" {
+				msg = "Contrôle non exécuté selon le motif structuré du backend."
+			}
 			res.Diagnostics = append(res.Diagnostics, report.Diagnostic{
 				Code:     code,
-				Message:  ctrl.Reason,
+				Message:  msg,
 				Critical: res.Critical,
 			})
 		} else {
 			// Applicable: execute
+			if opts.OnControlStart != nil {
+				opts.OnControlStart(ctrl)
+			}
 			execRoot := filepath.Clean(filepath.Join(plan.Repository, filepath.FromSlash(ctrl.Root)))
 			prefix := filepath.Clean(plan.Repository) + string(filepath.Separator)
 			if execRoot != filepath.Clean(plan.Repository) && !strings.HasPrefix(strings.ToLower(execRoot), strings.ToLower(prefix)) {

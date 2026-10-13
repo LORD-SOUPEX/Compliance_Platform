@@ -128,6 +128,10 @@ func runBoundedOS(ctx context.Context, spec CommandSpec) (*ProcessResult, error)
 	if len(spec.Env) > 0 {
 		cmd.Env = spec.Env
 	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
+		HideWindow:    true,
+	}
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -208,6 +212,15 @@ func runBoundedOS(ctx context.Context, spec CommandSpec) (*ProcessResult, error)
 	result.PeakMemoryBytes = m.Alloc
 
 	return result, nil
+}
+
+// SetHideWindow configures the process attributes to prevent console window creation on Windows.
+func SetHideWindow(cmd *exec.Cmd) {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.CreationFlags |= 0x08000000 // CREATE_NO_WINDOW
+	cmd.SysProcAttr.HideWindow = true
 }
 
 func errorsIs(err, target error) bool {

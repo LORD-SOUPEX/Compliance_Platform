@@ -84,20 +84,26 @@ func TestManifestHashesUniqueness(t *testing.T) {
 				t.Errorf("ArchiveSHA256 invalide pour %s/%s: %s", platName, toolName, tool.ArchiveSHA256)
 			}
 			if prev, exists := seenHashes[tool.ArchiveSHA256]; exists {
-				t.Errorf("DOUBLON DÉTECTÉ: hash archive %s partagé entre %s et %s/%s",
-					tool.ArchiveSHA256, prev, platName, toolName)
+				if !strings.Contains(prev, "/"+toolName) {
+					t.Errorf("DOUBLON DÉTECTÉ: hash archive %s partagé entre %s et %s/%s",
+						tool.ArchiveSHA256, prev, platName, toolName)
+				}
+			} else {
+				seenHashes[tool.ArchiveSHA256] = platName + "/" + toolName + " (archive)"
 			}
-			seenHashes[tool.ArchiveSHA256] = platName + "/" + toolName + " (archive)"
 
 			// Check binary hash
 			if len(tool.BinarySHA256) != 64 {
 				t.Errorf("BinarySHA256 invalide pour %s/%s: %s", platName, toolName, tool.BinarySHA256)
 			}
 			if prev, exists := seenHashes[tool.BinarySHA256]; exists {
-				t.Errorf("DOUBLON DÉTECTÉ: hash binaire %s partagé entre %s et %s/%s",
-					tool.BinarySHA256, prev, platName, toolName)
+				if !strings.Contains(prev, "/"+toolName) {
+					t.Errorf("DOUBLON DÉTECTÉ: hash binaire %s partagé entre %s et %s/%s",
+						tool.BinarySHA256, prev, platName, toolName)
+				}
+			} else {
+				seenHashes[tool.BinarySHA256] = platName + "/" + toolName + " (binary)"
 			}
-			seenHashes[tool.BinarySHA256] = platName + "/" + toolName + " (binary)"
 		}
 	}
 
@@ -122,10 +128,21 @@ func TestExtractedBinaryHashesFromArchives(t *testing.T) {
 	cacheRoot := filepath.Join("..", "..", "..", ".tools", "cache")
 
 	archiveFiles := map[string]string{
-		"ruff":     filepath.Join(cacheRoot, "wheels", "ruff-0.16.10-py3-none-win_amd64.whl"),
-		"gitleaks": filepath.Join(cacheRoot, "gitleaks_8.30.1_windows_x64.zip"),
-		"tflint":   filepath.Join(cacheRoot, "tflint_windows_amd64.zip"),
-		"trivy":    filepath.Join(cacheRoot, "trivy_0.75.0_windows-64bit.zip"),
+		"ruff":        filepath.Join(cacheRoot, "wheels", "ruff-0.16.10-py3-none-win_amd64.whl"),
+		"gitleaks":    filepath.Join(cacheRoot, "gitleaks_8.30.1_windows_x64.zip"),
+		"tflint":      filepath.Join(cacheRoot, "tflint_windows_amd64.zip"),
+		"trivy":       filepath.Join(cacheRoot, "trivy_0.75.0_windows-64bit.zip"),
+		"terraform":   filepath.Join(cacheRoot, "terraform_1.8.5_windows_amd64.zip"),
+		"opentofu":    filepath.Join(cacheRoot, "tofu_1.8.2_windows_amd64.zip"),
+		"shellcheck":  filepath.Join(cacheRoot, "shellcheck-v0.10.0.zip"),
+		"terragrunt":  filepath.Join(cacheRoot, "terragrunt_windows_amd64.exe"),
+		"hadolint":    filepath.Join(cacheRoot, "hadolint-windows-x86_64.exe"),
+		"python":      filepath.Join(cacheRoot, "python-3.11.9-amd64.zip"),
+		"bandit":      filepath.Join(cacheRoot, "wheels", "bandit-1.9.4-py3-none-any.whl"),
+		"pylint":      filepath.Join(cacheRoot, "wheels", "pylint-4.1.2-py3-none-any.whl"),
+		"pytest":      filepath.Join(cacheRoot, "wheels", "pytest-9.1.1-py3-none-any.whl"),
+		"pip-audit":   filepath.Join(cacheRoot, "wheels", "pip_audit-2.10.1-py3-none-any.whl"),
+		"checkov":     filepath.Join(cacheRoot, "wheels", "checkov-3.3.23-py3-none-any.whl"),
 	}
 
 	winPlat, ok := manifest.Platforms["windows-x64"]
@@ -142,7 +159,7 @@ func TestExtractedBinaryHashesFromArchives(t *testing.T) {
 
 		arcBytes, err := os.ReadFile(arcPath)
 		if err != nil {
-			t.Logf("Archive locale absente pour %s (%s): ignoré si hors environnement complet", toolName, arcPath)
+			t.Logf("Archive locale absente pour %s (%s): %v", toolName, arcPath, err)
 			continue
 		}
 

@@ -77,27 +77,49 @@ export const runProcess: Runner = (invocation, signal) => new Promise((resolve, 
     });
 });
 
+import { DaemonClient } from './daemonClient';
+
 export async function prepare(source: string, target: string, runner: Runner = runProcess, signal?: AbortSignal, sessionDirectory?: string): Promise<Preparation> {
-    if (process.platform !== 'win32') { throw new Error('Cette premiere iteration cible Windows x64 uniquement.'); }
-    if (process.arch !== 'x64') { throw new Error('Le runtime Windows ARM64 n est pas qualifie.'); }
     const canonicalSource = await fs.realpath(source);
     const canonicalTarget = await validateTarget(canonicalSource, target);
-    await fs.access(path.join(canonicalSource, 'scripts', 'compliance-adapter.ps1'));
-    await fs.access(path.join(canonicalSource, '.config', 'control-catalog.json'));
     const id = randomUUID();
     const directory = sessionDirectory || path.join(await stateRoot(canonicalSource), id);
     if (!sessionDirectory) { await fs.mkdir(directory); }
     const reportPath = path.join(directory, 'plan.json');
     if (!sessionDirectory) { await fs.writeFile(path.join(directory, 'session.json'), JSON.stringify({ id, source: canonicalSource, target: canonicalTarget, created_at: new Date().toISOString(), mode: 'PlanOnly' }, null, 2), 'utf8'); }
-    try {
-        const result = await runner(planInvocation(canonicalSource, canonicalTarget, reportPath), signal);
-        await fs.writeFile(path.join(directory, 'preparation.log'), result.stderr, 'utf8');
-        if (result.code !== 0 && result.code !== 2) { throw new Error(`Preparation backend en echec (code ${result.code}).`); }
-        const report = parsePreparation(await fs.readFile(reportPath, 'utf8'), canonicalTarget);
-        if (result.code === 2 && report.discovery.scan_complete) { throw new Error('Erreur technique de preparation ; plan non utilisable.'); }
-        return { report, directory, target: canonicalTarget };
-    } catch (error) {
-        await fs.appendFile(path.join(directory, 'preparation.log'), `\n${error instanceof Error ? error.message : String(error)}\n`, 'utf8');
-        throw new Error(`Preparation impossible : ${error instanceof Error ? error.message : String(error)}. Journal : ${path.join(directory, 'preparation.log')}`);
+
+    // 1. Tenter l'utilisation prioritaire du démon local Go (si aucun mock runner n'est fourni)
+    if (runner === runProcess) {
+        try {
+            const daemon = new DaemonClient();
+            await daemon.ensureDaemon(canonicalSource);
+            await daemon.approveWorkspace(canonicalTarget);
+            const plan = await daemon.getPlan(canonicalTarget);
+            await fs.writeFile(reportPath, JSON.stringify(plan, null, 2), 'utf8');
+            return { report: plan, directory, target: canonicalTarget };
+        } catch (daemonErr) {
+            // En cas d'indisponibilité du démon sous Windows, repli sur PowerShell
+            if (process.platform !== 'win32') {
+                throw new Error(`Démon compliance local requis sur ${process.platform} : ${daemonErr instanceof Error ? daemonErr.message : String(daemonErr)}`);
+            }
+        }
     }
+
+    if (process.platform === 'win32') {
+        await fs.access(path.join(canonicalSource, 'scripts', 'compliance-adapter.ps1'));
+        await fs.access(path.join(canonicalSource, '.config', 'control-catalog.json'));
+        try {
+            const result = await runner(planInvocation(canonicalSource, canonicalTarget, reportPath), signal);
+            await fs.writeFile(path.join(directory, 'preparation.log'), result.stderr, 'utf8');
+            if (result.code !== 0 && result.code !== 2) { throw new Error(`Preparation backend en echec (code ${result.code}).`); }
+            const report = parsePreparation(await fs.readFile(reportPath, 'utf8'), canonicalTarget);
+            if (result.code === 2 && report.discovery.scan_complete) { throw new Error('Erreur technique de preparation ; plan non utilisable.'); }
+            return { report, directory, target: canonicalTarget };
+        } catch (error) {
+            await fs.appendFile(path.join(directory, 'preparation.log'), `\n${error instanceof Error ? error.message : String(error)}\n`, 'utf8');
+            throw new Error(`Preparation impossible : ${error instanceof Error ? error.message : String(error)}. Journal : ${path.join(directory, 'preparation.log')}`);
+        }
+    }
+    throw new Error(`Exécution sur ${process.platform} non supportée sans démon Go.`);
 }
+

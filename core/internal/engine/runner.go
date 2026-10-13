@@ -213,7 +213,11 @@ func BuildInvocation(
 		arguments = []string{"-d", root, "--framework", framework, "--quiet"}
 		if strings.EqualFold(filepath.Ext(executable), ".cmd") {
 			arguments = append([]string{"-x", executable}, arguments...)
-			executable = filepath.Join(platformRoot, ".venv", "Scripts", "python.exe")
+			pyExe := filepath.Join(platformRoot, ".tools", "python", "python.exe")
+			if _, err := os.Stat(pyExe); err != nil {
+				pyExe = filepath.Join(platformRoot, ".venv", "Scripts", "python.exe")
+			}
+			executable = pyExe
 		}
 
 	case "trivy":

@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([ValidateSet('Install', 'Build', 'Test', 'TestHost')][string]$Action = 'Test')
+param([ValidateSet('Install', 'Build', 'Test', 'TestHost', 'Package')][string]$Action = 'Test')
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -26,7 +26,7 @@ if (-not (Test-Path -LiteralPath $compiler -PathType Leaf)) { throw 'Outils de l
 & $node.FullName $compiler -p (Join-Path $extension 'tsconfig.json')
 if ($LASTEXITCODE -ne 0) { throw 'Compilation de l extension en echec.' }
 if ($Action -eq 'Test') {
-    & $node.FullName --test (Join-Path $extension '.extension-build/tests/*.test.js')
+    & $node.FullName --test --test-concurrency=1 (Join-Path $extension '.extension-build/tests/*.test.js')
     if ($LASTEXITCODE -ne 0) { throw 'Tests de l extension en echec.' }
 }
 if ($Action -eq 'TestHost') {
@@ -44,4 +44,13 @@ if ($Action -eq 'TestHost') {
         $env:NODE_PATH = $previousNodePath
         $env:COMPLIANCE_VSCODE_EXECUTABLE = $previousExecutable
     }
+}
+if ($Action -eq 'Package') {
+    $python = Join-Path $root '.tools/python/python.exe'
+    if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+        $python = 'python'
+    }
+    $packager = Join-Path $root 'scripts/package_vsix.py'
+    & $python $packager
+    if ($LASTEXITCODE -ne 0) { throw 'Packaging VSIX en echec.' }
 }

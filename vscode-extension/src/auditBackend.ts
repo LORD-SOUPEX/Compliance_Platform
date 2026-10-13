@@ -6,11 +6,17 @@ import { StringDecoder } from 'node:string_decoder';
 import { planInvocation, prepare, Preparation, stateRoot, validateTarget } from './backend';
 import { containsPath, parsePreparation } from './model';
 import { AuditState } from './sessionController';
+import { DaemonClient } from './daemonClient';
 
 export interface Permissions { network: boolean; code_execution: boolean }
 export type AskPermissions = (preparation: Preparation) => Promise<Permissions>;
 
 export async function validateSource(source: string): Promise<void> {
+    if (process.platform !== 'win32') {
+        // Sur Linux et macOS, la validation s'appuie sur le catalogue et les binaires multi-OS
+        await fs.access(path.join(source, '.config/control-catalog.json'));
+        return;
+    }
     const index = JSON.parse((await fs.readFile(path.join(source, '.tools/runtime/index.json'), 'utf8')).replace(/^\uFEFF/, ''));
     const runtime = index.platforms?.['windows-x64'];
     if (index.schema_version !== 1 || runtime?.status !== 'qualified') { throw new Error('Runtime de la Pipeline source invalide.'); }
@@ -21,7 +27,10 @@ export async function validateSource(source: string): Promise<void> {
         if (typeof expected !== 'string' || !/^[a-f0-9]{64}$/i.test(expected) ||
             createHash('sha256').update(await fs.readFile(file)).digest('hex') !== expected.toLowerCase()) { throw new Error('Integrite du runtime invalide ; Doctor requis.'); }
     };
-    await hashMatches(runtime.python.executable, runtime.python.executable_sha256);
+    const pythonExecutable = (await fs.stat(runtime.python.executable).catch(() => null)) ?
+        runtime.python.executable :
+        path.join(source, '.tools/python', path.basename(runtime.python.executable));
+    await hashMatches(pythonExecutable, runtime.python.executable_sha256);
     await hashMatches(path.join(source, '.venv/Scripts/python.exe'), runtime.python.environment_executable_sha256);
     if (!Array.isArray(runtime.tools) || !Array.isArray(runtime.powershell_modules)) { throw new Error('Inventaire runtime incomplet.'); }
     for (const tool of runtime.tools.filter((entry: { active: boolean }) => entry.active)) {
@@ -52,6 +61,58 @@ async function atomicJson(file: string, value: unknown): Promise<void> {
 }
 
 async function stream(source: string, target: string, state: AuditState, directory: string, permissions: Permissions, hash: string, redaction: string | undefined, changed: () => void, signal: AbortSignal): Promise<void> {
+    // 1. Tenter le pilotage via le démon HTTP/SSE local
+    try {
+        const daemon = new DaemonClient();
+        await daemon.ensureDaemon(source);
+        await daemon.approveWorkspace(target);
+
+        const redactionPatterns = redaction ? [redaction] : [];
+        const run = await daemon.createRun(target, {
+            runId: state.runId,
+            outputDir: directory,
+            planOnly: false,
+            allowNetwork: permissions.network,
+            allowCodeExecution: permissions.code_execution,
+            redactionPatterns: redactionPatterns
+        });
+
+        const cancelHandler = () => {
+            void daemon.cancelRun(run.run_id).catch(() => {});
+        };
+        signal.addEventListener('abort', cancelHandler, { once: true });
+
+        try {
+            await daemon.streamEvents(run.run_id, (ev) => {
+                try {
+                    state.receive(ev);
+                    changed();
+                } catch {
+                    // Ignorer les erreurs d'événement hors séquence en transit
+                }
+            }, signal);
+        } finally {
+            signal.removeEventListener('abort', cancelHandler);
+        }
+
+        // Récupérer et persister le rapport final
+        try {
+            const finalReport = await daemon.getReport(run.run_id);
+            await fs.writeFile(path.join(directory, 'compliance-report.json'), JSON.stringify(finalReport, null, 2), 'utf8');
+            if (!state.reportPath) {
+                state.reportPath = path.join(directory, 'compliance-report.json');
+            }
+        } catch {
+            // Rapport non disponible si annulé ou échoué
+        }
+        return;
+    } catch (daemonErr) {
+        if (process.platform !== 'win32') {
+            throw new Error(`Démon compliance local requis sur ${process.platform} : ${daemonErr instanceof Error ? daemonErr.message : String(daemonErr)}`);
+        }
+        // Repli PowerShell sous Windows pendant la transition
+    }
+
     const invocation = planInvocation(source, target, path.join(directory, 'compliance-report.json'));
     invocation.arguments.pop();
     invocation.arguments.push('-ProgressRunId', state.runId, '-ExpectedCatalogSha256', hash);
@@ -119,6 +180,15 @@ export async function audit(source: string, state: AuditState, ask: AskPermissio
         metadata.permissions = permissions; metadata.catalog_sha256 = fresh.report.metadata.catalog_sha256 || '';
         await atomicJson(path.join(directory, 'session.json'), metadata);
         await stream(source, target, state, directory, permissions, metadata.catalog_sha256, redaction, changed, signal);
+        if (!state.reportPath) {
+            const candidate = path.join(directory, 'compliance-report.json');
+            try {
+                await fs.access(candidate);
+                state.reportPath = candidate;
+            } catch {
+                // Fichier absent
+            }
+        }
         if (state.reportPath) {
             const reportPath = await sessionArtifact(directory, state.reportPath);
             const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
@@ -134,6 +204,7 @@ export async function audit(source: string, state: AuditState, ask: AskPermissio
     } finally {
         clearInterval(heartbeat);
         if (!state.terminal) { state.fail('Session sans evenement terminal.'); metadata.state = 'incomplete'; }
+        if (state.status === 'Skipped') { metadata.state = 'cancelled'; }
         if (metadata.state === 'incomplete' || metadata.state === 'cancelled') { metadata.ended_at = new Date().toISOString(); await atomicJson(path.join(directory, 'session.json'), metadata); }
         changed();
     }

@@ -213,6 +213,9 @@ func BuildCompliancePlan(
 					if applicability == "capability_unavailable" {
 						reason = strings.Join(capability.Reasons, "; ")
 					}
+					if applicability == "technology_absent" {
+						reason = "Technologie absente selon Discovery."
+					}
 
 					reasonCode := applicability
 					if hasAlternative && len(selected) == 0 && applicability == "not_applicable" {

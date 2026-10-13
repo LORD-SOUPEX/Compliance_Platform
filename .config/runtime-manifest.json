@@ -12,7 +12,9 @@
           "archive_sha256": "97f2015c92aa97105b0eab19eb5d224884399281cfc5da86a92db4ab5e7fb2ca",
           "binary_in_archive": "ruff-0.16.10.data/scripts/ruff.exe",
           "binary_sha256": "7663ebf1a11dfdad737f95a0952d9e893eb88bf0ab6a24e3c4e48d4c8b8156eb",
-          "version_args": ["--version"]
+          "version_args": [
+            "--version"
+          ]
         },
         "gitleaks": {
           "name": "gitleaks",
@@ -21,7 +23,9 @@
           "archive_sha256": "d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e",
           "binary_in_archive": "gitleaks.exe",
           "binary_sha256": "17157e2ee8b76fc8b1d8bee607a250e34b8a8023c8bc81822d4b5ee4d78fcb7c",
-          "version_args": ["version"]
+          "version_args": [
+            "version"
+          ]
         },
         "tflint": {
           "name": "tflint",
@@ -30,7 +34,9 @@
           "archive_sha256": "fb42fb859d844b156a8ea9d3363078c4d8b85ca78782e60876b08c9b8e59f303",
           "binary_in_archive": "tflint.exe",
           "binary_sha256": "cd21f5cd4e29cb16e0e4e65c8cae11053d6f4461f2cf6a8b9a62d272d6a43a45",
-          "version_args": ["--version"]
+          "version_args": [
+            "--version"
+          ]
         },
         "trivy": {
           "name": "trivy",
@@ -39,13 +45,302 @@
           "archive_sha256": "4e43bd71a30f51aee39525f60f2b47043af77eb8df8fe082aae4372b69c6660f",
           "binary_in_archive": "trivy.exe",
           "binary_sha256": "3b4fcf6fec53c4c73c325cfd518c7264100695b19e6c59c6a777e4a67dc9f0e6",
-          "version_args": ["--version"]
+          "version_args": [
+            "--version"
+          ]
+        },
+        "terraform": {
+          "name": "terraform",
+          "version": "1.8.5",
+          "archive_url": "https://releases.hashicorp.com/terraform/1.8.5/terraform_1.8.5_windows_amd64.zip",
+          "archive_sha256": "17f93df5a4021a415f3fd50d2b55c0d093b42c64ea9957ceda55be3aaa91b0e5",
+          "binary_in_archive": "terraform.exe",
+          "binary_sha256": "e8d09543b436e84db70aa12ce42f1af1729b3b0489b424d29933a207034be2b1",
+          "version_args": [
+            "version"
+          ]
+        },
+        "opentofu": {
+          "name": "opentofu",
+          "version": "1.8.2",
+          "archive_url": "https://github.com/opentofu/opentofu/releases/download/v1.8.2/tofu_1.8.2_windows_amd64.zip",
+          "archive_sha256": "50af268bfdc9df41e895b8820f98ad5fe3f34a44ded1653fa16109ea67faa55e",
+          "binary_in_archive": "tofu.exe",
+          "binary_sha256": "cee2710f856076260855600f051cf7ae5387ffa3792c77c9b95757c3c08888fb",
+          "version_args": [
+            "version"
+          ]
+        },
+        "hadolint": {
+          "name": "hadolint",
+          "version": "2.15.1",
+          "archive_url": "https://github.com/hadolint/hadolint/releases/download/v2.15.1/hadolint-windows-x86_64.exe",
+          "archive_sha256": "01d927294962b5387f9ead4f18679158452be4f17c765ad0bdffe5264b9c7b0a",
+          "binary_in_archive": "hadolint-windows-x86_64.exe",
+          "binary_sha256": "01d927294962b5387f9ead4f18679158452be4f17c765ad0bdffe5264b9c7b0a",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "terragrunt": {
+          "name": "terragrunt",
+          "version": "1.1.6",
+          "archive_url": "https://github.com/gruntwork-io/terragrunt/releases/download/v1.1.6/terragrunt_windows_amd64.exe",
+          "archive_sha256": "609c60fbc334867cad90146cd0297ea80c19d711a81ae4690570082195f66afe",
+          "binary_in_archive": "terragrunt_windows_amd64.exe",
+          "binary_sha256": "609c60fbc334867cad90146cd0297ea80c19d711a81ae4690570082195f66afe",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "shellcheck": {
+          "name": "shellcheck",
+          "version": "0.10.0",
+          "archive_url": "https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.zip",
+          "archive_sha256": "eb6cd53a54ea97a56540e9d296ce7e2fa68715aa507ff23574646c1e12b2e143",
+          "binary_in_archive": "shellcheck.exe",
+          "binary_sha256": "4dd6fb1debca8ac71a24f932abcbed3e55d3078af71ac7c6dad98633020b7a97",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "python": {
+          "name": "python",
+          "version": "3.11.9",
+          "archive_url": "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.zip",
+          "archive_sha256": "4ba90a4ab8990891033d37ff04d2047fdae8948d0d2729a68d3a6a17c585b681",
+          "binary_in_archive": "python.exe",
+          "binary_sha256": "5f7b89a612c9b8af1d6456cdfcd1dbe5ca630849e79aebced9bee9a6694952ec",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "bandit": {
+          "name": "bandit",
+          "version": "1.9.4",
+          "archive_url": "https://files.pythonhosted.org/packages/bandit-1.9.4-py3-none-any.whl",
+          "archive_sha256": "f89ffa663767f5a0585ea075f01020207e966a9c0f2b9ef56a57c7963a3f6f8e",
+          "binary_in_archive": "bandit/__main__.py",
+          "binary_sha256": "3ed9ca3c4e64f55efd02b3ec704a3313daeec1420cb87958bf7ca208c279501b",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "pylint": {
+          "name": "pylint",
+          "version": "4.1.2",
+          "archive_url": "https://files.pythonhosted.org/packages/pylint-4.1.2-py3-none-any.whl",
+          "archive_sha256": "e34c8636edc7d60a2eaadca4ad6c18a49e202361987a26e81b2a17fa92be28e1",
+          "binary_in_archive": "pylint/__main__.py",
+          "binary_sha256": "75dfc81f55f36abbc59d825e63642a858a4d01c3d21d7ea76c0e29f0925dc30a",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "pytest": {
+          "name": "pytest",
+          "version": "9.1.1",
+          "archive_url": "https://files.pythonhosted.org/packages/pytest-9.1.1-py3-none-any.whl",
+          "archive_sha256": "37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c",
+          "binary_in_archive": "pytest/__main__.py",
+          "binary_sha256": "37f8b6a3df1aef71336bce85e366db968ede153dd72ad4e60bebff79e279dc40",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "pip-audit": {
+          "name": "pip-audit",
+          "version": "2.10.1",
+          "archive_url": "https://files.pythonhosted.org/packages/pip_audit-2.10.1-py3-none-any.whl",
+          "archive_sha256": "99ef3f600a317c1945f1e89e227ef26e1c2d618429b8bd3fa6f4f7c440c4611a",
+          "binary_in_archive": "pip_audit/__main__.py",
+          "binary_sha256": "395494f87564e65f7b64b583e61d304c7b319dd543948e615719d94119854e74",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "checkov": {
+          "name": "checkov",
+          "version": "3.3.23",
+          "archive_url": "https://files.pythonhosted.org/packages/checkov-3.3.23-py3-none-any.whl",
+          "archive_sha256": "cfef3446f20ea8b05d016df0b5e254b5dd82a8d743504ac8c423d0db9e75aa33",
+          "binary_in_archive": "cdk_integration_tests/__init__.py",
+          "binary_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "version_args": [
+            "--version"
+          ]
         }
       }
     },
     "linux-x64": {
       "status": "targeted",
-      "tools": {}
+      "tools": {
+        "ruff": {
+          "name": "ruff",
+          "version": "0.16.10",
+          "archive_url": "https://files.pythonhosted.org/packages/e4/03/17234145f302a645a123e8c3bb2411ecf4669fbc350de3b0d803230a1729/ruff-0.16.10-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+          "archive_sha256": "f33f43a864a8483eebd160e713336c8bab02c934feaff0a33cf5ccb41546d09a",
+          "binary_in_archive": "ruff-0.16.10.data/scripts/ruff",
+          "binary_sha256": "14704de5ea0d07038512de127bd52d6a169fb70bd70ddfa25bf39e21fed6b2b6",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "gitleaks": {
+          "name": "gitleaks",
+          "version": "8.30.1",
+          "archive_url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz",
+          "archive_sha256": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
+          "binary_in_archive": "gitleaks",
+          "binary_sha256": "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509",
+          "version_args": [
+            "version"
+          ]
+        },
+        "tflint": {
+          "name": "tflint",
+          "version": "0.64.0",
+          "archive_url": "https://github.com/terraform-linters/tflint/releases/download/v0.64.0/tflint_linux_amd64.zip",
+          "archive_sha256": "cca9d13e2e1d7a2c627af60ff899a3c9b74212899416aeb96ec764d2ef954537",
+          "binary_in_archive": "tflint",
+          "binary_sha256": "ebfaf169df4a7232dcf38063c5c302f7fd171fec5075fcbaec2a1ed8c5244592",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "trivy": {
+          "name": "trivy",
+          "version": "0.75.0",
+          "archive_url": "https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_Linux-64bit.tar.gz",
+          "archive_sha256": "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f",
+          "binary_in_archive": "trivy",
+          "binary_sha256": "93f9da8e4ba5e0c1c76d8234ed2494cf9afb0a96fd21953e424bb795f3299b8e",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "terraform": {
+          "name": "terraform",
+          "version": "1.8.5",
+          "archive_url": "https://releases.hashicorp.com/terraform/1.8.5/terraform_1.8.5_linux_amd64.zip",
+          "archive_sha256": "bb1ee3e8314da76658002e2e584f2d8854b6def50b7f124e27b957a42ddacfea",
+          "binary_in_archive": "terraform",
+          "binary_sha256": "026da7f222d6c7506e882173cb48611d50638dcbe98e87639e047797bee69817",
+          "version_args": [
+            "version"
+          ]
+        },
+        "opentofu": {
+          "name": "opentofu",
+          "version": "1.8.2",
+          "archive_url": "https://github.com/opentofu/opentofu/releases/download/v1.8.2/tofu_1.8.2_linux_amd64.tar.gz",
+          "archive_sha256": "9f43888571cbe9cdfe03e81c6cbb93b4aacc014db19373a4e7608aaa7df111d1",
+          "binary_in_archive": "tofu",
+          "binary_sha256": "fa9a0c6248eb6a8fde99eb40a2a157568f5e1b8de9e8a56e91f2ce18e0d6e221",
+          "version_args": [
+            "version"
+          ]
+        },
+        "hadolint": {
+          "name": "hadolint",
+          "version": "2.15.1",
+          "archive_url": "https://github.com/hadolint/hadolint/releases/download/v2.15.1/hadolint-linux-x86_64",
+          "archive_sha256": "c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507",
+          "binary_in_archive": "hadolint-linux-x86_64",
+          "binary_sha256": "c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "terragrunt": {
+          "name": "terragrunt",
+          "version": "1.1.6",
+          "archive_url": "https://github.com/gruntwork-io/terragrunt/releases/download/v1.1.6/terragrunt_linux_amd64",
+          "archive_sha256": "d75a80bb264758ba00dabcb17f4b507fcdab4ca90d9e41f96750df036bf69b04",
+          "binary_in_archive": "terragrunt_linux_amd64",
+          "binary_sha256": "d75a80bb264758ba00dabcb17f4b507fcdab4ca90d9e41f96750df036bf69b04",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "shellcheck": {
+          "name": "shellcheck",
+          "version": "0.10.0",
+          "archive_url": "https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz",
+          "archive_sha256": "6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87",
+          "binary_in_archive": "shellcheck-v0.10.0/shellcheck",
+          "binary_sha256": "f35ae15a4677945428bdfe61ccc297490d89dd1e544cc06317102637638c6deb",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "python": {
+          "name": "python",
+          "version": "3.11.9",
+          "archive_url": "https://github.com/astral-sh/python-build-standalone/releases/download/20240415/cpython-3.11.9%2B20240415-x86_64-unknown-linux-gnu-install_only.tar.gz",
+          "archive_sha256": "78b1c16a9fd032997ba92a60f46a64f795cd18ff335659dfdf6096df277b24d5",
+          "binary_in_archive": "python/bin/python3",
+          "binary_sha256": "c6547e1a05f0b1acaa7b9067dd3dcb073290fc6255dbc949e337701fe72d7c17",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "bandit": {
+          "name": "bandit",
+          "version": "1.9.4",
+          "archive_url": "https://files.pythonhosted.org/packages/bandit-1.9.4-py3-none-any.whl",
+          "archive_sha256": "f89ffa663767f5a0585ea075f01020207e966a9c0f2b9ef56a57c7963a3f6f8e",
+          "binary_in_archive": "bandit/__main__.py",
+          "binary_sha256": "3ed9ca3c4e64f55efd02b3ec704a3313daeec1420cb87958bf7ca208c279501b",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "pylint": {
+          "name": "pylint",
+          "version": "4.1.2",
+          "archive_url": "https://files.pythonhosted.org/packages/pylint-4.1.2-py3-none-any.whl",
+          "archive_sha256": "e34c8636edc7d60a2eaadca4ad6c18a49e202361987a26e81b2a17fa92be28e1",
+          "binary_in_archive": "pylint/__main__.py",
+          "binary_sha256": "75dfc81f55f36abbc59d825e63642a858a4d01c3d21d7ea76c0e29f0925dc30a",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "pytest": {
+          "name": "pytest",
+          "version": "9.1.1",
+          "archive_url": "https://files.pythonhosted.org/packages/pytest-9.1.1-py3-none-any.whl",
+          "archive_sha256": "37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c",
+          "binary_in_archive": "pytest/__main__.py",
+          "binary_sha256": "37f8b6a3df1aef71336bce85e366db968ede153dd72ad4e60bebff79e279dc40",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "pip-audit": {
+          "name": "pip-audit",
+          "version": "2.10.1",
+          "archive_url": "https://files.pythonhosted.org/packages/pip_audit-2.10.1-py3-none-any.whl",
+          "archive_sha256": "99ef3f600a317c1945f1e89e227ef26e1c2d618429b8bd3fa6f4f7c440c4611a",
+          "binary_in_archive": "pip_audit/__main__.py",
+          "binary_sha256": "395494f87564e65f7b64b583e61d304c7b319dd543948e615719d94119854e74",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "checkov": {
+          "name": "checkov",
+          "version": "3.3.23",
+          "archive_url": "https://files.pythonhosted.org/packages/checkov-3.3.23-py3-none-any.whl",
+          "archive_sha256": "cfef3446f20ea8b05d016df0b5e254b5dd82a8d743504ac8c423d0db9e75aa33",
+          "binary_in_archive": "cdk_integration_tests/__init__.py",
+          "binary_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "version_args": [
+            "--version"
+          ]
+        }
+      }
     },
     "macos-arm64": {
       "status": "targeted",

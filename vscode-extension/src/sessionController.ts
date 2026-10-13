@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Preparation } from './backend';
-import { parsePreparation, PlanNode, PreparationReport, projectPlan, Reason, VisualStatus } from './model';
+import { isSameDirectory, parsePreparation, PlanNode, PreparationReport, projectPlan, Reason, VisualStatus } from './model';
 
 export interface ProgressEvent {
     schema_version: number; run_id: string; sequence: number; timestamp: string; type: string;
@@ -87,7 +87,7 @@ export class AuditState {
     }
     verifyReport(value: unknown): void {
         if (!record(value) || value.schema_version !== 1 || !record(value.metadata) || value.metadata.run_id !== this.runId ||
-            value.repository !== this.target || !Array.isArray(value.execution_results) || !record(value.coverage) || !record(value.summary) ||
+            !isSameDirectory(String(value.repository), this.target) || !Array.isArray(value.execution_results) || !record(value.coverage) || !record(value.summary) ||
             !Array.isArray(value.findings) || !Array.isArray(value.diagnostics) || !Array.isArray(value.limitations) ||
             !['completed', 'blocked', 'error'].includes(String(value.execution_status)) || !['PASS', 'FAIL'].includes(String(value.verdict))) { throw new Error('Rapport final invalide ou d une autre session.'); }
         const ids = new Set<string>();

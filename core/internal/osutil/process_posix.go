@@ -105,3 +105,7 @@ func runBoundedOS(ctx context.Context, spec CommandSpec) (*ProcessResult, error)
 
 	return result, nil
 }
+
+// SetHideWindow is a no-op on POSIX operating systems.
+func SetHideWindow(cmd *exec.Cmd) {
+}
