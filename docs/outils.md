@@ -1,6 +1,6 @@
 # Outils du catalogue et manifeste
 
-Version courante : 2.0.13. Le manifeste est `.config/runtime-manifest.json`. `compliance runtime sync` télécharge l'archive HTTPS déclarée et extrait le binaire dans `~/.compliance/tools`. Une entrée est installable dès qu'elle figure dans le manifeste pour la plateforme. Une signature absente ou différente, ou une somme SHA-256 différente, ne bloque pas l'installation.
+Version courante : 2.0.14. Le manifeste est `.config/runtime-manifest.json`. `compliance runtime sync` télécharge l'archive HTTPS déclarée et extrait le binaire dans `~/.compliance/tools`. Une entrée est installable dès qu'elle figure dans le manifeste pour la plateforme. Une signature absente ou différente, ou une somme SHA-256 différente, ne bloque pas l'installation.
 
 ## Présents dans le manifeste
 

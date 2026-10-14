@@ -37,6 +37,10 @@ function escapeHtml(value: string): string {
 
 const gapCodes = new Set(['tool_unavailable', 'capability_unavailable', 'repository_unconfigured', 'platform_unavailable']);
 
+export function countsAsUnavailable(code: string): boolean {
+    return gapCodes.has(code);
+}
+
 export function coverageSentence(covered: number, detected: number, executed: number): string {
     if (detected <= 0) { return 'Aucune technologie détectée.'; }
     const text = `${covered} technologie(s) couverte(s) sur ${detected} détectée(s)`;

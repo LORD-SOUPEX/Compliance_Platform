@@ -1,8 +1,22 @@
 # ICP - IaC Compliance Platform
 
-![Architecture de la plateforme](https://raw.githubusercontent.com/LORD-SOUPEX/Compliance_Platform/main/vscode-extension/media/architecture.jpg)
+Audit local d'un dépôt. L'extension parle à un démon Go sur `127.0.0.1`. Aucun compte, aucune forge et aucun envoi du code. Version courante : 2.0.14.
 
-Audit local d'un dépôt. L'extension parle à un démon Go sur `127.0.0.1`. Aucun compte, aucune forge et aucun envoi du code. Version courante : 2.0.13.
+## Architecture de la plateforme
+
+| Étape | Rôle |
+| --- | --- |
+| Target | Dossier local à auditer |
+| Discovery | Technologies, racines et preuves |
+| Matrix | Contrôles du catalogue qui s'appliquent |
+| Resolver | Outils déjà présents sur la machine |
+| Plan | Ordre d'exécution et autorisations |
+| Engine | Exécution locale des contrôles |
+| Report | Rapport JSON, verdict et findings |
+
+- Le démon écoute sur `127.0.0.1`, port éphémère, jeton Bearer.
+- L'extension parle au démon en HTTP et en SSE.
+- Le schéma Mermaid du même parcours est dans le README du dépôt et dans `docs/architecture.md`. La page Détails de VS Code ne l'affiche pas.
 
 ## À quoi elle sert
 
@@ -20,7 +34,7 @@ Développeurs et évaluateurs qui veulent un contrôle local sur un projet Terra
 
 ## Contrôles
 
-ESLint et `tsc` viennent du `node_modules` de la cible. Sans `npm install` ou sans configuration ESLint, le contrôle n'est pas un succès. Terraform et les autres outils de répertoire restent un contrôle par racine. Le rapport les présente dans une carte par outil : chaque sous-dossier a son statut, sa durée et son nombre d'anomalies, puis se déroule vers les fichiers et leurs lignes. Checkov, TFLint, ShellCheck, Trivy et `terraform fmt` exposent la règle, le fichier, la ligne et le message. Une technologie exécutée sur au moins une racine n'est pas répétée dans les contrôles non applicables. `rumdl check` lint le Markdown. Sans fichier de configuration Markdown dans le dépôt, MD013 (longueur de ligne) est désactivée. Si `.rumdl.toml`, `.markdownlint.json` ou un équivalent est présent, cette règle reste active. `pytest` qui se termine avec le code 5 (aucun test collecté) est un succès, avec le diagnostic `no_tests_collected`. Pylint reçoit le `.pylintrc` ou le `pyproject.toml` à la racine du dépôt lorsqu'il en existe un. Ruff, Pylint, Bandit, pytest, pip-audit et yamllint produisent aussi un fichier, une ligne, une règle et un message. Un chemin d'anomalie qui commence par `/` ou `\` est rattaché au dossier du contrôle, puis à la racine de la Target. Sur Windows, `ansible-lint` n'est pas proposé à l'installation : il reste réservé à Linux et macOS, et `yamllint` couvre les playbooks. Les listes de fichiers (ShellCheck, Hadolint, Ruff, Pylint, Bandit) sont découpées pour rester sous la limite de ligne de commande. La découverte Docker reconnaît `Dockerfile`, `Dockerfile.*`, `Containerfile` et les noms `*.Dockerfile`, y compris dans un sous-dossier. Le canal Output ne remet pas une technologie dans `ignorés (technologie absente)` si un contrôle de cette technologie vient de s'exécuter.
+ESLint et `tsc` viennent du `node_modules` de la cible. Sans `npm install` ou sans configuration ESLint, le contrôle n'est pas un succès. Terraform et les autres outils de répertoire restent un contrôle par racine. Le rapport les présente dans une carte par outil : chaque sous-dossier a son statut, sa durée et son nombre d'anomalies, puis se déroule vers les fichiers et leurs lignes. Checkov, TFLint, ShellCheck, Trivy et `terraform fmt` exposent la règle, le fichier, la ligne et le message. Une technologie exécutée sur au moins une racine n'est pas répétée dans les contrôles non applicables. `rumdl check` lint le Markdown. Sans fichier de configuration Markdown dans le dépôt, MD013 (longueur de ligne) est désactivée. Si `.rumdl.toml`, `.markdownlint.json` ou un équivalent est présent, cette règle reste active. `pytest` qui se termine avec le code 5 (aucun test collecté) est un succès, avec le diagnostic `no_tests_collected`. Pylint reçoit le `.pylintrc` ou le `pyproject.toml` à la racine du dépôt lorsqu'il en existe un. Ruff, Pylint, Bandit, pytest, pip-audit et yamllint produisent aussi un fichier, une ligne, une règle et un message. Un chemin d'anomalie qui commence par `/` ou `\` est rattaché au dossier du contrôle, puis à la racine de la Target. Sur Windows, `ansible-lint` n'est pas proposé à l'installation : il reste réservé à Linux et macOS, et `yamllint` couvre les playbooks. Les listes de fichiers (ShellCheck, Hadolint, Ruff, Pylint, Bandit) sont découpées pour rester sous la limite de ligne de commande. La découverte Docker reconnaît `Dockerfile`, `Dockerfile.*`, `Containerfile` et les noms `*.Dockerfile`, y compris dans un sous-dossier. Ces noms restent une preuve pour Hadolint et Trivy lorsque l'échantillon de fichiers est tronqué. Le canal Output ne remet pas une technologie dans `ignorés (technologie absente)` si un contrôle de cette technologie vient de s'exécuter, et il n'inscrit `indisponible` que pour les mêmes codes que le compteur du rapport. Un plan rejeté au lancement nomme le contrôle, la racine et la raison.
 
 <!-- catalog-controls:start -->
 | Identifiant | Technologie | Outil |
@@ -107,10 +121,6 @@ Le réglage d'application `compliance.maxSessions` conserve de 1 à 1000 session
 ## Plateformes
 
 Seul **Windows x64** est qualifié (selftest exécuté ici). Les binaires Linux x64/arm64, Windows ARM64 et macOS Intel/Apple Silicon sont dans le VSIX ; leur statut est ciblé, pas qualifié, tant qu'un selftest n'a pas tourné sur la machine. `rumdl` 0.2.79 ne publie pas de binaire Windows ARM64.
-
-## Image d'architecture
-
-Le JPEG est `vscode-extension/media/architecture.jpg`. La page Détails de VS Code n'affiche que les images `https`. Le README de l'extension et ce guide pointent donc vers `https://raw.githubusercontent.com/LORD-SOUPEX/Compliance_Platform/main/vscode-extension/media/architecture.jpg`. Le fichier est aussi copié dans le VSIX en `image/jpeg`.
 
 ## Confidentialité
 

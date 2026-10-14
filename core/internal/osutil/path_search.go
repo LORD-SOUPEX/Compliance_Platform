@@ -62,9 +62,15 @@ func PowerShellModuleDirs(goos, home string) []string {
 func ScriptCommand(exePath string, args []string) (string, []string) {
 	ext := strings.ToLower(filepath.Ext(exePath))
 	if runtime.GOOS == "windows" && (ext == ".cmd" || ext == ".bat") {
-		python := filepath.Join(filepath.Dir(exePath), "python.exe")
-		if info, err := os.Stat(python); err == nil && !info.IsDir() {
-			return python, append([]string{"-x", exePath}, args...)
+		dir := filepath.Dir(exePath)
+		candidates := []string{filepath.Join(dir, "python.exe")}
+		if strings.EqualFold(filepath.Base(dir), "Scripts") {
+			candidates = append(candidates, filepath.Join(filepath.Dir(dir), "python.exe"))
+		}
+		for _, python := range candidates {
+			if info, err := os.Stat(python); err == nil && !info.IsDir() {
+				return python, append([]string{"-x", exePath}, args...)
+			}
 		}
 	}
 	return exePath, args

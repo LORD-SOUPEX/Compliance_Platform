@@ -1,4 +1,5 @@
-const { buildReportModel, nonApplicableMarkup, reportDurationMs, unavailableSummary, groupUnavailableLines } = require("../.extension-build/src/reportLayout.js");
+const { buildReportModel, nonApplicableMarkup, reportDurationMs, unavailableSummary, groupUnavailableLines, countsAsUnavailable } = require("../.extension-build/src/reportLayout.js");
+const { parsePreparation } = require("../.extension-build/src/model.js");
 const { unwiredReportActions, reportButtonCommand } = require("../.extension-build/src/reportActions.js");
 const { engineVersionMismatch } = require("../.extension-build/src/engineVersion.js");
 const { shouldPrompt, classifyProvisionError, consentText, selectManifestTools } = require("../.extension-build/src/toolProvision.js");
@@ -24,6 +25,20 @@ if (shouldPrompt({ fingerprint: "gitleaks", decision: "refused", installed: fals
 if (classifyProvisionError("dial tcp: connection refused").code !== "network" || classifyProvisionError("téléchargement de l'outil bandit: code HTTP 404").code === "network" || !classifyProvisionError("téléchargement de l'outil bandit: code HTTP 404").message.includes("bandit") || !consentText([{ command: "gitleaks", version: "8.30.1", source: "https://example.invalid/gitleaks.zip" }]).includes("8.30.1") || selectManifestTools({ platforms: { "windows-x64": { tools: { gitleaks: { version: "8.30.1", archive_url: "https://example.invalid/gitleaks.zip" } } } } }, "windows-x64", ["gitleaks", "pre-commit"]).length !== 1) fail("provision");
 const grouped = unavailableSummary([{ id: "python/linting/ruff/a", name: "ruff", technology: "python", resultStatus: "skipped", reasonCode: "tool_unavailable", reasonMessage: "Outil installable depuis le manifeste : ruff.", stdout: "", stderr: "" }, { id: "python/linting/ruff/b", name: "ruff", technology: "python", resultStatus: "skipped", reasonCode: "tool_unavailable", reasonMessage: "Outil installable depuis le manifeste : ruff.", stdout: "", stderr: "" }]);
 if (grouped.length !== 1 || !grouped[0].includes("2 racines concernées") || groupUnavailableLines(["python/linting/ruff/a — Outil installable", "python/linting/ruff/b — Outil installable"]).length !== 1 || groupUnavailableLines(["terraform/security/checkov/a - Outil installable depuis le manifeste : checkov.", "terraform/security/checkov/b - Outil installable depuis le manifeste : checkov."]).length !== 1) fail("unavailable group");
+if (countsAsUnavailable("not_applicable") || countsAsUnavailable("platform_unsupported") || !countsAsUnavailable("tool_unavailable")) fail("unavailable classification");
+const target = fs.mkdtempSync(require("os").tmpdir() + require("path").sep + "compliance-plan-");
+const accepted = {
+    schema_version: 1, execution_status: "planned", verdict: null, repository: target,
+    metadata: { run_id: "a".repeat(32), source_adapter: "VSCode" },
+    discovery: { scan_complete: true, scan_errors: [], technologies: [{ technology: "ansible", status: "detected", roots: ["."], evidence: ["ansible.cfg"], ambiguities: [] }] },
+    execution_plan: { repository: target, permissions: { network: false, code_execution: true }, controls: [{ id: "ansible/linting/ansible-lint/.", name: "ansible-lint", technology: "ansible", capability: "linting", root: ".", applicability: "platform_unsupported", reason: "reserve a Linux", reason_code: "platform_unsupported", execution_order: 1 }] },
+    execution_results: []
+};
+try { parsePreparation(JSON.stringify(accepted), target, true); } catch (error) { fail("platform_unsupported rejected " + error.message); }
+const escaped = JSON.parse(JSON.stringify(accepted));
+escaped.execution_plan.controls[0].id = "ansible/linting/ansible-lint/../outside";
+escaped.execution_plan.controls[0].root = "../outside";
+try { parsePreparation(JSON.stringify(escaped), target, true); fail("escaping root accepted"); } catch (error) { if (!String(error.message).includes("ansible/linting/ansible-lint/../outside") || !String(error.message).includes("hors Target")) fail("opaque rejection " + error.message); }
 const repeated = Array.from({ length: 12 }, (_, index) => ({ id: `terraform/security/checkov/root-${index}`, name: "checkov", technology: "terraform", resultStatus: "skipped", reasonCode: "tool_unavailable", reasonMessage: "Outil installable depuis le manifeste : checkov.", stdout: "", stderr: "" }));
 const deduped = buildReportModel({ verdict: "PASS", coverage: {}, technologies: [{ technology: "terraform", status: "detected" }], controls: repeated });
 if (deduped.tools.length !== 1 || deduped.tools[0] !== "checkov" || deduped.gaps.length !== 1 || (deduped.gaps[0].match(/checkov/g) || []).length !== 1) fail("dedupe " + JSON.stringify(deduped.tools) + " " + JSON.stringify(deduped.gaps));

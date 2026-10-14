@@ -1,6 +1,24 @@
 # Développement
 
-Version courante : 2.0.13.
+Version courante : 2.0.14.
+
+Sessions Windows x64 exécutées pour cette version :
+
+| Technologie | Contrôles exécutés | Limite connue |
+| --- | --- | --- |
+| Terraform | `content` non concerné. `cloud-foundation-toolkit` : terraform, tflint et checkov sur 8 racines. Fixture : terraform, tflint, checkov. | |
+| Kubernetes | checkov politique et sécurité sur `cloud-foundation-toolkit` et la fixture. | Trivy sécurité n'est pas lancé quand checkov est retenu. |
+| Shell | ShellCheck par lots sur `content` et la fixture. | |
+| Markdown | rumdl sur `content`, `cloud-foundation-toolkit` et la fixture. | |
+| Ansible | yamllint sur `content` et la fixture. | `ansible-lint` est réservé à Linux et macOS. |
+| Docker | Hadolint et Trivy sur `content` et la fixture, y compris `.gitpod.Dockerfile` et `*.Dockerfile`. | |
+| Helm | checkov politique et sécurité sur la fixture. | Trivy sécurité n'est pas lancé quand checkov est retenu. |
+| JavaScript | ESLint et gitleaks sur la fixture. | |
+| TypeScript | `tsc` sur la fixture. | ESLint TypeScript dépend du parseur configuré dans le dépôt. |
+| OpenTofu | tofu, tflint et checkov sur la fixture. | |
+| Python | Ruff, Pylint, Bandit, pytest et pip-audit sur la fixture. Pylint, Bandit et Ruff aussi sur `content`. | Une racine Python très grande peut tronquer la sortie capturée. |
+| Terragrunt | terragrunt hcl fmt sur la fixture. | |
+| PowerShell | Aucun. | PSScriptAnalyzer n'était pas installé sur la machine de qualification. |
 
 Les commandes ci-dessous construisent et vérifient le dépôt. Elles ne font pas partie de la page Marketplace.
 
@@ -19,7 +37,7 @@ Réinstaller l'extension de test, sans script PowerShell :
 
 ```bash
 cd vscode-extension
-npm run reinstall -- dist/compliance-local-pipelines-2.0.13.vsix
+npm run reinstall -- dist/compliance-local-pipelines-2.0.14.vsix
 ```
 
 Cela arrête le démon, désinstalle l'extension, supprime les dossiers résiduels de l'extension et installe le VSIX. Les sessions restent dans le dossier utilisateur.

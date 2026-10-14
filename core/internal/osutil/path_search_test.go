@@ -74,6 +74,29 @@ func TestScriptCommandUsesSiblingPython(t *testing.T) {
 	}
 }
 
+func TestScriptCommandUsesParentPythonOfScriptsDir(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("layout Windows")
+	}
+	root := t.TempDir()
+	scripts := filepath.Join(root, "Scripts")
+	if err := os.MkdirAll(scripts, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(scripts, "checkov.cmd")
+	python := filepath.Join(root, "python.exe")
+	if err := os.WriteFile(script, []byte("@echo off\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(python, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	exe, args := ScriptCommand(script, []string{"--version"})
+	if exe != python || len(args) != 3 || args[0] != "-x" || args[1] != script {
+		t.Fatalf("parent python = %s %v", exe, args)
+	}
+}
+
 func containsPath(dirs []string, want string) bool {
 	for _, dir := range dirs {
 		if dir == want {

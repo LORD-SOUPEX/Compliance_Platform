@@ -131,6 +131,7 @@ func runBoundedOS(ctx context.Context, spec CommandSpec) (*ProcessResult, error)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
 		HideWindow:    true,
+		CmdLine:       spec.CommandLine,
 	}
 
 	stdoutPipe, err := cmd.StdoutPipe()

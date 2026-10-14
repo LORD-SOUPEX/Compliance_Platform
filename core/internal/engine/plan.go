@@ -59,6 +59,35 @@ type PlanOptions struct {
 	DisabledControls        []string
 }
 
+func evidenceSamples(tech discovery.TechnologyRecord, root string) []string {
+	if tokens := tech.RootProof[root]; len(tokens) > 0 {
+		return tokens
+	}
+	if root == "." {
+		return tech.Evidence
+	}
+	prefix := strings.TrimSuffix(filepath.ToSlash(root), "/") + "/"
+	var samples []string
+	for _, ev := range tech.Evidence {
+		if strings.HasPrefix(strings.ToLower(filepath.ToSlash(ev)), strings.ToLower(prefix)) {
+			samples = append(samples, ev)
+		}
+	}
+	return samples
+}
+
+func evidenceTokenMatches(sample, wanted string) bool {
+	base := filepath.Base(filepath.ToSlash(sample))
+	ext := filepath.Ext(base)
+	if strings.EqualFold(base, wanted) || strings.EqualFold(ext, wanted) || strings.EqualFold(sample, wanted) {
+		return true
+	}
+	if strings.EqualFold(wanted, "Dockerfile") || strings.EqualFold(wanted, "Containerfile") {
+		return discovery.IsContainerFile(base)
+	}
+	return false
+}
+
 // BuildCompliancePlan creates an ExecutionPlan following the exact PowerShell contract.
 func BuildCompliancePlan(
 	discoveries []discovery.TechnologyRecord,
@@ -265,19 +294,9 @@ func BuildCompliancePlan(
 						}
 					}
 
-					// Evidence checking
-					evidence := tech.Evidence
-					var rootEvidence []string
-					if root == "." {
-						rootEvidence = evidence
-					} else {
-						rootPrefix := strings.TrimSuffix(filepath.ToSlash(root), "/") + "/"
-						for _, ev := range evidence {
-							if strings.HasPrefix(strings.ToLower(ev), strings.ToLower(rootPrefix)) {
-								rootEvidence = append(rootEvidence, ev)
-							}
-						}
-					}
+					// Evidence checking. The displayed sample is capped; root_proof keeps
+					// every accepted root's extensions and file names.
+					rootEvidence := evidenceSamples(tech, root)
 
 					var evidenceExtensions []string
 					if catalogCtrl != nil {
@@ -287,10 +306,8 @@ func BuildCompliancePlan(
 					evidenceMatches := len(evidenceExtensions) == 0
 					if !evidenceMatches {
 						for _, rev := range rootEvidence {
-							name := filepath.Base(rev)
-							ext := filepath.Ext(rev)
 							for _, ee := range evidenceExtensions {
-								if strings.EqualFold(ee, name) || strings.EqualFold(ee, ext) {
+								if evidenceTokenMatches(rev, ee) {
 									evidenceMatches = true
 									break
 								}
@@ -425,6 +442,9 @@ func BuildCompliancePlan(
 							reasonCode = "tool_unavailable"
 						} else if manifestPath, err := embedded.ResolveAsset("runtime-manifest.json", ".config/runtime-manifest.json"); err == nil && distribution.ToolListed(manifestPath, opts.PlatformID, command) {
 							reason = fmt.Sprintf("Outil installable depuis le manifeste : %s.", command)
+							reasonCode = "tool_unavailable"
+						} else if command == "Invoke-ScriptAnalyzer" {
+							reason = "Module PowerShell PSScriptAnalyzer absent. Installez-le pour l'utilisateur courant, puis relancez."
 							reasonCode = "tool_unavailable"
 						} else {
 							applicability = "platform_unavailable"

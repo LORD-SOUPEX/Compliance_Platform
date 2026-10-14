@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"compliance/internal/discovery"
 	"compliance/internal/matrix"
 	"compliance/internal/report"
 )
@@ -91,10 +92,42 @@ func TestBatchedAndStructuredFindings(t *testing.T) {
 	if len(formatted) != 1 || formatted[0].RuleID != "format" || formatted[0].File != "pkg/app.py" {
 		t.Fatalf("ruff format = %+v", formatted)
 	}
+	diff := parseToolFindings("ruff", "unformatted: File would be reformatted\n --> app.py:2:1\n", `C:\repo`)
+	if len(diff) != 1 || diff[0].File != "app.py" || diff[0].Line != 2 || diff[0].RuleID != "format" {
+		t.Fatalf("ruff diff = %+v", diff)
+	}
+	docker := parseToolFindings("hadolint", `C:\repo\images\app.Dockerfile:2 DL3009 info: Delete the apt lists`+"\n", `C:\repo`)
+	if len(docker) != 1 || docker[0].RuleID != "DL3009" || docker[0].Line != 2 || !strings.Contains(docker[0].File, "app.Dockerfile") {
+		t.Fatalf("hadolint = %+v", docker)
+	}
+	eslint := parseToolFindings("eslint", `[{"filePath":"src/app.js","messages":[{"ruleId":"no-unused-vars","message":"unused","line":1,"column":5,"severity":2}]}]`, `C:\repo`)
+	if len(eslint) != 1 || eslint[0].File != "src/app.js" || eslint[0].Line != 1 || eslint[0].RuleID != "no-unused-vars" {
+		t.Fatalf("eslint = %+v", eslint)
+	}
+	tsc := parseToolFindings("tsc", "src/app.ts(1,14): error TS2322: Type 'number' is not assignable to type 'string'.\n", `C:\repo`)
+	if len(tsc) != 1 || tsc[0].File != "src/app.ts" || tsc[0].Line != 1 || tsc[0].RuleID != "TS2322" {
+		t.Fatalf("tsc = %+v", tsc)
+	}
+	quoted := windowsCmdScript(`C:\Users\Jean Clanch\eslint.cmd`, []string{`C:\Users\Jean Clanch\repo`})
+	if !strings.Contains(quoted.RawCommandLine, `"C:\Users\Jean Clanch\eslint.cmd"`) || !strings.Contains(quoted.RawCommandLine, "/d /s /c") {
+		t.Fatalf("cmd quote = %s", quoted.RawCommandLine)
+	}
 	pylint := `[{"path":"pkg/app.py","line":3,"column":0,"message":"missing docstring","message-id":"C0114","symbol":"missing-module-docstring","type":"convention"}]`
 	py := parseToolFindings("pylint", pylint, `C:\repo`)
 	if len(py) != 1 || py[0].RuleID != "C0114" || py[0].Line != 3 || py[0].File != "pkg/app.py" {
 		t.Fatalf("pylint = %+v", py)
+	}
+	truncated := parseToolFindings("pylint", `[{"path":"a.py","line":4,"column":0,"message":"too long","message-id":"C0301","type":"convention"},{"path":"b.py","line":1,"message":"cut`, `C:\repo`)
+	if len(truncated) != 1 || truncated[0].File != "a.py" || truncated[0].Line != 4 || truncated[0].RuleID != "C0301" {
+		t.Fatalf("truncated pylint = %+v", truncated)
+	}
+	unpinned := parseToolFindings("pip-audit", "ERROR:pip_audit._cli:requirement cmakelint is not pinned: cmakelint (from RequirementLine(line_number=2, line='cmakelint', filename=WindowsPath('M:/Git/content/requirements.txt')))\n", `M:\Git\content`)
+	if len(unpinned) != 1 || unpinned[0].Line != 2 || unpinned[0].RuleID != "unpinned" || !strings.Contains(unpinned[0].File, "requirements.txt") {
+		t.Fatalf("pip-audit unpinned = %+v", unpinned)
+	}
+	collected := parseToolFindings("pytest", "INTERNALERROR>   File \"M:\\Git\\content\\utils\\nist_sync\\test_gemara_export.py\", line 23, in <module>\nINTERNALERROR>     from ruamel.yaml import YAML\nINTERNALERROR> ModuleNotFoundError: No module named 'ruamel'\n", `M:\Git\content`)
+	if len(collected) != 1 || collected[0].Line != 23 || collected[0].RuleID != "collection" || !strings.Contains(collected[0].File, "test_gemara_export.py") {
+		t.Fatalf("pytest collection = %+v", collected)
 	}
 	bandit := `{"results":[{"filename":"pkg/app.py","line_number":11,"test_id":"B602","issue_text":"shell","issue_severity":"HIGH"}]}`
 	security := parseToolFindings("bandit", bandit, `C:\repo`)
@@ -143,6 +176,22 @@ func TestCommandLineBatchesStayUnderWindowsLimit(t *testing.T) {
 	}
 }
 
+func TestDockerCatalogTokenMatchesRenamedFiles(t *testing.T) {
+	for _, name := range []string{".gitpod.Dockerfile", "app.Dockerfile", "Dockerfile.ci", "Containerfile"} {
+		if !evidenceTokenMatches(name, "Dockerfile") && !evidenceTokenMatches(name, "Containerfile") {
+			t.Fatalf("%s did not match a container catalog token", name)
+		}
+	}
+	tech := discovery.TechnologyRecord{
+		Evidence:  []string{"mod0/main.tf"},
+		Roots:     []string{"mod0", "mod9"},
+		RootProof: map[string][]string{"mod0": {".tf"}, "mod9": {".tf", "main.tf"}},
+	}
+	if samples := evidenceSamples(tech, "mod9"); len(samples) == 0 || !evidenceTokenMatches(samples[0], ".tf") {
+		t.Fatalf("capped sample hid mod9: %+v", samples)
+	}
+}
+
 func TestAnchorFindingPathUsesControlRoot(t *testing.T) {
 	repo := t.TempDir()
 	root := filepath.Join(repo, "infra", "vpc")
@@ -158,6 +207,19 @@ func TestAnchorFindingPathUsesControlRoot(t *testing.T) {
 	abs := filepath.Join(root, "main.tf")
 	if got := anchorFindingPath(repo, root, abs); got != "infra/vpc/main.tf" {
 		t.Fatalf("absolute = %s", got)
+	}
+	script := filepath.Join(repo, "scripts", "bad.sh")
+	if err := os.MkdirAll(filepath.Dir(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(script, []byte("echo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := anchorFindingPath(repo, filepath.Join(repo, "scripts"), "scripts/bad.sh"); got != "scripts/bad.sh" {
+		t.Fatalf("already rooted = %s", got)
+	}
+	if got := anchorFindingPath(repo, filepath.Join(repo, "scripts"), "bad.sh"); got != "scripts/bad.sh" {
+		t.Fatalf("cwd relative = %s", got)
 	}
 }
 

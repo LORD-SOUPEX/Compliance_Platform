@@ -407,9 +407,6 @@ def package_vsix(target_platform=None):
             "media/icon.png absent : le Marketplace exige un PNG d'au moins 128x128."
         )
     extension_files.append((icon_path, "extension/media/icon.png"))
-    architecture = ext_dir / "media" / "architecture.jpg"
-    if architecture.is_file():
-        extension_files.append((architecture, "extension/media/architecture.jpg"))
     report_css = ext_dir / "media" / "report.css"
     if not report_css.is_file():
         raise RuntimeError(

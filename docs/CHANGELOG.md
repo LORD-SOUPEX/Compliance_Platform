@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.14
+
+- Le lancement accepte un plan qui contient `platform_unsupported`. Le rejet nomme le contrôle, la racine et la raison. La préparation valide le même plan.
+- Chaque racine retenue conserve une preuve. `Dockerfile` et `Containerfile` couvrent aussi `Dockerfile.*`, `*.Dockerfile` et `.gitpod.Dockerfile`. Le canal Output et le compteur Indisponibles utilisent les mêmes codes.
+- Checkov d'un Python autonome (interpréteur au-dessus de `Scripts`) est lancé avec cet interpréteur.
+- Hadolint, ESLint, `tsc` et `ruff format` exposent un fichier, une ligne, une règle et un message. Un chemin déjà relatif au dépôt n'est plus préfixé une seconde fois. ESLint et `tsc` passent par `node` et le script du paquet.
+- `pip-audit` signale une dépendance non épinglée. `pytest` signale une erreur de collecte. Une sortie pylint JSON coupée conserve les objets déjà complets.
+- L'absence de PSScriptAnalyzer est un module manquant. La page Détails décrit l'architecture en Markdown. Le schéma Mermaid reste dans le README du dépôt.
+
+Sessions Windows x64 de cette version : `content` et `cloud-foundation-toolkit` jusqu'au rapport, plus un dépôt de fixture (Ansible/yamllint, Docker, Helm, JavaScript, Kubernetes, Markdown, OpenTofu, Python, Shell, Terraform, Terragrunt, TypeScript). `ansible-lint` reste réservé à Linux et macOS. PSScriptAnalyzer n'était pas installé. Trivy sécurité Kubernetes et Helm n'est pas lancé quand checkov couvre déjà cette capacité.
+
 ## 2.0.13
 
 - Le bandeau du rapport garde la maquette 2.0.12 et remplace les emoji par des icônes SVG. Le logo est `media/icon.png`.

@@ -1,6 +1,6 @@
 # Architecture et contrats techniques
 
-Version courante : 2.0.13. Les chiffres de contrôles figés dans d'anciennes notes (notamment « 28 contrôles ») sont obsolètes. La liste actuelle est le tableau `catalog-controls` des README, vérifié contre `.config/control-catalog.json`.
+Version courante : 2.0.14. Les chiffres de contrôles figés dans d'anciennes notes (notamment « 28 contrôles ») sont obsolètes. La liste actuelle est le tableau `catalog-controls` des README, vérifié contre `.config/control-catalog.json`.
 
 Le guide d'usage est le [README](../README.md). Le packaging et la signature sont dans [développement](developpement.md). Les outils sont dans [outils](outils.md).
 
@@ -55,6 +55,8 @@ Le résolveur d'outils est découplé de l'environnement virtuel du dépôt cibl
 8. **Préfixes macOS puis PATH** : `/opt/homebrew/bin`, `/opt/homebrew/sbin`, `/usr/local/bin`, `/usr/local/sbin`, `~/.local/bin`, `~/Library/Python/*/bin`, `~/.pyenv/shims`, puis `exec.LookPath`. Un VS Code lancé depuis le Dock trouve Homebrew sans hériter de `~/.zshrc`.
 
 Sur Windows, `ansible`, `ansible-lint` et `molecule` sont marqués incompatibles avant cette recherche : la présence du paquet ne prouve pas que le contrôleur s'exécute. Le plan ne les propose pas comme installables depuis le manifeste. `ansible-lint` est réservé à Linux et macOS ; `yamllint` couvre Ansible sur Windows. Une commande qui reçoit une longue liste de fichiers est découpée sous 24 000 caractères et les sorties sont agrégées.
+
+La découverte borne l'échantillon de fichiers affiché et le nombre de racines. Chaque racine retenue conserve une preuve (nom de fichier et extension). Le plan compare les jetons du catalogue à cette preuve, pas seulement à l'échantillon tronqué. Les jetons `Dockerfile` et `Containerfile` couvrent aussi `Dockerfile.*`, `*.Dockerfile` et `.gitpod.Dockerfile`. Un plan refusé nomme le contrôle, la racine et la raison. Le compteur Indisponibles du rapport et le canal Output comptent les mêmes codes : outil absent, capacité absente, dépôt non configuré, plateforme indisponible.
 
 ---
 

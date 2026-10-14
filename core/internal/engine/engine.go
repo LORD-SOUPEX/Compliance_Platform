@@ -81,6 +81,7 @@ type Invocation struct {
 	Cleanup         []string     `json:"-"`
 	GitleaksReport  string       `json:"-"`
 	ContinueOnError bool         `json:"-"`
+	RawCommandLine  string       `json:"-"`
 }
 
 // BuildInvocation constructs the executable and arguments for a planned control.
@@ -206,7 +207,7 @@ func BuildInvocation(
 		if len(containerFiles) == 0 {
 			return nil, errors.New("validation Compose non implementee par Hadolint")
 		}
-		return invocationWithFiles(executable, nil, containerFiles), nil
+		return invocationWithFiles(executable, []string{"--format", "json"}, containerFiles), nil
 
 	case "ansible-lint":
 		arguments = append(arguments, catalogArgs...)
@@ -220,16 +221,15 @@ func BuildInvocation(
 		arguments = []string{"-c", filepath.Join(platformRoot, cfg), "-f", "parsable", root}
 
 	case "eslint":
-		if strings.EqualFold(filepath.Ext(executable), ".cmd") || strings.EqualFold(filepath.Ext(executable), ".bat") {
-			comspec := os.Getenv("COMSPEC")
-			if comspec == "" {
-				comspec = "cmd.exe"
-			}
-			arguments = []string{"/d", "/s", "/c", executable, root}
-			executable = comspec
-		} else {
-			arguments = []string{root}
+		eslintArgs := []string{"-f", "json", root}
+		if inv, ok := nodeBinScript(executable, filepath.Join("..", "eslint", "bin", "eslint.js"), eslintArgs); ok {
+			return &inv, nil
 		}
+		if strings.EqualFold(filepath.Ext(executable), ".cmd") || strings.EqualFold(filepath.Ext(executable), ".bat") {
+			inv := windowsCmdScript(executable, eslintArgs)
+			return &Invocation{Executable: inv.Executable, Arguments: inv.Arguments, RawCommandLine: inv.RawCommandLine}, nil
+		}
+		arguments = eslintArgs
 
 	case "gitleaks":
 		reportPath, configPath, sideErr := writeGitleaksSidecars()
@@ -255,7 +255,7 @@ func BuildInvocation(
 		for _, project := range projects[1:] {
 			followups = append(followups, tscInvocation(executable, project))
 		}
-		return &Invocation{Executable: first.Executable, Arguments: first.Arguments, Followups: followups}, nil
+		return &Invocation{Executable: first.Executable, Arguments: first.Arguments, Followups: followups, RawCommandLine: first.RawCommandLine}, nil
 
 	case "rumdl":
 		arguments = []string{"check", "--respect-gitignore=true", "--exclude", discovery.ToolExcludeGlobs()}
@@ -557,7 +557,50 @@ func anchorFindingPath(repo, execRoot, file string) string {
 	if slash == "" || slash == "." {
 		return filepath.ToSlash(relativeToRepo(repo, execRoot))
 	}
+	relRoot := filepath.ToSlash(relativeToRepo(repo, execRoot))
+	if relRoot != "" && relRoot != "." && (slash == relRoot || strings.HasPrefix(slash, relRoot+"/")) {
+		return slash
+	}
+	repoFile := filepath.Join(repo, filepath.FromSlash(slash))
+	if info, err := os.Stat(repoFile); err == nil && !info.IsDir() && pathInsideRepo(repo, repoFile) {
+		return relativeToRepo(repo, repoFile)
+	}
 	return relativeToRepo(repo, filepath.Join(execRoot, filepath.FromSlash(slash)))
+}
+
+func windowsCmdScript(script string, args []string) Invocation {
+	comspec := os.Getenv("COMSPEC")
+	if comspec == "" {
+		comspec = "cmd.exe"
+	}
+	all := append([]string{script}, args...)
+	spaced := false
+	for _, part := range all {
+		if strings.ContainsAny(part, " \t\"") {
+			spaced = true
+			break
+		}
+	}
+	if !spaced {
+		return Invocation{Executable: comspec, Arguments: append([]string{"/d", "/s", "/c", script}, args...)}
+	}
+	quoted := make([]string, 0, len(all))
+	for _, part := range all {
+		quoted = append(quoted, quoteCmd(part))
+	}
+	comspecText := comspec
+	if strings.ContainsAny(comspec, " \t") {
+		comspecText = quoteCmd(comspec)
+	}
+	return Invocation{
+		Executable:     comspec,
+		Arguments:      []string{"/d", "/s", "/c"},
+		RawCommandLine: comspecText + " /d /s /c \"" + strings.Join(quoted, " ") + "\"",
+	}
+}
+
+func quoteCmd(value string) string {
+	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }
 
 func pathInsideRepo(repo, file string) bool {
@@ -586,15 +629,27 @@ func withoutColor(env []string) []string {
 
 func tscInvocation(executable, project string) Invocation {
 	arguments := []string{"--noEmit", "--pretty", "false", "--project", project}
+	if inv, ok := nodeBinScript(executable, filepath.Join("..", "typescript", "bin", "tsc"), arguments); ok {
+		return inv
+	}
 	ext := strings.ToLower(filepath.Ext(executable))
 	if ext == ".cmd" || ext == ".bat" {
-		comspec := os.Getenv("COMSPEC")
-		if comspec == "" {
-			comspec = "cmd.exe"
-		}
-		return Invocation{Executable: comspec, Arguments: append([]string{"/d", "/s", "/c", executable}, arguments...)}
+		return windowsCmdScript(executable, arguments)
 	}
 	return Invocation{Executable: executable, Arguments: arguments}
+}
+
+func nodeBinScript(cmdPath, relativeJS string, args []string) (Invocation, bool) {
+	script := filepath.Clean(filepath.Join(filepath.Dir(cmdPath), relativeJS))
+	info, err := os.Stat(script)
+	if err != nil || info.IsDir() {
+		return Invocation{}, false
+	}
+	node := osutil.LookupExecutable("node")
+	if node == "" {
+		return Invocation{}, false
+	}
+	return Invocation{Executable: node, Arguments: append([]string{script}, args...)}, true
 }
 
 func tsconfigProjects(repoRoot string) []string {
@@ -645,6 +700,9 @@ func explainNonExecution(ctrl *PlannedControl) string {
 		}
 		return fmt.Sprintf("Outil manquant : %s. L'extension peut l'installer depuis le manifeste, après accord, dans le dossier utilisateur.", command)
 	case "platform_unsupported":
+		if ctrl.Reason != "" {
+			return ctrl.Reason
+		}
 		return "Contrôle non qualifié pour cette plateforme."
 	case "platform_unavailable":
 		if ctrl.Reason != "" {
@@ -937,10 +995,14 @@ func ExecuteCompliancePlan(
 						var truncated, cancelled, timedOut bool
 						var procErr error
 						for _, call := range calls {
-							exe, args := osutil.ScriptCommand(call.Executable, call.Arguments)
+							exe, args := call.Executable, call.Arguments
+							if call.RawCommandLine == "" {
+								exe, args = osutil.ScriptCommand(call.Executable, call.Arguments)
+							}
 							procRes, err := osutil.RunBounded(ctx, osutil.CommandSpec{
 								Executable:       exe,
 								Args:             args,
+								CommandLine:      call.RawCommandLine,
 								WorkingDirectory: execRoot,
 								Env:              withoutColor(osutil.AugmentedEnviron()),
 								Limits: osutil.ProcessLimits{
@@ -1009,7 +1071,11 @@ func ExecuteCompliancePlan(
 							if ctrl.Tool != nil && ctrl.Tool.Command == "rumdl" {
 								res.Leaks = append(res.Leaks, parseRumdlOutput(stdout, plan.Repository)...)
 							} else if ctrl.Tool != nil {
-								res.Leaks = append(res.Leaks, parseToolFindings(ctrl.Tool.Command, stdout, plan.Repository)...)
+								parsed := stdout
+								if ctrl.Tool.Command == "pip-audit" {
+									parsed = stdout + "\n" + stderr
+								}
+								res.Leaks = append(res.Leaks, parseToolFindings(ctrl.Tool.Command, parsed, plan.Repository)...)
 							}
 							res.Leaks = anchorLeaks(res.Leaks, plan.Repository, execRoot)
 

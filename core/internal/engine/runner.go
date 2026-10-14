@@ -80,6 +80,12 @@ func parseToolFindings(command, stdout, repo string) []report.LocatedLeak {
 		leaks = parsePipAudit(stdout, repo)
 	case "yamllint":
 		leaks = parseYamllint(stdout, repo)
+	case "hadolint":
+		leaks = parseHadolint(stdout, repo)
+	case "eslint":
+		leaks = parseESLint(stdout, repo)
+	case "tsc":
+		leaks = parseTSC(stdout, repo)
 	default:
 		return nil
 	}
@@ -435,6 +441,24 @@ func parseRuff(stdout, repo string) []report.LocatedLeak {
 		return leaks
 	}
 	seen := map[string]bool{}
+	arrow := regexp.MustCompile(`(?m)^\s*-->\s+(.+):(\d+):(\d+)\s*$`)
+	for _, match := range arrow.FindAllStringSubmatch(stdout, -1) {
+		line, _ := strconv.Atoi(match[2])
+		column, _ := strconv.Atoi(match[3])
+		if line < 1 {
+			line = 1
+		}
+		if column < 1 {
+			column = 1
+		}
+		file := relativeToRepo(repo, strings.TrimSpace(match[1]))
+		leaks = append(leaks, report.LocatedLeak{
+			File: file, Line: line, Column: column, RuleID: "format", Description: "Le formatage du fichier diffère de ruff format.", Severity: "low",
+		})
+	}
+	if len(leaks) > 0 {
+		return leaks
+	}
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimRight(line, "\r"), "Would reformat:"))
 		line = strings.TrimSpace(line)
@@ -453,8 +477,30 @@ func parseRuff(stdout, repo string) []report.LocatedLeak {
 	return leaks
 }
 
+func salvageJSONArray(stdout string) string {
+	trimmed := strings.TrimSpace(stdout)
+	if json.Valid([]byte(trimmed)) {
+		return stdout
+	}
+	start := strings.Index(trimmed, "[")
+	if start < 0 {
+		return stdout
+	}
+	body := trimmed[start:]
+	last := strings.LastIndex(body, "}")
+	if last < 0 {
+		return stdout
+	}
+	candidate := body[:last+1] + "]"
+	if json.Valid([]byte(candidate)) {
+		return candidate
+	}
+	return stdout
+}
+
 func parsePylint(stdout, repo string) []report.LocatedLeak {
 	var leaks []report.LocatedLeak
+	stdout = salvageJSONArray(stdout)
 	if decodeJSONDocuments(stdout, func(raw json.RawMessage) {
 		var rows []struct {
 			Path      string `json:"path"`
@@ -570,6 +616,20 @@ func parsePytest(stdout, repo string) []report.LocatedLeak {
 	for _, match := range failed.FindAllStringSubmatch(stdout, -1) {
 		add(match[1], 1, match[2], match[3])
 	}
+	internal := regexp.MustCompile(`(?m)INTERNALERROR>\s+File "([^"]+)", line (\d+)`)
+	message := "Erreur interne pendant la collecte des tests."
+	if detail := regexp.MustCompile(`(?m)INTERNALERROR>\s+((?:ModuleNotFoundError|ImportError|SyntaxError|Error)[^\n]*)`).FindStringSubmatch(stdout); len(detail) == 2 {
+		message = strings.TrimSpace(detail[1])
+	}
+	seenFile := map[string]bool{}
+	for _, match := range internal.FindAllStringSubmatch(stdout, -1) {
+		if seenFile[match[1]] {
+			continue
+		}
+		seenFile[match[1]] = true
+		line, _ := strconv.Atoi(match[2])
+		add(match[1], line, "collection", message)
+	}
 	return leaks
 }
 
@@ -603,6 +663,21 @@ func parsePipAudit(stdout, repo string) []report.LocatedLeak {
 			}
 		}
 	})
+	unpinned := regexp.MustCompile(`(?m)requirement\s+(.+?)\s+is not pinned.*?line_number=(\d+).*?filename=(?:WindowsPath\('([^']+)'\)|'([^']+)')`)
+	for _, match := range unpinned.FindAllStringSubmatch(stdout, -1) {
+		line, _ := strconv.Atoi(match[2])
+		if line < 1 {
+			line = 1
+		}
+		file := match[3]
+		if file == "" {
+			file = match[4]
+		}
+		leaks = append(leaks, report.LocatedLeak{
+			File: relativeToRepo(repo, file), Line: line, Column: 1,
+			RuleID: "unpinned", Description: "Dépendance non épinglée : " + strings.TrimSpace(match[1]), Severity: "medium",
+		})
+	}
 	return leaks
 }
 
@@ -628,4 +703,122 @@ func yamllintSeverity(level string) string {
 		return "high"
 	}
 	return "low"
+}
+
+func parseHadolint(stdout, repo string) []report.LocatedLeak {
+	var leaks []report.LocatedLeak
+	if decodeJSONDocuments(stdout, func(raw json.RawMessage) {
+		var rows []struct {
+			File    string `json:"file"`
+			Line    int    `json:"line"`
+			Column  int    `json:"column"`
+			Level   string `json:"level"`
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(raw, &rows) != nil {
+			return
+		}
+		for _, row := range rows {
+			line := row.Line
+			if line < 1 {
+				line = 1
+			}
+			column := row.Column
+			if column < 1 {
+				column = 1
+			}
+			leaks = append(leaks, report.LocatedLeak{
+				File: relativeToRepo(repo, row.File), Line: line, Column: column,
+				RuleID: row.Code, Description: row.Message, Severity: hadolintSeverity(row.Level),
+			})
+		}
+	}) {
+		return leaks
+	}
+	pattern := regexp.MustCompile(`(?m)^(.*):(\d+)\s+(DL\d+)\s+([A-Za-z]+):\s*(.*)$`)
+	for _, match := range pattern.FindAllStringSubmatch(stdout, -1) {
+		line, _ := strconv.Atoi(match[2])
+		if line < 1 {
+			line = 1
+		}
+		leaks = append(leaks, report.LocatedLeak{
+			File: relativeToRepo(repo, match[1]), Line: line, Column: 1,
+			RuleID: match[3], Description: strings.TrimSpace(match[5]), Severity: hadolintSeverity(match[4]),
+		})
+	}
+	return leaks
+}
+
+func hadolintSeverity(level string) string {
+	switch strings.ToLower(level) {
+	case "error":
+		return "high"
+	case "warning":
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+func parseESLint(stdout, repo string) []report.LocatedLeak {
+	var files []struct {
+		FilePath string `json:"filePath"`
+		Messages []struct {
+			RuleID   string `json:"ruleId"`
+			Message  string `json:"message"`
+			Line     int    `json:"line"`
+			Column   int    `json:"column"`
+			Severity int    `json:"severity"`
+		} `json:"messages"`
+	}
+	if json.Unmarshal([]byte(strings.TrimSpace(stdout)), &files) != nil {
+		return nil
+	}
+	var leaks []report.LocatedLeak
+	for _, file := range files {
+		for _, message := range file.Messages {
+			if message.Message == "" {
+				continue
+			}
+			line := message.Line
+			if line < 1 {
+				line = 1
+			}
+			column := message.Column
+			if column < 1 {
+				column = 1
+			}
+			severity := "low"
+			if message.Severity >= 2 {
+				severity = "medium"
+			}
+			rule := message.RuleID
+			if rule == "" {
+				rule = "eslint"
+			}
+			leaks = append(leaks, report.LocatedLeak{
+				File: relativeToRepo(repo, file.FilePath), Line: line, Column: column,
+				RuleID: rule, Description: message.Message, Severity: severity,
+			})
+		}
+	}
+	return leaks
+}
+
+func parseTSC(stdout, repo string) []report.LocatedLeak {
+	pattern := regexp.MustCompile(`(?m)^(.+)\((\d+),(\d+)\):\s+error\s+(TS\d+):\s+(.*)$`)
+	var leaks []report.LocatedLeak
+	for _, match := range pattern.FindAllStringSubmatch(stdout, -1) {
+		line, _ := strconv.Atoi(match[2])
+		column, _ := strconv.Atoi(match[3])
+		if line < 1 {
+			line = 1
+		}
+		leaks = append(leaks, report.LocatedLeak{
+			File: relativeToRepo(repo, match[1]), Line: line, Column: column,
+			RuleID: match[4], Description: strings.TrimSpace(match[5]), Severity: "high",
+		})
+	}
+	return leaks
 }

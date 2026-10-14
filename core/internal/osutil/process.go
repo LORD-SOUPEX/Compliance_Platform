@@ -31,6 +31,7 @@ type ProcessResult struct {
 type CommandSpec struct {
 	Executable       string
 	Args             []string
+	CommandLine      string
 	WorkingDirectory string
 	Env              []string
 	Limits           ProcessLimits

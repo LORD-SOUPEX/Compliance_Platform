@@ -1,8 +1,22 @@
 # ICP - IaC Compliance Platform
 
-![Architecture de la plateforme](https://raw.githubusercontent.com/LORD-SOUPEX/Compliance_Platform/main/vscode-extension/media/architecture.jpg)
-
 Audit local d'un dépôt, depuis VS Code. Un démon Go sur la machine prépare le plan et exécute les contrôles. Aucun compte, aucun envoi du code.
+
+## Architecture de la plateforme
+
+| Étape | Rôle |
+| --- | --- |
+| Target | Dossier local à auditer |
+| Discovery | Technologies, racines et preuves |
+| Matrix | Contrôles du catalogue qui s'appliquent |
+| Resolver | Outils déjà présents sur la machine |
+| Plan | Ordre d'exécution et autorisations |
+| Engine | Exécution locale des contrôles |
+| Report | Rapport JSON, verdict et findings |
+
+- Le démon écoute sur `127.0.0.1`, port éphémère, jeton Bearer.
+- L'extension parle au démon en HTTP et en SSE.
+- Le schéma Mermaid du même parcours est dans le README du dépôt.
 
 ## À quoi elle sert
 

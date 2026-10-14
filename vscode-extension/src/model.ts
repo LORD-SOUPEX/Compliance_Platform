@@ -125,16 +125,21 @@ export function parsePreparation(text: string, target: string, allowPermissions 
         }
         technologies.add(technology.technology);
     }
+    const applicability = new Set(['applicable', 'not_applicable', 'capability_unavailable', 'tool_unavailable', 'technology_absent', 'ambiguous', 'platform_unsupported', 'platform_unavailable', 'repository_unconfigured', 'user_disabled', 'permission_denied']);
     const ids = new Set<string>();
     for (const control of report.execution_plan.controls) {
-        if (!isRecord(control) || !['id', 'name', 'technology', 'capability', 'root', 'applicability', 'reason'].every(field => typeof control[field] === 'string') ||
-            ids.has(String(control.id)) || !technologies.has(String(control.technology)) ||
-            typeof control.execution_order !== 'number' || !Number.isInteger(control.execution_order) || control.execution_order < 1 ||
-            !['applicable', 'not_applicable', 'capability_unavailable', 'tool_unavailable', 'technology_absent', 'ambiguous'].includes(String(control.applicability)) ||
-            path.isAbsolute(String(control.root)) || !containsPath(target, path.resolve(target, String(control.root)))) {
-            throw new Error('Controle du plan invalide ou hors Target.');
-        }
-        ids.add(String(control.id));
+        const id = isRecord(control) && typeof control.id === 'string' && control.id ? control.id : '(sans identifiant)';
+        const root = isRecord(control) && typeof control.root === 'string' ? control.root : '';
+        const reject = (why: string): never => { throw new Error(`Controle du plan invalide ou hors Target : ${id} (racine « ${root} ») : ${why}.`); };
+        if (!isRecord(control) || !['id', 'name', 'technology', 'capability', 'root', 'applicability', 'reason'].every(field => typeof control[field] === 'string')) { reject('champ texte manquant'); }
+        if (ids.has(id)) { reject('identifiant duplique'); }
+        if (!technologies.has(String(control.technology))) { reject(`technologie « ${String(control.technology)} » absente de l inventaire`); }
+        if (typeof control.execution_order !== 'number' || !Number.isInteger(control.execution_order) || control.execution_order < 1) { reject('ordre d execution invalide'); }
+        if (!applicability.has(String(control.applicability))) { reject(`applicabilite « ${String(control.applicability)} » non reconnue`); }
+        if (path.isAbsolute(root)) { reject('racine absolue'); }
+        const resolved = path.resolve(target, root);
+        if (!containsPath(target, resolved)) { reject(`chemin resolu hors Target (${resolved})`); }
+        ids.add(id);
     }
     return report as unknown as PreparationReport;
 }

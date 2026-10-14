@@ -182,6 +182,46 @@ func TestContainerFilesInSubdirectories(t *testing.T) {
 	}
 }
 
+func TestRootProofSurvivesEvidenceCap(t *testing.T) {
+	repo := t.TempDir()
+	for i := 0; i < 12; i++ {
+		mustWrite(t, filepath.Join(repo, "mod"+strconv.Itoa(i), "main.tf"), "resource \"a\" \"b\" {}\n")
+	}
+	mustWrite(t, filepath.Join(repo, ".gitpod.Dockerfile"), "FROM scratch\n")
+	mustWrite(t, filepath.Join(repo, "images", "app.Dockerfile"), "FROM scratch\n")
+	mustWrite(t, filepath.Join(repo, "scripts", "run.sh"), "#!/bin/sh\necho ok\n")
+	mustWrite(t, filepath.Join(repo, "app.py"), "import os\n")
+	mustWrite(t, filepath.Join(repo, "requirements.txt"), "requests==2.32.3\n")
+	mustWrite(t, filepath.Join(repo, "ansible.cfg"), "[defaults]\n")
+	mustWrite(t, filepath.Join(repo, "playbooks", "site.yml"), "- hosts: all\n  tasks:\n    - debug: msg=ok\n")
+	res, err := DiscoverAll(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tf := tech(t, res, "terraform")
+	if len(tf.Roots) != maxEvidence {
+		t.Fatalf("terraform roots = %d, want the cap %d", len(tf.Roots), maxEvidence)
+	}
+	for _, root := range tf.Roots {
+		joined := strings.Join(tf.RootProof[root], ",")
+		if !strings.Contains(joined, ".tf") {
+			t.Fatalf("root %s lost its .tf proof: %s", root, joined)
+		}
+	}
+	docker := tech(t, res, "docker")
+	if docker.Status != "detected" {
+		t.Fatalf("docker = %+v", docker)
+	}
+	var tokens []string
+	for _, list := range docker.RootProof {
+		tokens = append(tokens, list...)
+	}
+	joined := strings.Join(tokens, ",")
+	if !strings.Contains(joined, ".gitpod.Dockerfile") || !strings.Contains(joined, "app.Dockerfile") {
+		t.Fatalf("docker proof = %s", joined)
+	}
+}
+
 func TestPathHasSkippedDir(t *testing.T) {
 	if !PathHasSkippedDir("cli/testdata/README.md") || !PathHasSkippedDir(`cli\fixtures\a.md`) || PathHasSkippedDir("docs/README.md") {
 		t.Fatal("skip detection")

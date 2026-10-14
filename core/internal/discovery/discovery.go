@@ -16,12 +16,13 @@ import (
 
 // TechnologyRecord represents a detected technology.
 type TechnologyRecord struct {
-	Technology    string   `json:"technology"`
-	Status        string   `json:"status"` // detected, absent, ambiguous
-	Evidence      []string `json:"evidence"`
-	EvidenceTotal int      `json:"evidence_total"`
-	Roots         []string `json:"roots"`
-	Ambiguities   []string `json:"ambiguities"`
+	Technology    string              `json:"technology"`
+	Status        string              `json:"status"` // detected, absent, ambiguous
+	Evidence      []string            `json:"evidence"`
+	EvidenceTotal int                 `json:"evidence_total"`
+	Roots         []string            `json:"roots"`
+	Ambiguities   []string            `json:"ambiguities"`
+	RootProof     map[string][]string `json:"root_proof,omitempty"`
 }
 
 // AmbiguityDetail represents an ambiguity with context.
@@ -127,6 +128,7 @@ type techAccumulator struct {
 	evidenceTotal int
 	roots         map[string]bool
 	ambiguities   map[string]bool
+	proof         map[string]map[string]struct{}
 }
 
 func newAccumulator(tech string) *techAccumulator {
@@ -142,14 +144,17 @@ func newAccumulator(tech string) *techAccumulator {
 
 func (acc *techAccumulator) addEvidence(relFile, relRoot, status, ambiguity string) {
 	acc.evidenceTotal++
-	if len(acc.evidence) < maxEvidence {
-		acc.evidence[relFile] = true
-	}
 	if relRoot == "" {
 		relRoot = "."
 	}
-	if _, marked := acc.markers[relFile]; marked || len(acc.roots) < maxEvidence {
-		acc.roots[relRoot] = true
+	if !acc.roots[relRoot] && len(acc.roots) >= maxEvidence {
+		return
+	}
+	firstRoot := !acc.roots[relRoot]
+	acc.roots[relRoot] = true
+	acc.noteProof(relRoot, relFile)
+	if firstRoot || len(acc.evidence) < maxEvidence {
+		acc.evidence[relFile] = true
 	}
 	if status == "detected" {
 		acc.status = "detected"
@@ -196,6 +201,16 @@ func (acc *techAccumulator) toRecord() TechnologyRecord {
 	}
 	sort.Strings(ambList)
 
+	proof := map[string][]string{}
+	for root, tokens := range acc.proof {
+		list := make([]string, 0, len(tokens))
+		for token := range tokens {
+			list = append(list, token)
+		}
+		sort.Strings(list)
+		proof[root] = list
+	}
+
 	finalStatus := acc.status
 	if len(ambList) > 0 {
 		finalStatus = "ambiguous"
@@ -210,6 +225,25 @@ func (acc *techAccumulator) toRecord() TechnologyRecord {
 		EvidenceTotal: acc.evidenceTotal,
 		Roots:         rootsList,
 		Ambiguities:   ambList,
+		RootProof:     proof,
+	}
+}
+
+func (acc *techAccumulator) noteProof(relRoot, relFile string) {
+	if acc.proof == nil {
+		acc.proof = map[string]map[string]struct{}{}
+	}
+	tokens := acc.proof[relRoot]
+	if tokens == nil {
+		tokens = map[string]struct{}{}
+		acc.proof[relRoot] = tokens
+	}
+	base := filepath.Base(relFile)
+	if base != "" && base != "." {
+		tokens[base] = struct{}{}
+	}
+	if ext := strings.ToLower(filepath.Ext(base)); ext != "" {
+		tokens[ext] = struct{}{}
 	}
 }
 

@@ -16,7 +16,7 @@ import {
     VisualStatus
 } from './model';
 import { daemonBinaryDirectory, isOurDaemonImage } from './daemonLifecycle.js';
-import { groupUnavailableLines } from './reportLayout';
+import { countsAsUnavailable, groupUnavailableLines } from './reportLayout';
 import { engineVersionMismatch, expectedEngineVersion } from './engineVersion.js';
 
 export { engineVersionMismatch, expectedEngineVersion, setExpectedEngineVersion } from './engineVersion.js';
@@ -852,7 +852,7 @@ export async function prepare(source: string, target: string, client?: DaemonCli
         log?.(`demon : ${Date.now() - daemonStarted} ms`);
         await daemon.approveWorkspace(canonicalTarget);
         const planStarted = Date.now();
-        const plan = await daemon.getPlan(canonicalTarget);
+        const plan = parsePreparation(JSON.stringify(await daemon.getPlan(canonicalTarget)), canonicalTarget, true);
         const body = JSON.stringify(plan);
         log?.(`plan recu : ${Date.now() - planStarted} ms, ${Buffer.byteLength(body)} octets`);
         const writeStarted = Date.now();
@@ -956,7 +956,7 @@ async function stream(
                         else if (result?.status === 'fail') { log(`exécuté KO : ${id}`); }
                         else if (result?.status === 'error') { log(`erreur : ${id} — ${reason?.message || ''}`); }
                         else if (code === 'technology_absent') { absent.push(technology); }
-                        else { unavailable.push(`${id} — ${reason?.message || 'indisponible'}`); }
+                        else if (countsAsUnavailable(code)) { unavailable.push(`${id} — ${reason?.message || 'indisponible'}`); }
                     } else if (event.type === 'session_completed' || event.type === 'session_cancelled') {
                         const technologies = technologiesAbsentFromRun(executed, absent);
                         if (technologies.length) { log(`ignorés (technologie absente) : ${technologies.join(', ')}`); }
@@ -965,8 +965,9 @@ async function stream(
                     }
                 }
                 changed();
-            } catch {
-                // Ignorer les erreurs d'événement hors séquence en transit
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                if (message.includes('Controle du plan') || message.includes('Inventaire de technologies') || message.includes('plan v1')) { throw error; }
             }
         }, signal);
     } finally {
