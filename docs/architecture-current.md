@@ -43,7 +43,7 @@ Le moteur reçoit un dossier local cible (la *Target*), sans compte de forge ni 
 
 Le résolveur d'outils est entièrement découplé de l'environnement virtuel historique (`.venv`) et applique une recherche ordonnée et déterministe :
 
-1. **Binaires autonomes (`.tools/bin/<command>[.exe]`)** : Outils CLI natifs pré-positionnés ou synchronisés (`compliance`, `hadolint`, `tflint`, `terraform`, `tofu`, `terragrunt`, `shellcheck`, `trivy`, `gitleaks`, `ruff`).
+1. **Binaires autonomes (`.tools/bin/<command>[.exe]`)** : Outils du catalogue pré-positionnés ou synchronisés (`ruff`, `hadolint`, `tflint`, `terraform`, `tofu`, `terragrunt`, `shellcheck`, `trivy`) et le binaire `compliance`.
 2. **Environnement Python autonome (`.tools/python/Scripts/` ou `.tools/python/bin/`)** : Outils Python installés dans la distribution autonome locale (`bandit`, `pylint`, `pytest`, `pip-audit`, `checkov`).
 3. **Cache runtime du dépôt (`.tools/runtime/<platform>/<command>/...`)** puis **cache de distribution (`~/.compliance/tools/bin/<macos-x64|macos-arm64|...>/<command>`)** produit par `compliance runtime sync`.
 4. **Préfixes macOS**, consultés aussi quand VS Code est lancé depuis le Dock : `/opt/homebrew/bin`, `/opt/homebrew/sbin`, `/usr/local/bin`, `/usr/local/sbin`, `~/.local/bin`, `~/Library/Python/*/bin`, `~/.pyenv/shims`.

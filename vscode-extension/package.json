@@ -1,15 +1,22 @@
 {
   "name": "compliance-local-pipelines",
-  "displayName": "Compliance Local Pipelines",
-  "description": "Preparation des pipelines de conformite pour une Target locale externe.",
+  "displayName": "ICP - Iac Compliance Platform",
+  "description": "Audit local de conformité pour Python, Terraform, conteneurs, Kubernetes, Helm, Ansible et Shell.",
   "version": "2.0.0",
-  "private": true,
   "publisher": "compliance-platform",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "categories": ["Linters", "Testing"],
+  "keywords": ["compliance", "lint", "security", "terraform", "python", "kubernetes", "docker", "ansible"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LORD-SOUPEX/Compliance_Platform.git"
+  },
   "engines": { "vscode": "^1.81.0" },
   "scripts": {
     "compile": "tsc -p tsconfig.json",
     "pretest": "node -e \"const { spawnSync } = require('child_process'); const py = process.platform === 'win32' ? (spawnSync('where.exe', ['py']).status === 0 ? 'py' : 'python') : 'python3'; const res = spawnSync(py, ['package_vsix.py', '--ensure-binaries'], { stdio: 'inherit' }); process.exit(res.status || 0);\"",
-    "test": "tsc --noEmit && node -e \"const { spawnSync } = require('child_process'); const path = require('path'); const bin = process.platform === 'win32' ? path.join(__dirname, '..', '.tools', 'bin', 'compliance.exe') : path.join(__dirname, '..', '.tools', 'bin', 'compliance'); const res = spawnSync(bin, ['selftest'], { stdio: 'inherit' }); process.exit(res.status || 0);\"",
+    "test": "tsc --noEmit && node -e \"const { spawnSync } = require('child_process'); const path = require('path'); const py = process.platform === 'win32' ? (spawnSync('where.exe', ['py']).status === 0 ? 'py' : 'python') : 'python3'; const check = spawnSync(py, ['package_vsix.py', '--check-vsix'], { stdio: 'inherit' }); if (check.status) process.exit(check.status); const bin = process.platform === 'win32' ? path.join(__dirname, '..', '.tools', 'bin', 'compliance.exe') : path.join(__dirname, '..', '.tools', 'bin', 'compliance'); const res = spawnSync(bin, ['selftest'], { stdio: 'inherit' }); process.exit(res.status || 0);\"",
     "package": "node -e \"const { spawnSync } = require('child_process'); const py = process.platform === 'win32' ? (spawnSync('where.exe', ['py']).status === 0 ? 'py' : 'python') : 'python3'; const res = spawnSync(py, ['package_vsix.py'], { stdio: 'inherit' }); process.exit(res.status || 0);\""
   },
   "main": "./.extension-build/src/extension.js",

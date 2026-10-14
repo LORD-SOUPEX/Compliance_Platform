@@ -1,8 +1,14 @@
-# Compliance Local Pipelines (VS Code Extension)
+# Compliance Local Pipelines
 
-Extension locale autonome de préparation, d'orchestration et d'audit de pipelines de conformité pour cibles locales, pilotée par le moteur Go.
+Audit local de conformité pour une cible de votre choix. L'extension pilote un démon Go sur `127.0.0.1`, sans forge distante et sans compte cloud.
 
----
+Le catalogue couvre Python (`ruff`, `pylint`, `pytest`, `bandit`, `pip-audit`), Terraform et OpenTofu (`terraform fmt`, `tofu fmt`, `tflint`, `checkov`), Terragrunt, conteneurs (`hadolint`, `trivy`), Kubernetes et Helm (`checkov`, `trivy`), Ansible (`ansible-lint`, `yamllint`), Shell (`shellcheck`), Markdown (`markdownlint` via `pre-commit`) et PowerShell (`PSScriptAnalyzer`). JavaScript et TypeScript sont détectés ; aucun linter n'est configuré pour eux.
+
+## Installation
+
+Installez l'extension depuis le Marketplace, puis ouvrez la vue **Compliance Pipelines**. Choisissez une Target externe au dossier de l'extension. Le catalogue est embarqué dans le VSIX : un clone du dépôt n'est pas nécessaire. Les sessions sont écrites dans `~/.compliance/sessions`.
+
+Les binaires du démon (`windows`, `linux`, `darwin`, architectures `amd64` et `arm64`) sont inclus. Sur macOS, l'extension rend le binaire exécutable et retire l'attribut de quarantaine lorsqu'il est présent.
 
 ## Architecture et Principes Clés
 
@@ -13,8 +19,8 @@ L'extension fonctionne selon une architecture découplée sans aucune exécution
   - Protégé par un jeton Bearer cryptographique 256 bits généré à chaque lancement.
   - Protection stricte contre le piratage inter-origine (vérification des en-têtes `Host` et `Origin`).
   - Détection de terminaison de l'éditeur hôte et arrêt automatique sans laisser aucun processus orphelin (gestion par Job Objects sous Windows).
-- **Zéro dépendance PowerShell** :
-  - Tout le parsing, l'ordonnancement en graphe (DAG), la validation des schémas et l'exécution des contrôles sont assurés directement par le binaire Go.
+- **Orchestration par le binaire Go** :
+  - La découverte, le plan et l'exécution passent par le démon. Le contrôle PowerShell, lorsqu'il est applicable, appelle `pwsh` ou Windows PowerShell ; l'extension elle-même ne s'appuie pas sur un script PowerShell.
 - **Support Multi-OS Natif** :
   - Les 6 binaires natifs du moteur Go sont directement compilés et embarqués dans le package VSIX universel :
     - `bin/compliance-windows-amd64.exe`
@@ -70,7 +76,7 @@ npm install
 # Compilation TypeScript
 npm run compile
 
-# Lancement des tests de l'extension (34 scénarios) avec régénération automatique des binaires
+# Selftest du moteur Go (20/20) après compilation TypeScript
 npm test
 
 # Packaging du VSIX universel (compilation automatique des 6 binaires multi-OS Go)

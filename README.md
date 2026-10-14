@@ -26,17 +26,17 @@ La plateforme détecte automatiquement les technologies suivantes et planifie le
 
 | Écosystème | Technologies & Preuves | Capacités & Outils Associés |
 | :--- | :--- | :--- |
-| **Python** | `requirements.txt`, `pyproject.toml`, `setup.py`, `Pipfile` | Formatage & Linting (`ruff`), Sécurité AST (`bandit`) |
-| **Conteneurs** | `Dockerfile`, `Containerfile` | Linting Dockerfile (`hadolint`), Scan vulnérabilités (`trivy`) |
-| **Compose** | `docker-compose.yml`, `compose.yaml` | Linting & Bonnes pratiques (`hadolint`, `yamllint`, `trivy`) |
-| **Kubernetes** | Manifestes YAML K8s (`k8s/`, `deployment.yaml`) | Validation schémas K8s (`kubeconform`), Sécurité (`trivy`) |
-| **Ansible** | `playbook.yml`, `roles/`, `ansible.cfg` | Qualité & Bonnes pratiques (`ansible-lint`), YAML (`yamllint`) |
-| **Terraform & OpenTofu**| `*.tf`, `*.tofu`, `.terraform` | Linting HCL2 (`tflint`), Analyse de sécurité (`trivy`) |
-| **Terragrunt** | `terragrunt.hcl` | Validation de configuration HCL |
-| **Helm** | `Chart.yaml`, `values.yaml` | Validation de charts Helm (`kubeconform`, `yamllint`) |
-| **Shell** | Scripts `*.sh`, `*.bash` avec shebang | Analyse statique POSIX/Bash (`shellcheck`) |
-| **Documentation** | Fichiers Markdown `*.md` | Style et structure documentaire (`markdownlint`) |
-| **PowerShell** | Scripts `*.ps1`, `*.psm1` | Analyse statique (`PSScriptAnalyzer` via sonde système) |
+| **Python** | `requirements.txt`, `pyproject.toml`, `setup.py`, `Pipfile` | Formatage et lint (`ruff`), lint (`pylint`), tests (`pytest`), sécurité AST (`bandit`), audit des dépendances (`pip-audit`) |
+| **Conteneurs** | `Dockerfile`, `Containerfile` | Lint Dockerfile (`hadolint`), scan de vulnérabilités (`trivy`) |
+| **Kubernetes** | Manifestes YAML Kubernetes | Sécurité et politique (`checkov`), scan (`trivy`) |
+| **Ansible** | `playbook.yml`, `roles/`, `ansible.cfg` | Lint (`ansible-lint`), YAML (`yamllint`) |
+| **Terraform & OpenTofu** | `*.tf`, `*.tofu` | Formatage (`terraform fmt`, `tofu fmt`), lint (`tflint`), sécurité (`checkov`) |
+| **Terragrunt** | `terragrunt.hcl` | Formatage HCL (`terragrunt hcl fmt`) |
+| **Helm** | `Chart.yaml`, `values.yaml` | Sécurité et politique (`checkov`), scan (`trivy`) |
+| **Shell** | Scripts `.sh` | Analyse statique (`shellcheck`) |
+| **Documentation** | Fichiers Markdown `.md` | Lint (`markdownlint`, via la commande `pre-commit`) |
+| **PowerShell** | Scripts `.ps1`, `.psm1`, `.psd1` | Analyse statique (`PSScriptAnalyzer`, exécuté par `pwsh` ou Windows PowerShell) |
+| **JavaScript & TypeScript** | `.js`, `.jsx`, `.ts`, `.tsx` | Technologie détectée ; aucun outil de lint n'est configuré dans le catalogue |
 
 ---
 
