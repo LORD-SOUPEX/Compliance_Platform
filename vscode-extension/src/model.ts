@@ -1,3 +1,4 @@
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 export type VisualStatus = 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Error' | 'Warning' | 'Skipped' | 'Blocked' | 'Not applicable';
@@ -49,8 +50,34 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function resolveExisting(input: string): string {
+    const absolute = path.resolve(input);
+    const read = (value: string): string => fs.realpathSync.native ? fs.realpathSync.native(value) : fs.realpathSync(value);
+    try {
+        return read(absolute);
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT') { return absolute; }
+    }
+    let current = absolute;
+    const missing: string[] = [];
+    while (true) {
+        try {
+            const resolved = read(current);
+            return missing.reduceRight((prefix, segment) => path.join(prefix, segment), resolved);
+        } catch (error) {
+            const code = (error as NodeJS.ErrnoException).code;
+            if (code !== 'ENOENT') { return absolute; }
+            const parent = path.dirname(current);
+            if (parent === current) { return absolute; }
+            missing.push(path.basename(current));
+            current = parent;
+        }
+    }
+}
+
 export function containsPath(parent: string, candidate: string): boolean {
-    const relative = path.relative(parent, candidate);
+    const relative = path.relative(resolveExisting(parent), resolveExisting(candidate));
     return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
@@ -59,8 +86,6 @@ export function controlOutputText(runId: string, controlId: string, value: unkno
         typeof value.stdout !== 'string' || typeof value.stderr !== 'string' || typeof value.duration_ms !== 'number') { throw new Error('Sorties invalides ou d un autre controle.'); }
     return `Session : ${runId}\nControle : ${controlId}\nStatut canonique : ${value.status}\nDuree : ${value.duration_ms} ms\n\nSTDOUT\n${value.stdout}\n\nSTDERR\n${value.stderr}\n\nDIAGNOSTICS\n${JSON.stringify(value.diagnostics, null, 2)}`;
 }
-
-import * as fs from 'node:fs';
 
 export function isSameDirectory(a: string, b: string): boolean {
     if (path.relative(a, b) === '') { return true; }

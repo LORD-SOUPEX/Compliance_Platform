@@ -52,7 +52,7 @@
       "evidence": [
         "Binaire natif compliance-darwin-amd64 compile et embarque dans le VSIX universel"
       ],
-      "limitations": ["Execution physique du selftest sur machine macOS Intel requise pour qualification formelle"]
+      "limitations": ["Selftest physique sur macOS Intel encore requis avant le statut qualified. Resolution locale Homebrew, catalogue embarque et binaire VSIX executable sont en place."]
     },
     {
       "id": "macos-arm64",
@@ -62,7 +62,7 @@
       "evidence": [
         "Binaire natif compliance-darwin-arm64 compile et embarque dans le VSIX universel"
       ],
-      "limitations": ["Execution physique du selftest sur Apple Silicon requise pour qualification formelle"]
+      "limitations": ["Selftest physique sur Apple Silicon encore requis avant le statut qualified. Resolution locale Homebrew, catalogue embarque et binaire VSIX executable sont en place."]
     }
   ]
 }

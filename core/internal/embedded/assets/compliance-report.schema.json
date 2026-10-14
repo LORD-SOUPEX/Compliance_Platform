@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://compliance-platform.local/schemas/compliance-report-v1.json",
+  "title": "Compliance Platform Report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "engine_version", "generated_at", "metadata", "repository", "execution_status", "discovery", "matrix", "resolver", "execution_plan", "execution_results", "findings", "diagnostics", "summary", "coverage", "limitations", "verdict", "verdict_reasons", "advisory"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "engine_version": { "type": "string", "minLength": 1 },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "metadata": { "type": "object", "required": ["run_id", "source_mode", "source_adapter", "platform", "catalog_schema_version", "network_authorized", "code_execution_authorized"], "properties": { "run_id": { "type": "string" }, "source_mode": { "type": "string" }, "source_adapter": { "enum": ["PowerShell", "Bash", "VSCode", "GitLab", "Legacy", "Go", "Daemon"] }, "catalog_sha256": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" }, "platform_qualification_status": { "enum": ["targeted", "experimental", "qualified", null] }, "redaction_applied": { "type": "boolean" }, "network_authorized": { "type": "boolean" }, "code_execution_authorized": { "type": "boolean" } } },
+    "repository": { "type": "string", "minLength": 1 },
+    "execution_status": { "enum": ["planned", "completed", "blocked", "error"] },
+    "discovery": { "type": "object" },
+    "matrix": { "type": "array" },
+    "resolver": { "type": "array" },
+    "execution_plan": { "type": "object", "required": ["schema_version", "repository", "budgets", "permissions", "controls"] },
+    "execution_results": { "type": "array", "items": { "$ref": "#/$defs/result" } },
+    "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
+    "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } },
+    "summary": { "type": "object", "required": ["success", "fail", "error", "skipped", "critical_errors"] },
+    "coverage": { "type": "object", "required": ["complete", "planned_controls", "executed_controls", "omitted_required_controls", "dependency_skips", "limitations"] },
+    "metrics": { "type": "object", "required": ["discovery_ms", "resolver_ms", "compliance_ms", "reporting_ms"], "properties": { "discovery_ms": { "type": "integer", "minimum": 0 }, "resolver_ms": { "type": "integer", "minimum": 0 }, "compliance_ms": { "type": "integer", "minimum": 0 }, "reporting_ms": { "type": "integer", "minimum": 0 } } },
+    "limitations": { "type": "array" },
+    "verdict": { "enum": ["PASS", "FAIL", null] },
+    "verdict_reasons": { "type": "array", "items": { "type": "string" } },
+    "advisory": { "const": true }
+  },
+  "$defs": {
+    "result": {
+      "type": "object",
+      "required": ["control_id", "control_catalog_id", "name", "technology", "capability", "root", "severity", "status", "execution_start", "execution_end", "duration_ms", "tool_version", "stdout", "stderr", "exit_code", "output_truncated", "critical", "diagnostics"],
+      "properties": {
+        "status": { "enum": ["success", "fail", "error", "skipped"] },
+        "severity": { "enum": ["low", "medium", "high", "critical"] },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "required": ["id", "control_id", "name", "technology", "capability", "root", "severity", "status", "diagnostics"],
+      "properties": {
+        "status": { "enum": ["fail", "error"] },
+        "severity": { "enum": ["low", "medium", "high", "critical"] }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "required": ["code", "message", "critical"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string" },
+        "critical": { "type": "boolean" }
+      }
+    }
+  }
+}

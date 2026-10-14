@@ -34,8 +34,8 @@ var (
 	ErrForbiddenHost            = errors.New("en-tête Host non autorisé (rejet DNS Rebinding)")
 	ErrForbiddenOrigin          = errors.New("en-tête Origin externe ou non autorisé (rejet CSRF)")
 	ErrWorkspaceUntrusted       = errors.New("répertoire cible hors périmètre des espaces autorisés")
-	ErrRunNotFound             = errors.New("session d'audit introuvable")
-	ErrRunAlreadyFinished      = errors.New("la session d'audit est déjà terminée")
+	ErrRunNotFound              = errors.New("session d'audit introuvable")
+	ErrRunAlreadyFinished       = errors.New("la session d'audit est déjà terminée")
 	ErrApplyDestroyNeedsConfirm = errors.New("les étapes apply_destroy ne peuvent être exécutées que de manière unitaire avec confirmation explicite")
 )
 
@@ -95,7 +95,7 @@ type CreateRunRequest struct {
 	RunID               string   `json:"run_id,omitempty"`
 	OutputDir           string   `json:"output_dir,omitempty"`
 	PlanOnly            bool     `json:"plan_only"`
-	ControlID           string   `json:"control_id,omitempty"`   // Optional: run single control
+	ControlID           string   `json:"control_id,omitempty"` // Optional: run single control
 	AllowNetwork        bool     `json:"allow_network"`
 	AllowCodeExecution  bool     `json:"allow_code_execution"`
 	ConfirmApplyDestroy bool     `json:"confirm_apply_destroy"` // Required if running apply_destroy control
@@ -193,6 +193,9 @@ func WriteProtectedToken(path string, token string) error {
 
 	if err := os.WriteFile(path, []byte(token), 0600); err != nil {
 		return fmt.Errorf("écriture du fichier de jeton: %w", err)
+	}
+	if err := os.Chmod(path, 0600); err != nil {
+		return fmt.Errorf("restriction du fichier de jeton: %w", err)
 	}
 
 	if runtime.GOOS == "windows" {
@@ -366,20 +369,10 @@ func (sm *SecurityManager) ValidateTargetPath(targetPath string) (string, error)
 	return "", fmt.Errorf("%w: %s n'appartient à aucun workspace approuvé", ErrWorkspaceUntrusted, targetPath)
 }
 
-// CanonicalizePath cleans path and resolves all symlinks.
+// CanonicalizePath cleans path and resolves all symlinks, including the
+// longest existing ancestor when the leaf does not exist yet.
 func CanonicalizePath(p string) (string, error) {
-	abs, err := filepath.Abs(p)
-	if err != nil {
-		return "", err
-	}
-	real, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return filepath.Clean(abs), nil
-		}
-		return "", err
-	}
-	return filepath.Clean(real), nil
+	return osutil.CanonicalPath(p)
 }
 
 // Middleware creates an HTTP handler middleware enforcing Host, Origin, and Bearer authentication.
@@ -552,16 +545,16 @@ func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req Create
 	})
 
 	opts := engine.ComplianceOptions{
-		RepoRoot:          req.TargetPath,
-		PlatformRoot:      sm.platformRoot,
-		CatalogPath:       sm.catalogPath,
-		AllowNetwork:      req.AllowNetwork,
+		RepoRoot:           req.TargetPath,
+		PlatformRoot:       sm.platformRoot,
+		CatalogPath:        sm.catalogPath,
+		AllowNetwork:       req.AllowNetwork,
 		AllowCodeExecution: req.AllowCodeExecution,
-		PlanOnly:          req.PlanOnly,
-		RedactionPatterns: req.RedactionPatterns,
-		RunID:             s.ID,
-		SourceAdapter:     "VSCode",
-		CandidateResolver: sm.resolver,
+		PlanOnly:           req.PlanOnly,
+		RedactionPatterns:  req.RedactionPatterns,
+		RunID:              s.ID,
+		SourceAdapter:      "VSCode",
+		CandidateResolver:  sm.resolver,
 		OnPlanReady: func(planRep *report.Report) {
 			if b, err := json.MarshalIndent(planRep, "", "  "); err == nil {
 				planPath := filepath.Join(s.OutputDir, "execution-plan.json")
@@ -947,14 +940,14 @@ func StartDaemon(cfg DaemonConfig) (*DaemonServer, error) {
 	sessions := NewSessionManager(cfg.StateDir, cfg.PlatformRoot, cfg.CatalogPath, cfg.Version)
 
 	srv := &DaemonServer{
-		cfg:        cfg,
-		listener:   listener,
-		security:   security,
-		sessions:   sessions,
-		startedAt:  time.Now().UTC(),
-		tokenPath:  tokenPath,
-		lockPath:   lockPath,
-		statePath:  statePath,
+		cfg:       cfg,
+		listener:  listener,
+		security:  security,
+		sessions:  sessions,
+		startedAt: time.Now().UTC(),
+		tokenPath: tokenPath,
+		lockPath:  lockPath,
+		statePath: statePath,
 	}
 
 	state := DaemonState{
@@ -1072,14 +1065,19 @@ func (s *DaemonServer) handleApproveWorkspace(w http.ResponseWriter, r *http.Req
 		http.Error(w, "Chemin de workspace manquant", http.StatusBadRequest)
 		return
 	}
-	if err := s.security.AddApprovedWorkspace(targetPath); err != nil {
+	canonical, err := CanonicalizePath(targetPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.security.AddApprovedWorkspace(canonical); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":    "approved",
-		"workspace": targetPath,
-		"path":      targetPath,
+		"workspace": canonical,
+		"path":      canonical,
 	})
 }
 

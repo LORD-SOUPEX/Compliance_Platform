@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"compliance/internal/osutil"
 )
 
 // TechnologyRecord represents a detected technology.
@@ -192,7 +194,7 @@ func (acc *techAccumulator) toRecord() TechnologyRecord {
 // DiscoverAll scans repoRoot and discovers all 13 technologies supported by the Compliance Platform.
 func DiscoverAll(repoRoot string) (*DiscoveryResult, error) {
 	start := time.Now()
-	absRepo, err := filepath.Abs(repoRoot)
+	absRepo, err := osutil.CanonicalPath(repoRoot)
 	if err != nil {
 		return nil, err
 	}

@@ -12,8 +12,9 @@ Le moteur Go (`core/`) s'appuie sur une hiérarchie de résolution stricte pour 
 
 1. **Binaires locaux dédiés (`.tools/bin/`)** : Emplacement prioritaire contenant les exécutables natifs épinglés et vérifiés.
 2. **Environnement Python autonome (`.tools/python/`)** : Python portable indépendant de l'hôte pour l'exécution des modules d'analyse (ex. Ruff, Checkov, pip-audit).
-3. **Cache de distribution & Index (`.tools/runtime/`)** : Miroir local vérifié par signature cryptographique Ed25519 (`.config/runtime-manifest.json.sig`).
-4. **PATH système contrôlé** : Utilisé uniquement pour les outils système non redistribuables si explicitement configurés.
+3. **Cache de distribution** : `compliance runtime sync` installe les binaires vérifiés dans `~/.compliance/tools/bin/<plateforme>/` (`macos-x64`, `macos-arm64`, etc.). Le miroir `.tools/runtime/<plateforme>/` reste consulté en secours. La signature Ed25519 est `.config/runtime-manifest.json.sig`.
+4. **Préfixes macOS** : `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`, `~/Library/Python/*/bin` et `~/.pyenv/shims`, y compris lorsque le PATH GUI de VS Code ne contient pas Homebrew.
+5. **PATH du processus** : dernier recours (`exec.LookPath`), après les emplacements ci-dessus.
 
 En mode déconnecté / hors-ligne, le moteur utilise exclusivement les artefacts et caches locaux validés par leurs sommes de contrôle SHA-256.
 
@@ -33,7 +34,10 @@ npm run package
 ```
 
 Sous le capot, `vscode-extension/package_vsix.py` génère un conteneur conforme à la norme **Open Packaging Conventions (OPC)** :
-- Il compile et intègre les binaires natifs Go pour l'ensemble des 6 cibles ciblées :
+- Il recopie `.config/` dans `core/internal/embedded/assets/` avant `go build`, pour que `//go:embed` (qui ne peut pas remonter au-dessus du module `core`) reste aligné sur le catalogue.
+- Il embarque ces mêmes fichiers dans `extension/.config/` du VSIX. Une extension installée hors dépôt trouve son catalogue sans clone Git. Les sessions sont alors écrites dans `~/.compliance/sessions`, pas dans le dossier de l'extension.
+- Les binaires POSIX du ZIP portent le mode Unix `0755` (`external_attr`). Au lancement, l'extension réapplique `chmod 0755` et, sur macOS, retire `com.apple.quarantine` si l'attribut est présent.
+- Il compile et intègre les binaires natifs Go pour l'ensemble des 6 cibles :
   - `bin/compliance-windows-amd64.exe`
   - `bin/compliance-windows-arm64.exe`
   - `bin/compliance-linux-amd64`
@@ -81,8 +85,8 @@ Conformément à `.config/platform-support.json` :
 | **windows-arm64** | **Targeted** | Binaire natif `compliance-windows-arm64.exe` cross-compilé et embarqué dans le VSIX universel. |
 | **linux-x64** | **Targeted** | Binaire natif `compliance-linux-amd64` cross-compilé (`GOOS=linux GOARCH=amd64`). Confinement POSIX validé. |
 | **linux-arm64** | **Targeted** | Binaire natif `compliance-linux-arm64` cross-compilé (`GOOS=linux GOARCH=arm64`) embarqué dans le VSIX. |
-| **darwin-amd64** | **Targeted** | Binaire natif `compliance-darwin-amd64` cross-compilé embarqué dans le package VSIX. |
-| **darwin-arm64** | **Targeted** | Binaire natif `compliance-darwin-arm64` cross-compilé (`GOOS=darwin GOARCH=arm64`) embarqué dans le VSIX. |
+| **macos-x64** | **Targeted** | Binaire `compliance-darwin-amd64` embarqué. Identifiant catalogue `macos-x64`. Selftest physique Intel encore requis pour `qualified`. |
+| **macos-arm64** | **Targeted** | Binaire `compliance-darwin-arm64` embarqué. Identifiant catalogue `macos-arm64`. Selftest physique Apple Silicon encore requis pour `qualified`. |
 
 ---
 

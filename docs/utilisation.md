@@ -25,7 +25,7 @@ code --new-window --extensionDevelopmentPath="./vscode-extension" .
 *Alternative avec le VSIX autonome packagé :*
 ```bash
 npm run package
-code --install-extension dist/compliance-local-pipelines-0.1.0.vsix
+code --install-extension dist/compliance-local-pipelines-2.0.0.vsix
 ```
 
 ### Parcours utilisateur dans l'éditeur
@@ -58,7 +58,9 @@ Le moteur Go autonome peut être invoqué directement depuis n'importe quel shel
 
 ### Commandes Fondamentales
 
-Assurez-vous que l'exécutable `compliance` est disponible (dans `.tools/bin/compliance.exe` ou dans votre `PATH`) :
+L'exécutable `compliance` peut être celui de `.tools/bin/` ou le binaire embarqué dans le VSIX. Le catalogue est lu sur disque s'il est présent, sinon depuis les fichiers embarqués dans le binaire : un dossier temporaire qui ne contient que `compliance` peut exécuter `compliance selftest`.
+
+Sur macOS, un VS Code ouvert depuis le Dock n'hérite pas de `~/.zshrc`. Le résolveur consulte quand même Homebrew (`/opt/homebrew/bin` sur Apple Silicon, `/usr/local/bin` sur Intel), `~/.local/bin` et pyenv. PowerShell 7 est `pwsh` (`/opt/homebrew/bin/pwsh` ou `/usr/local/microsoft/powershell/7/pwsh`).
 
 ```bash
 # Vérifier la validité de l'installation et du démon

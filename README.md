@@ -13,7 +13,8 @@ Le moteur d'exécution autonome écrit en Go (`core/`) et son démon local HTTP/
 - **Moteur Go autonome multi-OS (v2.0.0)** : Discovery, Capability Matrix, Tool Resolver, Compliance Engine, Reporting canonique et serveur local (démon HTTP/SSE).
 - **Extension VS Code intégrée** : Interface TreeView locale connectée au démon local via HTTP et streaming d'événements temps réel (SSE), avec lecteur de rapports interactif natif et visualisations de findings.
 - **Sécurité et confinement stricts** : Démon éphémère ou persistant sur `127.0.0.1:0`, jeton Bearer 256 bits généré localement, validation stricte des en-têtes `Host` et `Origin`, approbation explicite des dossiers cibles (*workspace approval*), confinement des processus enfants (Job Objects sous Windows, process groups POSIX sous Linux/macOS) et annulation immédiate sans processus orphelin.
-- **Résolution d'outils découplée** : Résolution ordonnée via binaires autonomes (`.tools/bin/`), environnement Python autonome (`.tools/python/`), cache runtime et PATH système, sans dépendance à un `.venv` local.
+- **Résolution d'outils découplée** : Binaires locaux (`.tools/bin/`), Python autonome (`.tools/python/`), cache `~/.compliance/tools/bin/<plateforme>/`, préfixes macOS (Homebrew, `~/.local/bin`, pyenv) puis PATH. Un VS Code lancé depuis le Dock trouve les outils Homebrew sans hériter de `~/.zshrc`.
+- **Autonomie hors dépôt** : Le catalogue et les schémas sont embarqués dans le binaire (`//go:embed`) et dans le VSIX. `compliance selftest` fonctionne sans clone Git.
 - **Validation autonome intégrée (`compliance selftest`)** : Suite d'auto-test en 20 étapes vérifiant le cycle de vie du démon, la sécurité, l'exécution et l'annulation sur port éphémère.
 - **Catalogue de 28 contrôles standardisés** couvrant les écosystèmes majeurs du développement et des infrastructures cloud modernes.
 
@@ -51,6 +52,7 @@ Compliance_Platform/
 │   ├── internal/
 │   │   ├── discovery/                  # Détection des technologies et racines
 │   │   ├── distribution/               # Synchronisation et intégrité des outils
+│   │   ├── embedded/                   # Catalogue et schémas embarqués (//go:embed)
 │   │   ├── engine/                     # Moteur d'exécution DAG et gestion des runs
 │   │   ├── matrix/                     # Capability Matrix et sondes d'outils
 │   │   ├── osutil/                     # Confinement multi-OS (Job Objects / POSIX)
@@ -102,6 +104,7 @@ flowchart TD
 
 ### 1. Gestion de la Casse et Normalisation Multi-OS
 - Les comparaisons de chemins (`server.go` et `model.ts`) sont insensibles à la casse sur **Windows** et **macOS** (`runtime.GOOS == "windows" || runtime.GOOS == "darwin"`), et strictement sensibles sur **Linux**.
+- `osutil.CanonicalPath` résout les liens symboliques, y compris le plus long ancêtre existant. Sur macOS, `/var` et `/tmp` sont donc ramenés à `/private/var` et `/private/tmp` avant l'approbation d'un workspace.
 - Tous les chemins sont normalisés via `filepath.ToSlash` pour garantir l'uniformité des contrats JSON et des identifiants de contrôles.
 
 ### 2. Routage HTTP/SSE Résilient (RFC 3986)
@@ -109,7 +112,7 @@ flowchart TD
 - Gestion résiliente de la troncature des dot-segments par les proxys HTTP clients : si le segment final `/.` est normalisé en routeur, le moteur résout automatiquement la variante exacte enregistrée dans la session.
 
 ### 3. Packaging VSIX Universel à la Volée
-- Le script `package_vsix.py` (intégré à `npm run package`) cross-compile automatiquement à la volée les binaires natifs Go pour 6 architectures et les incorpore dans l'archive VSIX :
+- Le script `package_vsix.py` (intégré à `npm run package`) synchronise `.config/` vers l'embed Go, cross-compile les binaires natifs pour 6 architectures, pose le mode Unix `0755` sur les binaires POSIX du VSIX, et embarque `extension/.config/` :
   - `windows-x64` (`compliance-windows-amd64.exe`)
   - `windows-arm64` (`compliance-windows-arm64.exe`)
   - `linux-x64` (`compliance-linux-amd64`)
@@ -168,8 +171,8 @@ L'extension locale s'installe via le package VSIX autonome multi-OS (`vscode-ext
 | **Windows ARM64** | Targeted | Binaire natif `compliance-windows-arm64.exe` cross-compilé et embarqué dans le VSIX universel. |
 | **Linux x64** | Targeted | Binaire natif `compliance-linux-amd64` cross-compilé et embarqué dans le VSIX universel. |
 | **Linux ARM64** | Targeted | Binaire natif `compliance-linux-arm64` cross-compilé et embarqué dans le VSIX universel. |
-| **macOS x64** | Targeted | Binaire natif `compliance-darwin-amd64` cross-compilé et embarqué dans le VSIX universel. |
-| **macOS ARM64** | Targeted | Binaire natif `compliance-darwin-arm64` cross-compilé et embarqué dans le VSIX universel. |
+| **macOS x64** (`macos-x64`, binaire `compliance-darwin-amd64`) | Targeted | Binaire natif embarqué, catalogue autonome, résolution Homebrew. Le statut `qualified` attend un selftest physique sur Mac Intel. |
+| **macOS ARM64** (`macos-arm64`, binaire `compliance-darwin-arm64`) | Targeted | Binaire natif embarqué, catalogue autonome, résolution `/opt/homebrew`. Le statut `qualified` attend un selftest physique sur Apple Silicon. |
 
 ---
 

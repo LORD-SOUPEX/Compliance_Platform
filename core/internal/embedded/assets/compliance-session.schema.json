@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Session locale et progression Compliance v1",
+  "oneOf": [{ "$ref": "#/$defs/session" }, { "$ref": "#/$defs/event" }],
+  "$defs": {
+    "reason": { "type": "object", "required": ["code", "message"], "properties": { "code": { "type": "string", "minLength": 1 }, "message": { "type": "string", "minLength": 1 } } },
+    "session": {
+      "type": "object",
+      "required": ["schema_version", "run_id", "target", "pipeline_source", "started_at", "ended_at", "state", "permissions", "catalog_sha256", "report_path"],
+      "properties": {
+        "schema_version": { "const": 1 }, "run_id": { "type": "string", "pattern": "^[a-f0-9]{32}$" },
+        "target": { "type": "string" }, "pipeline_source": { "type": "string" }, "started_at": { "type": "string", "format": "date-time" },
+        "ended_at": { "type": ["string", "null"] }, "state": { "enum": ["preparing", "running", "cancelling", "completed", "cancelled", "failed", "incomplete"] },
+        "permissions": { "type": "object", "required": ["network", "code_execution"], "properties": { "network": { "type": "boolean" }, "code_execution": { "type": "boolean" } } },
+        "catalog_sha256": { "type": ["string", "null"] }, "report_path": { "type": "string" }
+      }
+    },
+    "event": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "run_id", "sequence", "timestamp", "type", "control_id", "technology", "root", "data"],
+      "properties": {
+        "schema_version": { "const": 1 }, "run_id": { "type": "string", "pattern": "^[a-f0-9]{32}$" }, "sequence": { "type": "integer", "minimum": 1 },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "type": { "enum": ["session_started", "preparation_started", "preparation_completed", "plan_available", "control_started", "control_completed", "session_cancelling", "session_cancelled", "report_available", "session_completed", "session_failed"] },
+        "control_id": { "type": ["string", "null"] }, "technology": { "type": ["string", "null"] }, "root": { "type": ["string", "null"] }, "data": { "type": ["object", "null"] }
+      },
+      "allOf": [{
+        "if": { "properties": { "type": { "const": "control_completed" } } },
+        "then": { "properties": { "data": {
+          "type": "object", "required": ["status", "reason", "result", "output_path"],
+          "properties": { "status": { "enum": ["Succeeded", "Failed", "Error", "Warning", "Skipped", "Blocked", "Not applicable"] }, "output_path": { "type": "string" }, "result": { "type": "object" }, "reason": { "anyOf": [{ "$ref": "#/$defs/reason" }, { "type": "null" }] } },
+          "allOf": [{ "if": { "properties": { "status": { "enum": ["Warning", "Skipped", "Blocked", "Not applicable"] } } }, "then": { "properties": { "reason": { "$ref": "#/$defs/reason" } } } }]
+        } } }
+      }]
+    }
+  }
+}

@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"time"
 
+	"compliance/internal/embedded"
 	"compliance/internal/server"
 )
 
@@ -62,10 +63,10 @@ func Run(platformRoot string) (bool, []TestStep) {
 	_ = os.WriteFile(filepath.Join(fixtureDir, "app.py"), []byte("print('selftest')\n"), 0644)
 	_ = os.WriteFile(filepath.Join(fixtureDir, "Dockerfile"), []byte("FROM alpine:3.18\nCMD [\"echo\", \"test\"]\n"), 0644)
 
-	catalogPath := filepath.Join(platformRoot, ".config", "control-catalog.json")
-	if _, err := os.Stat(catalogPath); os.IsNotExist(err) {
-		// Fallback minimal catalog if needed
-		catalogPath = ""
+	catalogPath, err := embedded.ResolveAsset("control-catalog.json", filepath.Join(platformRoot, ".config", "control-catalog.json"))
+	if err != nil {
+		steps = append(steps, TestStep{Name: "Catalogue embarqué", Error: err.Error()})
+		return false, steps
 	}
 
 	var srv *server.DaemonServer

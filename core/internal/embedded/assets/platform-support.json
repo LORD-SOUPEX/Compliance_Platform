@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "platforms": [
+    {
+      "id": "windows-x64",
+      "os": "windows",
+      "architecture": "x64",
+      "status": "qualified",
+      "evidence": [
+        "Selftest Go autonome valide (20/20 PASS sur port ephemere)",
+        "Suite de tests unitaires Go validee (100% PASS)",
+        "Extension VS Code validee sur demon local (34/34 PASS)",
+        "Binaire natif compliance-windows-amd64.exe embarque dans le VSIX universel"
+      ],
+      "limitations": ["Environnement multi-OS physique non execute hors Windows (Linux et macOS cross-compiles uniquement)"]
+    },
+    {
+      "id": "windows-arm64",
+      "os": "windows",
+      "architecture": "arm64",
+      "status": "targeted",
+      "evidence": [
+        "Binaire natif compliance-windows-arm64.exe compile et embarque dans le VSIX universel"
+      ],
+      "limitations": ["Execution physique du selftest requise pour qualification formelle"]
+    },
+    {
+      "id": "linux-x64",
+      "os": "linux",
+      "architecture": "x64",
+      "status": "targeted",
+      "evidence": [
+        "Binaire natif compliance-linux-amd64 compile et embarque dans le VSIX universel"
+      ],
+      "limitations": ["WSL absent sur l'hote local; requiert l'execution du selftest sur une machine physique ou conteneur Linux pour qualification formelle"]
+    },
+    {
+      "id": "linux-arm64",
+      "os": "linux",
+      "architecture": "arm64",
+      "status": "targeted",
+      "evidence": [
+        "Binaire natif compliance-linux-arm64 compile et embarque dans le VSIX universel"
+      ],
+      "limitations": ["Execution physique du selftest requise pour qualification formelle"]
+    },
+    {
+      "id": "macos-x64",
+      "os": "macos",
+      "architecture": "x64",
+      "status": "targeted",
+      "evidence": [
+        "Binaire natif compliance-darwin-amd64 compile et embarque dans le VSIX universel"
+      ],
+      "limitations": ["Selftest physique sur macOS Intel encore requis avant le statut qualified. Resolution locale Homebrew, catalogue embarque et binaire VSIX executable sont en place."]
+    },
+    {
+      "id": "macos-arm64",
+      "os": "macos",
+      "architecture": "arm64",
+      "status": "targeted",
+      "evidence": [
+        "Binaire natif compliance-darwin-arm64 compile et embarque dans le VSIX universel"
+      ],
+      "limitations": ["Selftest physique sur Apple Silicon encore requis avant le statut qualified. Resolution locale Homebrew, catalogue embarque et binaire VSIX executable sont en place."]
+    }
+  ]
+}

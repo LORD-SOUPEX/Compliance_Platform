@@ -12,19 +12,21 @@ Le démon Compliance Platform expose une API REST et un flux Server-Sent Events 
 
 ### Fichier d'état (`daemon.json`)
 
-À son démarrage, le démon enregistre ses paramètres d'accès dans `<state_dir>/daemon.json` (permissions `0600` sur systèmes POSIX, isolation par profil utilisateur et descripteurs de sécurité restreints sous Windows) :
+À son démarrage, le démon enregistre ses paramètres d'accès dans `<state_dir>/daemon.json` (permissions `0600`, réappliquées après l'écriture). Le jeton Bearer est dans `<state_dir>/daemon.token`, au même mode. Sur POSIX, `<state_dir>/daemon.lock` est un verrou `flock` exclusif tenu tant que le processus vit. L'arrêt propre répond à `SIGINT` et à `SIGTERM`.
 
 ```json
 {
   "pid": 12345,
   "port": 54321,
   "host": "127.0.0.1",
-  "token_path": "<state_dir>/token.txt",
+  "token_path": "<state_dir>/daemon.token",
   "state_dir": "<state_dir>",
   "started_at": "2026-10-14T00:00:00Z",
   "version": "2.0.0"
 }
 ```
+
+Les chemins de workspace approuvés et les cibles sont canonisés avant comparaison. Sur macOS, une approbation de `/var/folders/...` correspond à une requête sur `/private/var/folders/...`.
 
 ---
 

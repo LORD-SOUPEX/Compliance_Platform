@@ -8,6 +8,7 @@ compiled TypeScript extension and embedded multi-OS Go binaries.
 import os
 import sys
 import json
+import platform
 import zipfile
 import shutil
 import subprocess
@@ -59,6 +60,50 @@ TARGETS = [
     ("darwin", "arm64", "compliance-darwin-arm64"),
 ]
 
+EMBEDDED_CONFIG = [
+    "control-catalog.json",
+    "control-catalog.schema.json",
+    "compliance-report.schema.json",
+    "compliance-session.schema.json",
+    "runtime-manifest.json",
+    "runtime-manifest.json.sig",
+    "runtime-manifest.schema.json",
+    "pipeline.schema.json",
+    "platform-support.json",
+]
+
+def sync_embedded_assets(root: Path) -> None:
+    """Copy .config into the Go embed tree. //go:embed cannot reach a parent of core/."""
+    source = root / ".config"
+    destination = root / "core" / "internal" / "embedded" / "assets"
+    destination.mkdir(parents=True, exist_ok=True)
+    for name in EMBEDDED_CONFIG:
+        src = source / name
+        if not src.is_file():
+            raise RuntimeError(f"Fichier de configuration absent pour l'embed Go: {src}")
+        shutil.copy2(src, destination / name)
+
+def host_cli_binary_name() -> str:
+    machine = platform.machine().lower()
+    arm = machine in ("arm64", "aarch64")
+    if sys.platform == "win32":
+        return "compliance-windows-arm64.exe" if arm else "compliance-windows-amd64.exe"
+    if sys.platform == "darwin":
+        return "compliance-darwin-arm64" if arm else "compliance-darwin-amd64"
+    return "compliance-linux-arm64" if arm else "compliance-linux-amd64"
+
+def write_zip_entry(zf: zipfile.ZipFile, src_path: Path, arcname: str, executable: bool) -> None:
+    data = src_path.read_bytes()
+    info = zipfile.ZipInfo(arcname)
+    info.compress_type = zipfile.ZIP_DEFLATED
+    if executable:
+        info.create_system = 3
+        info.external_attr = (0o100755) << 16
+    else:
+        info = zipfile.ZipInfo.from_file(src_path, arcname)
+        info.compress_type = zipfile.ZIP_DEFLATED
+    zf.writestr(info, data)
+
 def find_go_binary(root: Path) -> str:
     tool_go = root / ".tools" / "go" / "bin" / ("go.exe" if sys.platform == "win32" else "go")
     if tool_go.exists():
@@ -81,6 +126,7 @@ def get_latest_core_mtime(core_dir: Path) -> float:
 
 def ensure_binaries(ext_dir: Path, force: bool = False):
     root = ext_dir.parent
+    sync_embedded_assets(root)
     core_dir = root / "core"
     bin_dir = ext_dir / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
@@ -119,9 +165,11 @@ def ensure_binaries(ext_dir: Path, force: bool = False):
     tools_bin = root / ".tools" / "bin"
     if tools_bin.exists():
         cli_name = "compliance.exe" if sys.platform == "win32" else "compliance"
-        src_candidate = bin_dir / ("compliance-windows-amd64.exe" if sys.platform == "win32" else "compliance-linux-amd64")
+        src_candidate = bin_dir / host_cli_binary_name()
         if src_candidate.exists():
             shutil.copy2(src_candidate, tools_bin / cli_name)
+            if sys.platform != "win32":
+                os.chmod(tools_bin / cli_name, 0o755)
 
 def package_vsix():
     ext_dir = Path(__file__).resolve().parent
@@ -159,6 +207,7 @@ def package_vsix():
 
     # Files to include in extension/ directory
     extension_files = []
+    executable_arcnames = set()
 
     # 1. package.json & README.md
     extension_files.append((ext_dir / "package.json", "extension/package.json"))
@@ -179,7 +228,15 @@ def package_vsix():
         raise RuntimeError("Embedded binaries in bin/ missing. Run build_go_binaries first.")
     for file in sorted(bin_dir.iterdir()):
         if file.is_file():
-            extension_files.append((file, f"extension/bin/{file.name}"))
+            arcname = f"extension/bin/{file.name}"
+            extension_files.append((file, arcname))
+            if not file.name.endswith(".exe"):
+                executable_arcnames.add(arcname)
+
+    config_dir = root / ".config"
+    for name in EMBEDDED_CONFIG:
+        src = config_dir / name
+        extension_files.append((src, f"extension/.config/{name}"))
 
     # Create VSIX ZIP archive
     with zipfile.ZipFile(vsix_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -190,7 +247,7 @@ def package_vsix():
         # Write extension files
         for src_path, arcname in extension_files:
             print(f"  + {arcname} ({src_path.stat().st_size} bytes)")
-            zf.write(src_path, arcname)
+            write_zip_entry(zf, src_path, arcname, arcname in executable_arcnames)
 
     print(f"[SUCCESS] VSIX archive built successfully: {vsix_path} ({vsix_path.stat().st_size} bytes)")
     return vsix_path

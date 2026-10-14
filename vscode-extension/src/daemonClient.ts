@@ -1,8 +1,9 @@
 import * as http from 'node:http';
+import * as fsSync from 'node:fs';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { spawn, ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, ChildProcess } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
     containsPath,
@@ -126,15 +127,22 @@ export class DaemonClient {
         }
 
         const args = ['daemon', '-state-dir', this.stateDir!, '-platform-root', platformRoot];
+        let spawnError: Error | undefined;
+        let earlyExit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
         this.daemonProcess = spawn(complianceBin, args, {
             detached: true,
             windowsHide: true,
             stdio: 'ignore'
         });
+        this.daemonProcess.once('error', (error) => { spawnError = error; });
+        this.daemonProcess.once('exit', (code, signal) => { earlyExit = { code, signal }; });
         this.daemonProcess.unref();
 
         const deadline = Date.now() + 15000;
         while (Date.now() < deadline) {
+            if (spawnError || earlyExit) {
+                throw describeDaemonLaunchFailure(spawnError, earlyExit);
+            }
             await new Promise(r => setTimeout(r, 200));
             try {
                 const data = await fs.readFile(stateFile, 'utf8');
@@ -152,7 +160,7 @@ export class DaemonClient {
             }
         }
 
-        throw new Error('Délai dépassé lors du démarrage du démon local Compliance.');
+        throw describeDaemonLaunchFailure(spawnError, earlyExit);
     }
 
     private async findComplianceBinary(platformRoot: string): Promise<string | null> {
@@ -181,7 +189,9 @@ export class DaemonClient {
         for (const candidate of candidates) {
             try {
                 await fs.access(candidate);
-                return path.resolve(candidate);
+                const binaryPath = path.resolve(candidate);
+                prepareComplianceBinary(binaryPath);
+                return binaryPath;
             } catch {
                 // Not found, check next
             }
@@ -550,19 +560,65 @@ export class SessionController {
     end(): void { this.busy = false; this.abort = undefined; }
 }
 
+export function isInstalledExtensionSource(source: string): boolean {
+    return fsSync.existsSync(path.join(source, '.config', 'control-catalog.json'))
+        && !fsSync.existsSync(path.join(source, 'core', 'go.mod'))
+        && !fsSync.existsSync(path.join(source, '.git'));
+}
+
+export function runsDirectory(source: string): string {
+    if (isInstalledExtensionSource(source)) {
+        return path.join(os.homedir(), '.compliance', 'sessions', 'runs');
+    }
+    return path.join(source, '.tools', 'state', 'runs');
+}
+
 export async function stateRoot(source: string): Promise<string> {
-    let directory = source;
-    for (const segment of ['.tools', 'state', 'runs']) {
-        directory = path.join(directory, segment);
+    const directory = runsDirectory(source);
+    const base = isInstalledExtensionSource(source) ? os.homedir() : source;
+    const relative = path.relative(base, directory);
+    let current = base;
+    for (const segment of relative.split(path.sep).filter(Boolean)) {
+        current = path.join(current, segment);
         try {
-            const entry = await fs.lstat(directory);
+            const entry = await fs.lstat(current);
             if (entry.isSymbolicLink() || !entry.isDirectory()) { throw new Error('Le dossier d etat ne doit pas etre un lien ou un fichier.'); }
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { throw error; }
-            await fs.mkdir(directory);
+            await fs.mkdir(current);
         }
     }
     return directory;
+}
+
+function prepareComplianceBinary(binaryPath: string): void {
+    if (process.platform !== 'win32') {
+        fsSync.chmodSync(binaryPath, 0o755);
+    }
+    if (process.platform === 'darwin') {
+        try {
+            execFileSync('xattr', ['-d', 'com.apple.quarantine', binaryPath], { stdio: 'ignore' });
+        } catch {
+            // Attribute absent, or xattr unavailable. Gatekeeper is reported at spawn time.
+        }
+    }
+}
+
+function describeDaemonLaunchFailure(error?: Error, exit?: { code: number | null; signal: NodeJS.Signals | null }): Error {
+    const errno = (error as NodeJS.ErrnoException | undefined)?.code;
+    if (errno === 'EACCES' || errno === 'EPERM') {
+        return new Error('Binaire compliance non exécutable (EACCES). Le mode 0755 n\'a pas pu être appliqué.');
+    }
+    if (exit?.signal === 'SIGKILL' || exit?.code === 137) {
+        return new Error('Le binaire compliance a été tué (SIGKILL, signal 9). Sur macOS, Gatekeeper peut bloquer un exécutable non notarié même après le retrait de la quarantaine.');
+    }
+    if (error) {
+        return new Error(`Démarrage du démon impossible : ${error.message}`);
+    }
+    if (exit) {
+        return new Error(`Le démon s'est arrêté immédiatement (code ${exit.code ?? 'aucun'}, signal ${exit.signal ?? 'aucun'}).`);
+    }
+    return new Error('Délai dépassé lors du démarrage du démon local Compliance.');
 }
 
 export async function validateTarget(source: string, target: string): Promise<string> {
@@ -616,9 +672,8 @@ export async function validateSource(source: string, client?: DaemonClient): Pro
 
 export async function sessionArtifact(directory: string, artifact: string): Promise<string> {
     const candidate = path.resolve(directory, artifact);
-    if (!containsPath(directory, candidate)) { throw new Error('Artefact hors dossier de session.'); }
     const real = await fs.realpath(candidate);
-    if (!containsPath(await fs.realpath(directory), real)) { throw new Error('Artefact de session redirige hors dossier.'); }
+    if (!containsPath(directory, real)) { throw new Error('Artefact de session redirige hors dossier.'); }
     return real;
 }
 
@@ -878,7 +933,7 @@ export function displayReport(value: unknown, presentations: unknown): { report:
 
 export async function readSession(source: string, reference: ReportReference): Promise<{ directory: string; session: Fields }> {
     if (!/^[a-f0-9]{32}$/.test(reference.runId) || path.relative(source, reference.source) !== '') { throw new Error('Reference de session invalide ou d une autre Pipeline source.'); }
-    const directory = path.join(source, '.tools/state/runs', reference.runId);
+    const directory = path.join(runsDirectory(source), reference.runId);
     const session = json(await readStable(path.join(directory, 'session.json'), 1024 * 1024));
     if (!fields(session) || session.schema_version !== 1 || session.run_id !== reference.runId || session.target !== reference.target ||
         typeof session.pipeline_source !== 'string' || path.relative(source, session.pipeline_source) !== '' ||
@@ -908,7 +963,7 @@ export async function loadReport(source: string, file: string, reference?: Repor
         const envelope = await daemon.validateReport(raw, digest);
         if (!fields(envelope) || envelope.schema_version !== 1 || envelope.report_sha256 !== digest) { throw new Error('Validation non rattachee aux octets du rapport.'); }
         const displayed = displayReport(raw, envelope.presentations);
-        if (reference && ((displayed.report.metadata as Fields).run_id !== reference.runId || displayed.report.repository !== reference.target)) { throw new Error('Identite run_id ou Target incoherente avec la session.'); }
+        if (reference && ((displayed.report.metadata as Fields).run_id !== reference.runId || !isSameDirectory(String(displayed.report.repository), reference.target))) { throw new Error('Identite run_id ou Target incoherente avec la session.'); }
         if (associated && fields(associated.session.permissions)) {
             const metadata = displayed.report.metadata as Fields;
             if (metadata.network_authorized !== associated.session.permissions.network || metadata.code_execution_authorized !== associated.session.permissions.code_execution) { throw new Error('Permissions du rapport incoherentes avec la session.'); }
@@ -934,8 +989,7 @@ export function findingLocation(finding: Fields): FindingLocation | undefined {
 export async function targetFile(target: string, file: string): Promise<string> {
     if (!path.isAbsolute(target) || file.includes('\0') || /^(?:[a-z][a-z0-9+.-]*:)/i.test(file.replace(/^[A-Za-z]:[\\/]/, ''))) { throw new Error('Chemin local invalide.'); }
     const candidate = path.resolve(target, file);
-    if (!containsPath(target, candidate)) { throw new Error('Fichier hors Target refuse.'); }
     await noLinks(candidate);
-    if (!containsPath(await fs.realpath(target), await fs.realpath(candidate)) || !(await fs.stat(candidate)).isFile()) { throw new Error('Localisation hors Target ou non fichier.'); }
+    if (!containsPath(target, candidate) || !(await fs.stat(candidate)).isFile()) { throw new Error('Localisation hors Target ou non fichier.'); }
     return candidate;
 }

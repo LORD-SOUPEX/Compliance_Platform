@@ -15,7 +15,7 @@ import (
 var (
 	kernel32                     = syscall.NewLazyDLL("kernel32.dll")
 	procCreateJobObjectW         = kernel32.NewProc("CreateJobObjectW")
-	procSetInformationJobObject   = kernel32.NewProc("SetInformationJobObject")
+	procSetInformationJobObject  = kernel32.NewProc("SetInformationJobObject")
 	procAssignProcessToJobObject = kernel32.NewProc("AssignProcessToJobObject")
 	procTerminateJobObject       = kernel32.NewProc("TerminateJobObject")
 	procCloseHandle              = kernel32.NewProc("CloseHandle")

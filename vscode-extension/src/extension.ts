@@ -1,7 +1,8 @@
 import * as path from 'node:path';
+import * as fsSync from 'node:fs';
 import { promises as fs } from 'node:fs';
 import * as vscode from 'vscode';
-import { audit, Permissions, prepare, sessionArtifact, SessionController, validateSource, validateTarget } from './daemonClient';
+import { audit, Permissions, prepare, runsDirectory, sessionArtifact, SessionController, validateSource, validateTarget } from './daemonClient';
 import { controlOutputText, PlanNode, projectPlan, VisualStatus } from './model';
 import { ReportPanel } from './reportPanel';
 
@@ -43,8 +44,16 @@ class PipelineTree implements vscode.TreeDataProvider<PlanNode> {
     }
 }
 
+function resolvePlatformSource(extensionPath: string): string {
+    const inside = path.join(extensionPath, '.config', 'control-catalog.json');
+    if (fsSync.existsSync(inside)) { return extensionPath; }
+    const parent = path.resolve(extensionPath, '..');
+    if (fsSync.existsSync(path.join(parent, '.config', 'control-catalog.json'))) { return parent; }
+    throw new Error('Catalogue de contrôles introuvable dans l\'extension installée ou dans le dépôt.');
+}
+
 export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNode[]; getReportHtml(): string | undefined } {
-    const source = path.resolve(context.extensionPath, '..');
+    const source = resolvePlatformSource(context.extensionPath);
     const controller = new SessionController(source);
     const tree = new PipelineTree(controller);
     const output = vscode.window.createOutputChannel('Compliance');
@@ -143,13 +152,13 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
         vscode.commands.registerCommand('compliance.openSessionFolder', async () => {
             const runId = controller.audit?.runId || reports.knownReference()?.runId;
             if (!runId) { return; }
-            const directory = path.join(source, '.tools/state/runs', runId);
+            const directory = path.join(runsDirectory(source), runId);
             await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(await sessionArtifact(directory, directory)));
         }),
         vscode.commands.registerCommand('compliance.openControlOutput', async (node: PlanNode) => {
             try {
                 if (!controller.audit || !node?.output_path) { return; }
-                const directory = path.join(source, '.tools/state/runs', controller.audit.runId);
+                const directory = path.join(runsDirectory(source), controller.audit.runId);
                 const result = JSON.parse(await fs.readFile(await sessionArtifact(directory, node.output_path), 'utf8'));
                 const content = controlOutputText(controller.audit.runId, node.id, result);
                 await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ content, language: 'plaintext' }));

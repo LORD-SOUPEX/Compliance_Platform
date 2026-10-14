@@ -11,6 +11,7 @@ import (
 
 	"compliance/internal/discovery"
 	"compliance/internal/matrix"
+	"compliance/internal/osutil"
 	"compliance/internal/report"
 )
 
@@ -51,6 +52,7 @@ type PlanOptions struct {
 	AllowNetwork            bool
 	AllowCodeExecution      bool
 	CustomDependencies      map[string][]string
+	PlatformID              string
 }
 
 // BuildCompliancePlan creates an ExecutionPlan following the exact PowerShell contract.
@@ -61,7 +63,7 @@ func BuildCompliancePlan(
 	repoRoot string,
 	opts PlanOptions,
 ) (*report.ExecutionPlan, []*PlannedControl, error) {
-	absRepo, err := filepath.Abs(repoRoot)
+	absRepo, err := osutil.CanonicalPath(repoRoot)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -330,6 +332,12 @@ func BuildCompliancePlan(
 						severity = catalogCtrl.Severity
 						cost = catalogCtrl.Cost
 						parameters = catalogCtrl.Parameters
+					}
+
+					if applicability == "applicable" && !platformSupported(platSupport, opts.PlatformID) {
+						applicability = "not_applicable"
+						reasonCode = "platform_unsupported"
+						reason = fmt.Sprintf("Controle non qualifie pour la plateforme %s.", opts.PlatformID)
 					}
 
 					// Permissions check
@@ -805,6 +813,18 @@ func ValidateStepGuardrails(p *Pipeline, step *PipelineStep, ctx GuardrailContex
 	return nil
 }
 
+func platformSupported(support []string, platformID string) bool {
+	if len(support) == 0 || platformID == "" {
+		return true
+	}
+	for _, id := range support {
+		if id == platformID {
+			return true
+		}
+	}
+	return false
+}
+
 func matchForbiddenEnv(forbidden, env string) bool {
 	if env == forbidden {
 		return true
@@ -826,4 +846,3 @@ func matchEnvPattern(pattern, env string) bool {
 	}
 	return false
 }
-

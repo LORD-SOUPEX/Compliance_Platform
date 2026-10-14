@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -15,11 +14,12 @@ import (
 
 	"compliance/internal/discovery"
 	"compliance/internal/distribution"
+	"compliance/internal/embedded"
 	"compliance/internal/engine"
+	"compliance/internal/osutil"
 	"compliance/internal/report"
 	"compliance/internal/selftest"
 	"compliance/internal/server"
-	"os/signal"
 )
 
 const version = "2.0.0"
@@ -95,9 +95,12 @@ func runDaemon(args []string) {
 		cwd, _ := os.Getwd()
 		*platformRoot = cwd
 	}
-	if *catalogPath == "" {
-		*catalogPath = filepath.Join(*platformRoot, ".config", "control-catalog.json")
+	resolvedCatalog, err := embedded.ResolveAsset("control-catalog.json", *catalogPath, filepath.Join(*platformRoot, ".config", "control-catalog.json"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] Catalogue de contrôles introuvable: %v\n", err)
+		os.Exit(1)
 	}
+	*catalogPath = resolvedCatalog
 
 	srv, err := server.StartDaemon(server.DaemonConfig{
 		ListenAddr:         *listenAddr,
@@ -117,7 +120,7 @@ func runDaemon(args []string) {
 
 	// Intercept termination signals
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt)
+	osutil.NotifyTermination(sigCh)
 	<-sigCh
 
 	fmt.Println("\n[INFO] Arrêt du démon compliance en cours...")
@@ -141,7 +144,7 @@ func runDiscovery(args []string) {
 		target = fs.Arg(0)
 	}
 
-	absTarget, err := filepath.Abs(target)
+	absTarget, err := osutil.CanonicalPath(target)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ERROR] Chemin invalide: %v\n", err)
 		os.Exit(2)
@@ -178,6 +181,19 @@ func runRuntimeSync(args []string) {
 		fmt.Fprintf(os.Stderr, "[ERROR] Clé publique Ed25519 invalide\n")
 		os.Exit(2)
 	}
+
+	resolvedManifest, err := embedded.ResolveAsset("runtime-manifest.json", *manifestPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] Manifeste runtime introuvable: %v\n", err)
+		os.Exit(2)
+	}
+	resolvedSig, err := embedded.ResolveAsset("runtime-manifest.json.sig", *sigPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] Signature du manifeste introuvable: %v\n", err)
+		os.Exit(2)
+	}
+	*manifestPath = resolvedManifest
+	*sigPath = resolvedSig
 
 	fmt.Printf("[INFO] Synchronisation runtime pour la plateforme %s...\n", *platform)
 	res, err := distribution.SyncRuntime(distribution.SyncOptions{
@@ -220,7 +236,7 @@ func runPipeline(args []string) {
 		target = fs.Arg(0)
 	}
 
-	absTarget, err := filepath.Abs(target)
+	absTarget, err := osutil.CanonicalPath(target)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ERROR] Chemin invalide: %v\n", err)
 		os.Exit(2)
@@ -231,9 +247,10 @@ func runPipeline(args []string) {
 		platformRoot = findPlatformRoot()
 	}
 
-	catalogPath := *catalogFlag
-	if catalogPath == "" {
-		catalogPath = filepath.Join(platformRoot, ".config", "control-catalog.json")
+	catalogPath, err := embedded.ResolveAsset("control-catalog.json", *catalogFlag, filepath.Join(platformRoot, ".config", "control-catalog.json"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] Catalogue de contrôles introuvable: %v\n", err)
+		os.Exit(2)
 	}
 
 	outReport := *outputPath
@@ -340,11 +357,7 @@ func findPlatformRoot() string {
 }
 
 func defaultCacheDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ".compliance/tools"
-	}
-	return filepath.Join(home, ".compliance", "tools")
+	return osutil.DefaultToolCacheDir()
 }
 
 func defaultCABundle() string {
@@ -396,7 +409,7 @@ func resolveTool(name, override string) ToolInvocation {
 		}
 	}
 
-	if p, err := exec.LookPath(name); err == nil {
+	if p := osutil.LookupExecutable(name); p != "" {
 		return ToolInvocation{Executable: p}
 	}
 
@@ -448,4 +461,3 @@ func runSelftest(args []string) {
 	}
 	os.Exit(0)
 }
-

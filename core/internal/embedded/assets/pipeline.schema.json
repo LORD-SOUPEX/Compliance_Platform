@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://compliance-platform.local/schemas/pipeline-v1.json",
+  "title": "Compliance Platform Declarative Pipeline v1",
+  "description": "Schéma de définition déclarative des pipelines d'outils et garde-fous d'exécution locale.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "id",
+    "name",
+    "technology",
+    "category",
+    "side_effect_level",
+    "steps"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "enum": ["1"],
+      "description": "Version du schéma de pipeline"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]+(\\.[a-z0-9_-]+)+$",
+      "description": "Identifiant qualifié du pipeline (ex: terraform.dev-deployment, python.quality)"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Nom lisible du pipeline"
+    },
+    "technology": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Technologie cible (ex: terraform, python, opentofu, docker)"
+    },
+    "category": {
+      "type": "string",
+      "enum": ["quality", "dev_deployment", "ephemeral_sandbox", "maintenance"],
+      "description": "Catégorie fonctionnelle du pipeline"
+    },
+    "side_effect_level": {
+      "type": "string",
+      "enum": ["read_only", "network", "filesystem", "apply_destroy"],
+      "description": "Niveau maximal d'effet de bord induit par le pipeline"
+    },
+    "guardrails": {
+      "$ref": "#/$defs/guardrails_definition"
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Liste ordonnée des étapes composant le DAG d'exécution",
+      "items": { "$ref": "#/$defs/pipeline_step" }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "side_effect_level": { "const": "apply_destroy" } }
+      },
+      "then": {
+        "required": ["guardrails"],
+        "properties": {
+          "guardrails": {
+            "required": [
+              "allowed_environments",
+              "forbidden_environments",
+              "require_plan_preview",
+              "require_explicit_confirmation"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "guardrails_definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowed_environments": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "Liste blanche des environnements autorisés pour l'exécution (ex: sandbox, dev-local, ephemeral-*)"
+        },
+        "forbidden_environments": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "Liste noire absolue des environnements interdits (ex: prod, production, staging, shared)"
+        },
+        "require_plan_preview": {
+          "type": "boolean",
+          "description": "Exige obligatoirement la réussite préalable d'une étape de prévisualisation (plan/dry-run)"
+        },
+        "require_explicit_confirmation": {
+          "type": "boolean",
+          "description": "Exige une confirmation explicite et bloquante de l'utilisateur avant exécution"
+        },
+        "state_backend_restrictions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Types de backend autorisés (ex: ['local', 'dev-*']) pour prévenir l'altération de remote state partagé"
+        }
+      }
+    },
+    "pipeline_step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "tool",
+        "args",
+        "side_effect",
+        "timeout_seconds"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_-]+$",
+          "description": "Identifiant unique de l'étape au sein du pipeline (ex: init, plan, apply, lint)"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Description claire de l'étape"
+        },
+        "tool": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Nom de l'outil requis dans le catalogue (ex: ruff, tofu, bandit, hadolint)"
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Arguments de ligne de commande passés à l'outil"
+        },
+        "side_effect": {
+          "type": "string",
+          "enum": ["read_only", "network", "filesystem", "apply_destroy"],
+          "description": "Niveau d'effet de bord de l'étape individuelle"
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Délai maximum d'exécution en secondes avant coupure sans orphelin"
+        },
+        "depends_on": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Identifiants des étapes préalables requises dans le DAG"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Variables d'environnement injectées spécifiquement à cette étape"
+        }
+      }
+    }
+  }
+}

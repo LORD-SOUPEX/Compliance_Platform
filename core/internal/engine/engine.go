@@ -8,11 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
 	"compliance/internal/discovery"
 	"compliance/internal/distribution"
+	"compliance/internal/embedded"
 	"compliance/internal/matrix"
 	"compliance/internal/osutil"
 	"compliance/internal/report"
@@ -250,20 +252,17 @@ func BuildInvocation(
 		filesJSON, _ := json.Marshal(filesInRoot)
 		escapedFilesJSON := strings.ReplaceAll(string(filesJSON), "'", "''")
 		escapedExec := strings.ReplaceAll(executable, "'", "''")
+		settingsArg := powershellSettingsArg(ctrl, platformRoot)
 		psCommand := fmt.Sprintf(
-			"Set-StrictMode -Version Latest; $ErrorActionPreference = 'Stop'; if ('%s' -ne '' -and (Test-Path '%s' -PathType Leaf)) { Import-Module -Name '%s' -Force -ErrorAction SilentlyContinue }; $findings = @(); foreach ($file in ('%s' | ConvertFrom-Json)) { $tokens = $null; $parseErrors = $null; [Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$parseErrors) | Out-Null; if ($parseErrors.Count -gt 0) { foreach ($pe in $parseErrors) { $findings += [pscustomobject]@{ ScriptName = [IO.Path]::GetFileName($file); Line = $pe.Extent.StartLineNumber; RuleName = 'PowerShellSyntax'; Severity = 'Error'; Message = $pe.Message } } } elseif (Get-Command Invoke-ScriptAnalyzer -ErrorAction SilentlyContinue) { $findings += @(Invoke-ScriptAnalyzer -Path $file -Severity @('Error', 'Warning') -ErrorAction SilentlyContinue) } }; foreach ($f in $findings) { [pscustomobject]@{ file = $f.ScriptName; line = $f.Line; rule = $f.RuleName; severity = [string]$f.Severity; message = $f.Message } | ConvertTo-Json -Compress }; if (@($findings | Where-Object { $_.Severity -in @('Error', 'Warning') }).Count -gt 0) { exit 1 }; exit 0",
-			escapedExec, escapedExec, escapedExec, escapedFilesJSON,
+			"Set-StrictMode -Version Latest; $ErrorActionPreference = 'Stop'; if ('%s' -ne '' -and (Test-Path '%s' -PathType Leaf)) { Import-Module -Name '%s' -Force -ErrorAction SilentlyContinue }; $findings = @(); foreach ($file in ('%s' | ConvertFrom-Json)) { $tokens = $null; $parseErrors = $null; [Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$parseErrors) | Out-Null; if ($parseErrors.Count -gt 0) { foreach ($pe in $parseErrors) { $findings += [pscustomobject]@{ ScriptName = [IO.Path]::GetFileName($file); Line = $pe.Extent.StartLineNumber; RuleName = 'PowerShellSyntax'; Severity = 'Error'; Message = $pe.Message } } } elseif (Get-Command Invoke-ScriptAnalyzer -ErrorAction SilentlyContinue) { $findings += @(Invoke-ScriptAnalyzer -Path $file -Severity @('Error', 'Warning')%s -ErrorAction SilentlyContinue) } }; foreach ($f in $findings) { [pscustomobject]@{ file = $f.ScriptName; line = $f.Line; rule = $f.RuleName; severity = [string]$f.Severity; message = $f.Message } | ConvertTo-Json -Compress }; if (@($findings | Where-Object { $_.Severity -in @('Error', 'Warning') }).Count -gt 0) { exit 1 }; exit 0",
+			escapedExec, escapedExec, escapedExec, escapedFilesJSON, settingsArg,
 		)
 		arguments = []string{
 			"-NoProfile",
 			"-ExecutionPolicy", "Bypass",
 			"-Command", psCommand,
 		}
-		if strings.HasSuffix(strings.ToLower(executable), "pwsh") || strings.HasSuffix(strings.ToLower(executable), "pwsh.exe") {
-			executable = "pwsh"
-		} else {
-			executable = "powershell.exe"
-		}
+		executable = powershellHost(runtime.GOOS, executable)
 
 	default:
 		return nil, fmt.Errorf("adaptateur de controle non implemente: %s", command)
@@ -273,6 +272,47 @@ func BuildInvocation(
 		Executable: executable,
 		Arguments:  arguments,
 	}, nil
+}
+
+func powershellSettingsArg(ctrl *PlannedControl, platformRoot string) string {
+	if ctrl == nil || ctrl.Parameters == nil {
+		return ""
+	}
+	settings, _ := ctrl.Parameters["settings"].(string)
+	settings = strings.TrimSpace(settings)
+	if settings == "" {
+		return ""
+	}
+	if !filepath.IsAbs(settings) {
+		settings = filepath.Join(platformRoot, settings)
+	}
+	info, err := os.Stat(settings)
+	if err != nil || info.IsDir() {
+		return ""
+	}
+	escaped := strings.ReplaceAll(settings, "'", "''")
+	return fmt.Sprintf(" -Settings '%s'", escaped)
+}
+
+// powershellHost selects the PowerShell executable for the target OS.
+// goos is explicit so Darwin behavior can be tested on any host.
+func powershellHost(goos, source string) string {
+	lower := strings.ToLower(source)
+	if strings.HasSuffix(lower, "pwsh") || strings.HasSuffix(lower, "pwsh.exe") {
+		if goos == "windows" && !strings.HasSuffix(lower, ".exe") && !strings.Contains(source, `\`) && !strings.Contains(source, `/`) {
+			return "pwsh.exe"
+		}
+		return source
+	}
+	if goos == "windows" {
+		return "powershell.exe"
+	}
+	if goos == runtime.GOOS {
+		if found := osutil.LookupExecutable("pwsh"); found != "" {
+			return found
+		}
+	}
+	return "pwsh"
 }
 
 // ProbeToolVersion runs the version command of a tool and returns the parsed version string.
@@ -629,9 +669,9 @@ func RunPythonPipeline(ctx context.Context, opts PipelineOptions) (*report.Repor
 		SchemaVersion: 1,
 		Repository:    opts.RepoRoot,
 		Budgets: report.Budgets{
-			TimeoutSeconds:         int(timeout.Seconds()),
+			TimeoutSeconds:          int(timeout.Seconds()),
 			MaxOutputBytesPerStream: maxOutput,
-			MaxControls:            len(planControls),
+			MaxControls:             len(planControls),
 		},
 		Permissions: report.Permissions{
 			Network:       false,
@@ -869,7 +909,7 @@ type ComplianceOptions struct {
 	AllowCodeExecution      bool
 	PlanOnly                bool
 	RedactionPatterns       []string
-	RedactionReplacement   string
+	RedactionReplacement    string
 	PlatformQualification   string
 	RunID                   string
 	SourceAdapter           string
@@ -888,7 +928,7 @@ func RunCompliance(ctx context.Context, opts ComplianceOptions) (*report.Report,
 	if repoRoot == "" {
 		repoRoot = "."
 	}
-	absRepo, err := filepath.Abs(repoRoot)
+	absRepo, err := osutil.CanonicalPath(repoRoot)
 	if err != nil {
 		return nil, fmt.Errorf("chemin de dépôt invalide: %w", err)
 	}
@@ -898,9 +938,9 @@ func RunCompliance(ctx context.Context, opts ComplianceOptions) (*report.Report,
 		platformRoot = absRepo
 	}
 
-	catalogPath := opts.CatalogPath
-	if catalogPath == "" {
-		catalogPath = filepath.Join(platformRoot, ".config", "control-catalog.json")
+	catalogPath, err := embedded.ResolveAsset("control-catalog.json", opts.CatalogPath, filepath.Join(platformRoot, ".config", "control-catalog.json"))
+	if err != nil {
+		return nil, fmt.Errorf("catalogue de contrôles introuvable: %w", err)
 	}
 
 	// 1. Load catalog
@@ -939,6 +979,7 @@ func RunCompliance(ctx context.Context, opts ComplianceOptions) (*report.Report,
 		MaximumControls:         opts.MaximumControls,
 		AllowNetwork:            opts.AllowNetwork,
 		AllowCodeExecution:      opts.AllowCodeExecution,
+		PlatformID:              plat.ID,
 	}
 
 	execPlan, plannedControls, err := BuildCompliancePlan(discResult.Technologies, matrixEntries, resolutionEntries, absRepo, planOpts)

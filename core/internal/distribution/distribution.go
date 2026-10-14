@@ -22,18 +22,20 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/ulikunitz/xz"
 )
 
 var (
-	ErrInvalidSignature       = errors.New("signature du manifeste invalide ou corrompue")
+	ErrInvalidSignature        = errors.New("signature du manifeste invalide ou corrompue")
 	ErrSignatureLengthMismatch = errors.New("longueur de signature cryptographique invalide")
-	ErrArchiveHashMismatch    = errors.New("somme SHA-256 de l'archive téléchargée non conforme")
-	ErrBinaryHashMismatch     = errors.New("somme SHA-256 du binaire extrait non conforme")
-	ErrPlatformUnsupported    = errors.New("plateforme non présente dans le manifeste")
-	ErrToolNotFound           = errors.New("binaire introuvable dans l'archive")
-	ErrToolNotInManifest      = errors.New("outil absent du manifeste pour cette plateforme")
-	ErrToolUnavailableOffline = errors.New("outil indisponible hors-ligne (archive absente du cache local)")
-	ErrIntegrityViolation     = errors.New("intégrité binaire compromise : somme SHA-256 divergente")
+	ErrArchiveHashMismatch     = errors.New("somme SHA-256 de l'archive téléchargée non conforme")
+	ErrBinaryHashMismatch      = errors.New("somme SHA-256 du binaire extrait non conforme")
+	ErrPlatformUnsupported     = errors.New("plateforme non présente dans le manifeste")
+	ErrToolNotFound            = errors.New("binaire introuvable dans l'archive")
+	ErrToolNotInManifest       = errors.New("outil absent du manifeste pour cette plateforme")
+	ErrToolUnavailableOffline  = errors.New("outil indisponible hors-ligne (archive absente du cache local)")
+	ErrIntegrityViolation      = errors.New("intégrité binaire compromise : somme SHA-256 divergente")
 )
 
 // DefaultPhase0PublicKey is a dedicated Ed25519 public key for platform distribution.
@@ -239,6 +241,9 @@ func SyncRuntime(opts SyncOptions) (*SyncResult, error) {
 		if err := os.Rename(tempPath, destPath); err != nil {
 			_ = os.Remove(tempPath)
 			return nil, fmt.Errorf("renommage atomique vers %s: %w", destPath, err)
+		}
+		if err := os.Chmod(destPath, 0755); err != nil {
+			return nil, fmt.Errorf("permission d'exécution sur %s: %w", destPath, err)
 		}
 
 		result.SyncedTools[name] = destPath
@@ -491,20 +496,31 @@ func extractBinary(archiveBytes []byte, binaryName, sourceURL string) ([]byte, e
 			return nil, err
 		}
 		defer gzr.Close()
-		tr := tar.NewReader(gzr)
-		for {
-			hdr, err := tr.Next()
-			if err != nil {
-				break
-			}
-			base := filepath.Base(hdr.Name)
-			if strings.EqualFold(base, binaryName) || strings.EqualFold(base, binaryName+".exe") {
-				return io.ReadAll(tr)
-			}
+		return readTarBinary(tar.NewReader(gzr), binaryName)
+	}
+
+	if strings.HasSuffix(lowerSource, ".tar.xz") || strings.HasSuffix(lowerSource, ".txz") {
+		xr, err := xz.NewReader(bytes.NewReader(archiveBytes))
+		if err != nil {
+			return nil, err
 		}
-		return nil, ErrToolNotFound
+		return readTarBinary(tar.NewReader(xr), binaryName)
 	}
 
 	// Raw binary if not an archive
 	return archiveBytes, nil
+}
+
+func readTarBinary(tr *tar.Reader, binaryName string) ([]byte, error) {
+	for {
+		hdr, err := tr.Next()
+		if err != nil {
+			break
+		}
+		base := filepath.Base(hdr.Name)
+		if strings.EqualFold(base, binaryName) || strings.EqualFold(base, binaryName+".exe") {
+			return io.ReadAll(tr)
+		}
+	}
+	return nil, ErrToolNotFound
 }

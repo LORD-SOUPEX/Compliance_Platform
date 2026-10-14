@@ -72,14 +72,14 @@ type CandidateToolState struct {
 
 // CapabilityEntry represents a capability within the matrix.
 type CapabilityEntry struct {
-	Name            string                   `json:"name"`
-	SelectionPolicy string                   `json:"selection_policy"` // all, alternative
-	CatalogControls []CatalogControl         `json:"catalog_controls"`
-	Required        bool                     `json:"required"`
-	Availability    string                   `json:"availability"` // available, partially_available, unavailable, unconfigured, not_applicable, ambiguous
-	CandidateTools  []CandidateToolState     `json:"candidate_tools"`
-	AvailableTools  []string                 `json:"available_tools"`
-	Reasons         []string                 `json:"reasons"`
+	Name            string               `json:"name"`
+	SelectionPolicy string               `json:"selection_policy"` // all, alternative
+	CatalogControls []CatalogControl     `json:"catalog_controls"`
+	Required        bool                 `json:"required"`
+	Availability    string               `json:"availability"` // available, partially_available, unavailable, unconfigured, not_applicable, ambiguous
+	CandidateTools  []CandidateToolState `json:"candidate_tools"`
+	AvailableTools  []string             `json:"available_tools"`
+	Reasons         []string             `json:"reasons"`
 }
 
 // CapabilityMatrixEntry represents the capability matrix for one technology.
@@ -273,7 +273,13 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 		}
 	}
 
-	// 5. Check PowerShell modules for Invoke-ScriptAnalyzer
+	// 5. Distribution cache produced by compliance runtime sync.
+	cached := filepath.Join(osutil.DefaultToolCacheDir(), "bin", platform.ID, command+ext)
+	if info, err := os.Stat(cached); err == nil && !info.IsDir() {
+		return probeCommand(cached, true)
+	}
+
+	// 6. Check PowerShell modules for Invoke-ScriptAnalyzer
 	if command == "Invoke-ScriptAnalyzer" {
 		psModule := filepath.Join(root, ".tools", "powershell-modules", "PSScriptAnalyzer")
 		if _, err := os.Stat(psModule); err == nil {
@@ -320,6 +326,9 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 					filepath.Join(userProfile, "Documents", "PowerShell", "Modules"),
 				)
 			}
+		} else {
+			home, _ := os.UserHomeDir()
+			candidateDirs = append(candidateDirs, osutil.PowerShellModuleDirs(runtime.GOOS, home)...)
 		}
 
 		for _, baseDir := range candidateDirs {
@@ -369,9 +378,9 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 		}
 	}
 
-	// 5. Check PATH
-	if path, err := exec.LookPath(command); err == nil {
-		return probeCommand(path, false)
+	// 7. Darwin tool directories (Homebrew, pip user, pyenv), then PATH.
+	if found := osutil.LookupExecutable(command); found != "" {
+		return probeCommand(found, false)
 	}
 
 	// 6. Not installed
@@ -700,23 +709,23 @@ type CatalogTool struct {
 
 // CatalogControl represents a single control definition from .config/control-catalog.json.
 type CatalogControl struct {
-	ID               string                 `json:"id"`
-	Name             string                 `json:"name"`
-	Objective        string                 `json:"objective"`
-	Technology       string                 `json:"technology"`
-	Capability       string                 `json:"capability"`
-	Tool             *CatalogTool           `json:"tool"`
-	Severity         string                 `json:"severity"`           // low, medium, high, critical
-	SelectionPolicy  string                 `json:"selection_policy"`    // all, alternative
-	Applicability    ControlApplicability   `json:"applicability"`
-	Parameters       map[string]interface{} `json:"parameters"`
-	Dependencies     []string               `json:"dependencies"`
-	TimeoutSeconds   int                    `json:"timeout_seconds"`
-	Cost             string                 `json:"cost"`                // low, medium, high
-	SideEffectLevel  string                 `json:"side_effect_level"`   // read_only, code_execution, network, network_code_execution
-	Permissions      []string               `json:"permissions"`
-	PlatformSupport  []string               `json:"platform_support"`
-	Limitations      []string               `json:"limitations"`
+	ID              string                 `json:"id"`
+	Name            string                 `json:"name"`
+	Objective       string                 `json:"objective"`
+	Technology      string                 `json:"technology"`
+	Capability      string                 `json:"capability"`
+	Tool            *CatalogTool           `json:"tool"`
+	Severity        string                 `json:"severity"`         // low, medium, high, critical
+	SelectionPolicy string                 `json:"selection_policy"` // all, alternative
+	Applicability   ControlApplicability   `json:"applicability"`
+	Parameters      map[string]interface{} `json:"parameters"`
+	Dependencies    []string               `json:"dependencies"`
+	TimeoutSeconds  int                    `json:"timeout_seconds"`
+	Cost            string                 `json:"cost"`              // low, medium, high
+	SideEffectLevel string                 `json:"side_effect_level"` // read_only, code_execution, network, network_code_execution
+	Permissions     []string               `json:"permissions"`
+	PlatformSupport []string               `json:"platform_support"`
+	Limitations     []string               `json:"limitations"`
 }
 
 // ControlCatalog contains all controls and the catalog checksum.
@@ -890,5 +899,3 @@ func (c *ControlCatalog) GetCapabilityProfile(technology string) []CapabilityPro
 
 	return profiles
 }
-
-

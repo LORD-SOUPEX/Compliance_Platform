@@ -24,6 +24,8 @@ L'extension fonctionne selon une architecture découplée sans aucune exécution
     - `bin/compliance-darwin-amd64`
     - `bin/compliance-darwin-arm64`
   - Aucun téléchargement additionnel n'est requis à l'installation.
+  - Le VSIX contient aussi `extension/.config/` (catalogue, schémas, manifeste). Installée hors d'un clone Git, l'extension utilise ce catalogue et écrit les sessions dans `~/.compliance/sessions`.
+  - Avant de lancer le démon, l'extension pose le mode `0755` sur le binaire POSIX et, sur macOS, retire l'attribut `com.apple.quarantine` lorsqu'il est présent. Un refus `EACCES` ou un `SIGKILL` (signal 9, Gatekeeper) est signalé explicitement.
 
 ---
 

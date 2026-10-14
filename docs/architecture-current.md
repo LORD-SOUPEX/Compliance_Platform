@@ -29,7 +29,7 @@ Le moteur reçoit un dossier local cible (la *Target*), sans compte de forge ni 
 | :--- | :--- | :--- |
 | **Discovery** | Inventaire des technologies, preuves, racines, ambiguïtés et erreurs de scan | `core/internal/discovery` |
 | **Capability Matrix** | Matrice des contrôles applicables, profils et états préliminaires | `core/internal/matrix` |
-| **Tool Resolver** | Résolution ordonnée découplée (`.tools/bin/`, Python autonome, cache runtime, PATH) | `core/internal/distribution`, `core/internal/matrix` |
+| **Tool Resolver** | `.tools/bin/`, Python autonome, cache `~/.compliance/tools/bin/<plateforme>/`, préfixes macOS, PATH | `core/internal/distribution`, `core/internal/matrix`, `core/internal/osutil` |
 | **Catalogue de contrôles** | 28 contrôles, profils, permissions, timeouts, paramètres et dépendances | [`.config/control-catalog.json`](../.config/control-catalog.json), `core/internal/matrix` |
 | **Compliance Engine** | Ordonnancement déterministe (DAG), exécution, verdict, limitations | `core/internal/engine` |
 | **Serveur & Démon local** | API REST/SSE locale sur port éphémère, jeton Bearer 256 bits, contrôle Host/Origin | `core/internal/server` |
@@ -45,9 +45,10 @@ Le résolveur d'outils est entièrement découplé de l'environnement virtuel hi
 
 1. **Binaires autonomes (`.tools/bin/<command>[.exe]`)** : Outils CLI natifs pré-positionnés ou synchronisés (`compliance`, `hadolint`, `tflint`, `terraform`, `tofu`, `terragrunt`, `shellcheck`, `trivy`, `gitleaks`, `ruff`).
 2. **Environnement Python autonome (`.tools/python/Scripts/` ou `.tools/python/bin/`)** : Outils Python installés dans la distribution autonome locale (`bandit`, `pylint`, `pytest`, `pip-audit`, `checkov`).
-3. **Cache runtime multi-OS (`.tools/runtime/<platform>/<command>/...`)** : Outils déployés par plateforme.
-4. **Modules PowerShell (système ou `.tools/powershell-modules/`)** : Module `PSScriptAnalyzer` inspecté par son manifeste `.psd1` (via `PSModulePath` système ou cache local) pour le contrôle dédié `powershell.lint.psscriptanalyzer`.
-5. **PATH système** : Découverte des exécutables déclarés sur le système d'exploitation hôte via `exec.LookPath`.
+3. **Cache runtime du dépôt (`.tools/runtime/<platform>/<command>/...`)** puis **cache de distribution (`~/.compliance/tools/bin/<macos-x64|macos-arm64|...>/<command>`)** produit par `compliance runtime sync`.
+4. **Préfixes macOS**, consultés aussi quand VS Code est lancé depuis le Dock : `/opt/homebrew/bin`, `/opt/homebrew/sbin`, `/usr/local/bin`, `/usr/local/sbin`, `~/.local/bin`, `~/Library/Python/*/bin`, `~/.pyenv/shims`.
+5. **Modules PowerShell** : `PSScriptAnalyzer` via `.tools/powershell-modules/`, `PSModulePath`, et sur macOS/Linux `~/.local/share/powershell/Modules` ainsi que `/usr/local/share/powershell/Modules` (et `/opt/homebrew/share/powershell/Modules` sur Darwin). L'exécution hors Windows utilise `pwsh`, pas `powershell.exe`.
+6. **PATH du processus** : dernier recours, via `exec.LookPath`. Le PATH transmis aux outils est enrichi des préfixes macOS.
 
 ---
 
@@ -56,13 +57,13 @@ Le résolveur d'outils est entièrement découplé de l'environnement virtuel hi
 Le démon HTTP/SSE local (`core/internal/server`) implémente un modèle de sécurité en profondeur pour l'exécution locale :
 
 - **Écoute strictement locale** : Liaison exclusive sur `127.0.0.1` avec attribution d'un port TCP éphémère (`:0`) pour éliminer tout conflit de port.
-- **Authentification par jeton Bearer 256 bits** : Généré aléatoirement à chaque démarrage, stocké dans `daemon.json` avec permissions restreintes (`0600` sur POSIX, isolation de profil utilisateur et ACL restrictives sous Windows), exigé sur toutes les requêtes (sauf GET `/api/v1/health`).
+- **Authentification par jeton Bearer 256 bits** : Généré aléatoirement à chaque démarrage, stocké dans `daemon.token` avec permissions `0600` réappliquées après écriture. `daemon.json` est écrit avec le même mode. Sous Windows, une ACL restrictive est posée en plus. Le jeton est exigé sur toutes les requêtes (sauf GET `/api/v1/health`).
 - **Validation stricte des en-têtes `Host` et `Origin`** : Rejet systématique avec code HTTP 403 si l'en-tête `Host` ne correspond pas à `127.0.0.1:<port>` ou si `Origin` ne provient pas d'un client local autorisé (`vscode-webview://` ou localhost).
-- **Approbation explicite des dossiers cibles (*Workspace Approval*)** : Tout chemin `target_path` doit être préalablement canonisé et approuvé via `POST /api/v1/workspaces/approve`. Toute tentative d'audit hors des dossiers autorisés est rejetée (code 403).
+- **Approbation explicite des dossiers cibles (*Workspace Approval*)** : Tout chemin `target_path` est canonisé (`EvalSymlinks`, puis le plus long ancêtre existant si la feuille n'existe pas encore) avant `POST /api/v1/workspaces/approve`. Sur macOS, `/var/folders/...` et `/private/var/folders/...` désignent le même dossier. Toute cible hors des dossiers autorisés est rejetée (code 403).
 - **Confinement des processus enfants et zéro processus orphelin** :
   - Sous Windows : Rattachement de tous les processus fils à un Windows Job Object configuré avec `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`.
   - Sous POSIX : Création d'un groupe de processus dédié (`Setpgid: true`) et terminaison du groupe complet via `syscall.Kill(-pgid, SIGKILL)` en cas d'annulation ou de timeout.
-- **Verrou d'instance unique** : Gestion d'un fichier de verrou (`daemon.lock`) pour garantir qu'un seul démon s'exécute pour un répertoire d'état donné.
+- **Verrou d'instance unique** : Sur POSIX, `daemon.lock` est tenu par `syscall.Flock` exclusif non bloquant pendant toute la vie du processus. Sur Windows, le fichier porte le PID du démon vivant. Les deux modes réappliquent `0600`. `SIGINT` et `SIGTERM` arrêtent le démon et libèrent le verrou.
 
 ---
 

@@ -4,6 +4,7 @@ package osutil
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"runtime"
 	"sync"
@@ -23,6 +24,8 @@ func runBoundedOS(ctx context.Context, spec CommandSpec) (*ProcessResult, error)
 	cmd.Dir = spec.WorkingDirectory
 	if len(spec.Env) > 0 {
 		cmd.Env = spec.Env
+	} else {
+		cmd.Env = AugmentedEnviron()
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
@@ -67,6 +70,7 @@ func runBoundedOS(ctx context.Context, spec CommandSpec) (*ProcessResult, error)
 
 	result := &ProcessResult{}
 	var timedOut, cancelled bool
+	var killErr error
 
 	select {
 	case <-ctxTimeout.Done():
@@ -75,8 +79,10 @@ func runBoundedOS(ctx context.Context, spec CommandSpec) (*ProcessResult, error)
 		} else {
 			timedOut = true
 		}
-		// Kill the entire process group
-		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+		// Kill the entire process group. ESRCH means the leader already exited.
+		if err := syscall.Kill(-pgid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+			killErr = err
+		}
 		<-waitCh
 	case waitErr := <-waitCh:
 		if waitErr != nil {
@@ -94,6 +100,12 @@ func runBoundedOS(ctx context.Context, spec CommandSpec) (*ProcessResult, error)
 	result.Duration = time.Since(startTime)
 	result.Stdout = stdoutCap.String()
 	result.Stderr = stderrCap.String()
+	if killErr != nil {
+		if result.Stderr != "" {
+			result.Stderr += "\n"
+		}
+		result.Stderr += "arrêt du groupe de processus: " + killErr.Error()
+	}
 	result.OutputTruncated = stdoutCap.Truncated() || stderrCap.Truncated()
 	result.TotalBytesRead = stdoutCap.TotalRead() + stderrCap.TotalRead()
 	result.TimedOut = timedOut
