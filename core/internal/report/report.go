@@ -3,8 +3,11 @@ package report
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
+
+	"compliance/internal/version"
 )
 
 // Report conforms strictly to .config/compliance-report.schema.json (v1).
@@ -32,16 +35,16 @@ type Report struct {
 }
 
 type Metadata struct {
-	RunId                      string  `json:"run_id"`
-	SourceMode                 string  `json:"source_mode"`
-	SourceAdapter              string  `json:"source_adapter"` // PowerShell, Bash, VSCode, GitLab, Legacy
-	Platform                   string  `json:"platform"`
-	CatalogSchemaVersion       int     `json:"catalog_schema_version"`
-	CatalogSha256              *string `json:"catalog_sha256"`
-	PlatformQualificationStatus string `json:"platform_qualification_status,omitempty"`
-	RedactionApplied           bool    `json:"redaction_applied"`
-	NetworkAuthorized          bool    `json:"network_authorized"`
-	CodeExecutionAuthorized    bool    `json:"code_execution_authorized"`
+	RunId                       string  `json:"run_id"`
+	SourceMode                  string  `json:"source_mode"`
+	SourceAdapter               string  `json:"source_adapter"` // PowerShell, Bash, VSCode, GitLab, Legacy
+	Platform                    string  `json:"platform"`
+	CatalogSchemaVersion        int     `json:"catalog_schema_version"`
+	CatalogSha256               *string `json:"catalog_sha256"`
+	PlatformQualificationStatus string  `json:"platform_qualification_status,omitempty"`
+	RedactionApplied            bool    `json:"redaction_applied"`
+	NetworkAuthorized           bool    `json:"network_authorized"`
+	CodeExecutionAuthorized     bool    `json:"code_execution_authorized"`
 }
 
 type ExecutionPlan struct {
@@ -53,9 +56,9 @@ type ExecutionPlan struct {
 }
 
 type Budgets struct {
-	TimeoutSeconds         int   `json:"timeout_seconds"`
+	TimeoutSeconds          int   `json:"timeout_seconds"`
 	MaxOutputBytesPerStream int64 `json:"max_output_bytes_per_stream"`
-	MaxControls            int   `json:"max_controls"`
+	MaxControls             int   `json:"max_controls"`
 }
 
 type Permissions struct {
@@ -64,24 +67,35 @@ type Permissions struct {
 }
 
 type ExecutionResult struct {
-	ControlId        string       `json:"control_id"`
-	ControlCatalogId *string      `json:"control_catalog_id"`
-	Name             string       `json:"name"`
-	Technology       string       `json:"technology"`
-	Capability       string       `json:"capability"`
-	Root             string       `json:"root"`
-	Severity         string       `json:"severity"` // low, medium, high, critical
-	Status           string       `json:"status"`   // success, fail, error, skipped
-	ExecutionStart   string       `json:"execution_start"`
-	ExecutionEnd     string       `json:"execution_end"`
-	DurationMs       int64        `json:"duration_ms"`
-	ToolVersion      *string      `json:"tool_version"`
-	Stdout           string       `json:"stdout"`
-	Stderr           string       `json:"stderr"`
-	ExitCode         *int         `json:"exit_code"`
-	OutputTruncated  bool         `json:"output_truncated"`
-	Critical         bool         `json:"critical"`
-	Diagnostics      []Diagnostic `json:"diagnostics"`
+	ControlId        string        `json:"control_id"`
+	ControlCatalogId *string       `json:"control_catalog_id"`
+	Name             string        `json:"name"`
+	Technology       string        `json:"technology"`
+	Capability       string        `json:"capability"`
+	Root             string        `json:"root"`
+	Severity         string        `json:"severity"` // low, medium, high, critical
+	Status           string        `json:"status"`   // success, fail, error, skipped
+	ExecutionStart   string        `json:"execution_start"`
+	ExecutionEnd     string        `json:"execution_end"`
+	DurationMs       int64         `json:"duration_ms"`
+	ToolVersion      *string       `json:"tool_version"`
+	Stdout           string        `json:"stdout"`
+	Stderr           string        `json:"stderr"`
+	ExitCode         *int          `json:"exit_code"`
+	OutputTruncated  bool          `json:"output_truncated"`
+	Critical         bool          `json:"critical"`
+	Diagnostics      []Diagnostic  `json:"diagnostics"`
+	Leaks            []LocatedLeak `json:"-"`
+}
+
+// LocatedLeak is one secret location. The secret value itself is never stored.
+type LocatedLeak struct {
+	File        string
+	Line        int
+	Column      int
+	RuleID      string
+	Description string
+	Severity    string
 }
 
 type Finding struct {
@@ -93,6 +107,10 @@ type Finding struct {
 	Root        string       `json:"root"`
 	Severity    string       `json:"severity"` // low, medium, high, critical
 	Status      string       `json:"status"`   // fail, error
+	Message     string       `json:"message,omitempty"`
+	File        string       `json:"file,omitempty"`
+	Line        int          `json:"line,omitempty"`
+	Column      int          `json:"column,omitempty"`
 	Diagnostics []Diagnostic `json:"diagnostics"`
 }
 
@@ -100,6 +118,9 @@ type Diagnostic struct {
 	Code     string `json:"code"`
 	Message  string `json:"message"`
 	Critical bool   `json:"critical"`
+	File     string `json:"file,omitempty"`
+	Line     int    `json:"line,omitempty"`
+	Column   int    `json:"column,omitempty"`
 }
 
 type Summary struct {
@@ -111,19 +132,25 @@ type Summary struct {
 }
 
 type Coverage struct {
-	Complete                 bool          `json:"complete"`
-	PlannedControls          int           `json:"planned_controls"`
-	ExecutedControls         int           `json:"executed_controls"`
-	OmittedRequiredControls  int           `json:"omitted_required_controls"`
-	DependencySkips          int           `json:"dependency_skips"`
-	Limitations              []interface{} `json:"limitations"`
+	Complete                bool          `json:"complete"`
+	PlannedControls         int           `json:"planned_controls"`
+	ApplicableControls      int           `json:"applicable_controls"`
+	ExecutedControls        int           `json:"executed_controls"`
+	DetectedTechnologies    int           `json:"detected_technologies"`
+	CoveredTechnologies     int           `json:"covered_technologies"`
+	UncoveredTechnologies   []string      `json:"uncovered_technologies"`
+	Label                   string        `json:"label"`
+	OmittedRequiredControls int           `json:"omitted_required_controls"`
+	DependencySkips         int           `json:"dependency_skips"`
+	Limitations             []interface{} `json:"limitations"`
 }
 
 type Metrics struct {
-	DiscoveryMs  int64 `json:"discovery_ms"`
-	ResolverMs   int64 `json:"resolver_ms"`
-	ComplianceMs int64 `json:"compliance_ms"`
-	ReportingMs  int64 `json:"reporting_ms"`
+	DiscoveryMs     int64 `json:"discovery_ms"`
+	ResolverMs      int64 `json:"resolver_ms"`
+	ComplianceMs    int64 `json:"compliance_ms"`
+	ReportingMs     int64 `json:"reporting_ms"`
+	TotalDurationMs int64 `json:"total_duration_ms"`
 }
 
 // ComputeVerdict calculates PASS or FAIL based on execution results.
@@ -155,6 +182,9 @@ func ComputeVerdict(results []ExecutionResult) (string, Summary, []string) {
 	if summary.CriticalErrors > 0 {
 		verdict = "FAIL"
 		reasons = append(reasons, "Au moins une erreur critique empeche une evaluation complete.")
+	}
+	if summary.Success == 0 && summary.Fail == 0 && summary.Error == 0 && summary.Skipped > 0 {
+		reasons = append(reasons, "Aucun contrôle exécuté. Les autres sont ignorés (technologie absente) ou indisponibles (outil manquant ou absent du catalogue).")
 	}
 
 	return verdict, summary, reasons
@@ -195,7 +225,40 @@ func BuildComplianceReport(opts ReportOptions) *Report {
 
 	for _, r := range opts.Results {
 		allDiagnostics = append(allDiagnostics, r.Diagnostics...)
-		if r.Status == "fail" || r.Status == "error" {
+		if len(r.Leaks) > 0 {
+			for index, leak := range r.Leaks {
+				code := leak.RuleID
+				if code == "" {
+					code = "gitleaks"
+				}
+				message := leak.Description
+				if leak.RuleID != "" && leak.Description != "" {
+					message = leak.RuleID + " — " + leak.Description
+				} else if message == "" {
+					message = code
+				}
+				severity := leak.Severity
+				if severity == "" {
+					severity = r.Severity
+				}
+				diag := Diagnostic{Code: code, Message: message, File: leak.File, Line: leak.Line, Column: leak.Column}
+				findings = append(findings, Finding{
+					Id:          fmt.Sprintf("%s#%d", r.ControlId, index+1),
+					ControlId:   r.ControlId,
+					Name:        code,
+					Technology:  r.Technology,
+					Capability:  r.Capability,
+					Root:        r.Root,
+					Severity:    severity,
+					Status:      "fail",
+					Message:     message,
+					File:        leak.File,
+					Line:        leak.Line,
+					Column:      leak.Column,
+					Diagnostics: []Diagnostic{diag},
+				})
+			}
+		} else if r.Status == "fail" || r.Status == "error" {
 			findingID := r.ControlId
 			if r.ControlCatalogId != nil && *r.ControlCatalogId != "" {
 				findingID = *r.ControlCatalogId
@@ -239,12 +302,16 @@ func BuildComplianceReport(opts ReportOptions) *Report {
 		}
 	}
 
-	// Calculate executed controls (exit_code != nil)
+	// Calculate executed controls (exit_code != nil) and the applicable scope.
 	executedControls := 0
+	applicableControls := 0
 	dependencySkips := 0
 	for _, r := range opts.Results {
 		if r.ExitCode != nil {
 			executedControls++
+		}
+		if controlInApplicableScope(r) {
+			applicableControls++
 		}
 		for _, d := range r.Diagnostics {
 			if d.Code == "dependency_failed" {
@@ -303,6 +370,15 @@ func BuildComplianceReport(opts ReportOptions) *Report {
 
 	for _, r := range opts.Results {
 		seenResultIds[r.ControlId]++
+		if r.Status == "skipped" && len(r.Diagnostics) > 0 {
+			switch r.Diagnostics[0].Code {
+			case "technology_absent", "not_applicable", "platform_unsupported", "permission_denied", "ambiguous", "alternative_not_selected":
+				continue
+			case "capability_unavailable", "tool_unavailable", "repository_unconfigured":
+				blockingSkippedCount++
+				continue
+			}
+		}
 		if r.Status == "skipped" && !nonApplicableIds[r.ControlId] {
 			blockingSkippedCount++
 			if requiredPlanControls[r.ControlId] {
@@ -342,10 +418,18 @@ func BuildComplianceReport(opts ReportOptions) *Report {
 		reasons = append(reasons, fmt.Sprintf("%d controle(s) requis omis de l'evaluation.", omittedRequiredCount))
 	}
 
+	detectedCount, coveredCount, uncovered := technologyCoverage(opts.DiscoveryData, opts.Results)
+	label := coverageSentence(coveredCount, detectedCount, executedControls)
+	coverageComplete := !opts.PlanOnly && opts.ScanComplete && detectedCount > 0 && coveredCount == detectedCount && executedControls > 0 && summary.Error == 0 && summary.Fail == 0 && blockingSkippedCount == 0 && omittedRequiredCount == 0 && !hasDuplicates && !missingResults
 	coverage := Coverage{
-		Complete:                !opts.PlanOnly && opts.ScanComplete && len(opts.Results) == len(opts.Plan.Controls) && summary.Error == 0 && blockingSkippedCount == 0 && omittedRequiredCount == 0 && !hasDuplicates && !missingResults,
+		Complete:                coverageComplete,
 		PlannedControls:         len(opts.Plan.Controls),
+		ApplicableControls:      applicableControls,
 		ExecutedControls:        executedControls,
+		DetectedTechnologies:    detectedCount,
+		CoveredTechnologies:     coveredCount,
+		UncoveredTechnologies:   uncovered,
+		Label:                   label,
 		OmittedRequiredControls: omittedRequiredCount,
 		DependencySkips:         dependencySkips,
 		Limitations:             make([]interface{}, 0),
@@ -353,12 +437,28 @@ func BuildComplianceReport(opts ReportOptions) *Report {
 
 	var verdictPtr *string
 	if !opts.PlanOnly {
-		if summary.Fail > 0 || summary.CriticalErrors > 0 || omittedRequiredCount > 0 {
+		switch {
+		case summary.Success == 0 && summary.Fail == 0 && summary.Error == 0:
+			verdictPtr = nil
+			reasons = append([]string{label}, reasons...)
+			if len(uncovered) > 0 {
+				reasons = append(reasons, "Lacunes : "+strings.Join(uncovered, ", ")+".")
+			}
+		case summary.Fail > 0 || summary.CriticalErrors > 0 || omittedRequiredCount > 0:
 			v := "FAIL"
 			verdictPtr = &v
-		} else {
+			reasons = append([]string{label}, reasons...)
+		case !coverageComplete:
 			v := "PASS"
 			verdictPtr = &v
+			reasons = append([]string{label}, reasons...)
+			if len(uncovered) > 0 {
+				reasons = append(reasons, "Lacunes : "+strings.Join(uncovered, ", ")+".")
+			}
+		default:
+			v := "PASS"
+			verdictPtr = &v
+			reasons = append([]string{label}, reasons...)
 		}
 	}
 
@@ -388,7 +488,7 @@ func BuildComplianceReport(opts ReportOptions) *Report {
 		status = "blocked"
 	}
 
-	engineVer := "2.0.0"
+	engineVer := version.Version
 	resultsList := opts.Results
 	if resultsList == nil {
 		resultsList = make([]ExecutionResult, 0)
@@ -432,6 +532,131 @@ func BuildComplianceReport(opts ReportOptions) *Report {
 			CodeExecutionAuthorized:     opts.Plan.Permissions.CodeExecution,
 		},
 	}
+}
+
+func controlInApplicableScope(r ExecutionResult) bool {
+	if r.Status == "success" || r.Status == "fail" || r.Status == "error" {
+		return true
+	}
+	if len(r.Diagnostics) == 0 {
+		return false
+	}
+	switch r.Diagnostics[0].Code {
+	case "technology_absent", "not_applicable", "platform_unsupported", "alternative_not_selected":
+		return false
+	default:
+		return true
+	}
+}
+
+func coverageSentence(covered, detected, executed int) string {
+	if detected <= 0 {
+		return "Aucune technologie détectée."
+	}
+	text := fmt.Sprintf("%d technologie(s) couverte(s) sur %d détectée(s)", covered, detected)
+	switch {
+	case covered == detected:
+		return "Couverture complète : " + text + "."
+	case executed == 0:
+		return "Couverture nulle : " + text + "."
+	default:
+		return "Couverture partielle : " + text + "."
+	}
+}
+
+func technologyCoverage(discovery interface{}, results []ExecutionResult) (int, int, []string) {
+	detected := map[string]bool{}
+	for _, name := range detectedTechnologies(discovery) {
+		detected[name] = true
+	}
+	type state struct {
+		executed bool
+		gap      string
+		disabled bool
+		seen     bool
+	}
+	byTech := map[string]*state{}
+	for name := range detected {
+		byTech[name] = &state{}
+	}
+	for _, result := range results {
+		if !detected[result.Technology] {
+			continue
+		}
+		item := byTech[result.Technology]
+		if result.ExitCode != nil {
+			item.executed = true
+		}
+		if len(result.Diagnostics) == 0 {
+			continue
+		}
+		item.seen = true
+		switch result.Diagnostics[0].Code {
+		case "user_disabled":
+			item.disabled = true
+		case "tool_unavailable", "capability_unavailable", "repository_unconfigured", "platform_unavailable":
+			if item.gap == "" {
+				item.gap = result.Technology + " : " + result.Diagnostics[0].Message
+			}
+		}
+	}
+	names := make([]string, 0, len(detected))
+	for name := range detected {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	covered := 0
+	var gaps []string
+	for _, name := range names {
+		item := byTech[name]
+		if item.disabled && item.gap == "" && !item.executed {
+			continue
+		}
+		if item.gap == "" && !item.executed {
+			item.gap = name + " : détectée, aucun contrôle au catalogue"
+		}
+		if item.gap != "" {
+			gaps = append(gaps, item.gap)
+			continue
+		}
+		covered++
+	}
+	if gaps == nil {
+		gaps = []string{}
+	}
+	return covered + len(gaps), covered, gaps
+}
+
+func detectedTechnologies(discovery interface{}) []string {
+	names := uncoveredTechnologies(discovery, map[string]bool{})
+	return names
+}
+
+func uncoveredTechnologies(discovery interface{}, addressed map[string]bool) []string {
+	if discovery == nil {
+		return nil
+	}
+	raw, err := json.Marshal(discovery)
+	if err != nil {
+		return nil
+	}
+	var view struct {
+		Technologies []struct {
+			Technology string `json:"technology"`
+			Status     string `json:"status"`
+		} `json:"technologies"`
+	}
+	if err := json.Unmarshal(raw, &view); err != nil {
+		return nil
+	}
+	var missing []string
+	for _, tech := range view.Technologies {
+		if tech.Status == "detected" && tech.Technology != "" && !addressed[tech.Technology] {
+			missing = append(missing, tech.Technology)
+		}
+	}
+	sort.Strings(missing)
+	return missing
 }
 
 // BuildReport maintains backward compatibility with Phase 0 callers.
@@ -528,4 +753,3 @@ func CompareCanonicalReports(rep1, rep2 map[string]interface{}) []string {
 
 	return diffs
 }
-

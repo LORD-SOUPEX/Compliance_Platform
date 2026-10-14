@@ -27,6 +27,8 @@ import (
 	"compliance/internal/matrix"
 	"compliance/internal/osutil"
 	"compliance/internal/report"
+	"compliance/internal/sessions"
+	"compliance/internal/version"
 )
 
 var (
@@ -83,23 +85,27 @@ type DiscoveryResponse struct {
 
 // PlanRequest represents request to POST /api/v1/plans.
 type PlanRequest struct {
-	TargetPath          string `json:"target_path"`
-	AllowNetwork        bool   `json:"allow_network"`
-	AllowCodeExecution  bool   `json:"allow_code_execution"`
-	IncludeApplyDestroy bool   `json:"include_apply_destroy"`
+	TargetPath           string   `json:"target_path"`
+	AllowNetwork         bool     `json:"allow_network"`
+	AllowCodeExecution   bool     `json:"allow_code_execution"`
+	IncludeApplyDestroy  bool     `json:"include_apply_destroy"`
+	DisabledTechnologies []string `json:"disabled_technologies,omitempty"`
+	DisabledControls     []string `json:"disabled_controls,omitempty"`
 }
 
 // CreateRunRequest represents request to POST /api/v1/runs.
 type CreateRunRequest struct {
-	TargetPath          string   `json:"target_path"`
-	RunID               string   `json:"run_id,omitempty"`
-	OutputDir           string   `json:"output_dir,omitempty"`
-	PlanOnly            bool     `json:"plan_only"`
-	ControlID           string   `json:"control_id,omitempty"` // Optional: run single control
-	AllowNetwork        bool     `json:"allow_network"`
-	AllowCodeExecution  bool     `json:"allow_code_execution"`
-	ConfirmApplyDestroy bool     `json:"confirm_apply_destroy"` // Required if running apply_destroy control
-	RedactionPatterns   []string `json:"redaction_patterns,omitempty"`
+	TargetPath           string   `json:"target_path"`
+	RunID                string   `json:"run_id,omitempty"`
+	OutputDir            string   `json:"output_dir,omitempty"`
+	PlanOnly             bool     `json:"plan_only"`
+	ControlID            string   `json:"control_id,omitempty"` // Optional: run single control
+	AllowNetwork         bool     `json:"allow_network"`
+	AllowCodeExecution   bool     `json:"allow_code_execution"`
+	ConfirmApplyDestroy  bool     `json:"confirm_apply_destroy"` // Required if running apply_destroy control
+	RedactionPatterns    []string `json:"redaction_patterns,omitempty"`
+	DisabledTechnologies []string `json:"disabled_technologies,omitempty"`
+	DisabledControls     []string `json:"disabled_controls,omitempty"`
 }
 
 // RunCreationResponse represents response from POST /api/v1/runs.
@@ -170,9 +176,10 @@ type PresentationItem struct {
 
 // ValidateReportResponse represents response from POST /api/v1/reports/validate.
 type ValidateReportResponse struct {
-	SchemaVersion int                `json:"schema_version"`
-	ReportSHA256  string             `json:"report_sha256"`
-	Presentations []PresentationItem `json:"presentations"`
+	SchemaVersion   int                `json:"schema_version"`
+	ReportSHA256    string             `json:"report_sha256"`
+	Presentations   []PresentationItem `json:"presentations"`
+	TotalDurationMs int64              `json:"total_duration_ms"`
 }
 
 // GenerateBearerToken generates a cryptographically secure 256-bit token (64 hex chars).
@@ -464,11 +471,11 @@ func (sm *SessionManager) CreateRun(ctx context.Context, req CreateRunRequest) (
 	if runDir == "" {
 		runDir = filepath.Join(sm.stateDir, "runs", runID)
 	}
+	sm.purgeRuns(runDir, runID, 1)
 	_ = os.MkdirAll(runDir, 0700)
 	_ = os.MkdirAll(filepath.Join(runDir, "logs"), 0700)
 
-	sessionPath := filepath.Join(runDir, "session.json")
-	initSession := map[string]interface{}{
+	mergeSessionFile(filepath.Join(runDir, "session.json"), map[string]interface{}{
 		"schema_version": 1,
 		"run_id":         runID,
 		"target":         req.TargetPath,
@@ -478,11 +485,7 @@ func (sm *SessionManager) CreateRun(ctx context.Context, req CreateRunRequest) (
 			"code_execution": req.AllowCodeExecution,
 		},
 		"started_at": time.Now().UTC().Format(time.RFC3339),
-		"ended_at":   nil,
-	}
-	if b, err := json.MarshalIndent(initSession, "", "  "); err == nil {
-		_ = os.WriteFile(sessionPath, b, 0600)
-	}
+	})
 
 	runCtx, cancel := context.WithCancel(context.Background())
 
@@ -518,7 +521,15 @@ func (sm *SessionManager) CreateRun(ctx context.Context, req CreateRunRequest) (
 	return session, nil
 }
 
+func (sm *SessionManager) purgeRuns(runDir, protect string, reserve int) {
+	if runDir == "" {
+		return
+	}
+	_, _ = sessions.Purge(filepath.Dir(runDir), sessions.Options{Reserve: reserve, Protect: []string{protect, filepath.Base(runDir)}})
+}
+
 func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req CreateRunRequest) {
+	defer sm.purgeRuns(s.OutputDir, s.ID, 0)
 	defer func() {
 		if r := recover(); r != nil {
 			s.mu.Lock()
@@ -545,16 +556,18 @@ func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req Create
 	})
 
 	opts := engine.ComplianceOptions{
-		RepoRoot:           req.TargetPath,
-		PlatformRoot:       sm.platformRoot,
-		CatalogPath:        sm.catalogPath,
-		AllowNetwork:       req.AllowNetwork,
-		AllowCodeExecution: req.AllowCodeExecution,
-		PlanOnly:           req.PlanOnly,
-		RedactionPatterns:  req.RedactionPatterns,
-		RunID:              s.ID,
-		SourceAdapter:      "VSCode",
-		CandidateResolver:  sm.resolver,
+		RepoRoot:             req.TargetPath,
+		PlatformRoot:         sm.platformRoot,
+		CatalogPath:          sm.catalogPath,
+		AllowNetwork:         req.AllowNetwork,
+		AllowCodeExecution:   req.AllowCodeExecution,
+		DisabledTechnologies: req.DisabledTechnologies,
+		DisabledControls:     req.DisabledControls,
+		PlanOnly:             req.PlanOnly,
+		RedactionPatterns:    req.RedactionPatterns,
+		RunID:                s.ID,
+		SourceAdapter:        "VSCode",
+		CandidateResolver:    sm.resolver,
 		OnPlanReady: func(planRep *report.Report) {
 			if b, err := json.MarshalIndent(planRep, "", "  "); err == nil {
 				planPath := filepath.Join(s.OutputDir, "execution-plan.json")
@@ -609,8 +622,7 @@ func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req Create
 				}
 			}
 
-			logPath := filepath.Join(s.OutputDir, "logs", filepath.Base(ctrl.ID)+".log")
-			_ = os.WriteFile(logPath, []byte(res.Stdout+"\n"+res.Stderr), 0600)
+			logPath, _ := WriteControlLog(s.OutputDir, ctrl.ID, res.Stdout, res.Stderr)
 
 			s.emitEvent("control_completed", &ctrlID, &tech, &root, map[string]interface{}{
 				"status":      presStatus,
@@ -637,22 +649,7 @@ func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req Create
 		}
 		s.mu.Unlock()
 
-		sessionPath := filepath.Join(s.OutputDir, "session.json")
-		sessionData := map[string]interface{}{
-			"schema_version": 1,
-			"run_id":         s.ID,
-			"target":         s.TargetPath,
-			"state":          "cancelled",
-			"permissions": map[string]bool{
-				"network":        s.Permissions.Network,
-				"code_execution": s.Permissions.CodeExecution,
-			},
-			"started_at": s.StartedAt.Format(time.RFC3339),
-			"ended_at":   now.Format(time.RFC3339),
-		}
-		if sessBytes, sErr := json.MarshalIndent(sessionData, "", "  "); sErr == nil {
-			_ = os.WriteFile(sessionPath, sessBytes, 0600)
-		}
+		writeSessionSnapshot(filepath.Join(s.OutputDir, "session.json"), s, "cancelled", now)
 
 		reportPath := filepath.Join(s.OutputDir, "compliance-report.json")
 		if rep != nil {
@@ -704,22 +701,7 @@ func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req Create
 		}
 	}
 
-	sessionPath := filepath.Join(s.OutputDir, "session.json")
-	sessionData := map[string]interface{}{
-		"schema_version": 1,
-		"run_id":         s.ID,
-		"target":         s.TargetPath,
-		"state":          "completed",
-		"permissions": map[string]bool{
-			"network":        s.Permissions.Network,
-			"code_execution": s.Permissions.CodeExecution,
-		},
-		"started_at": s.StartedAt.Format(time.RFC3339),
-		"ended_at":   now.Format(time.RFC3339),
-	}
-	if sessBytes, sErr := json.MarshalIndent(sessionData, "", "  "); sErr == nil {
-		_ = os.WriteFile(sessionPath, sessBytes, 0600)
-	}
+	writeSessionSnapshot(filepath.Join(s.OutputDir, "session.json"), s, "completed", now)
 
 	s.emitEvent("report_available", nil, nil, nil, map[string]interface{}{
 		"report_path": reportPath,
@@ -735,11 +717,72 @@ func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req Create
 	})
 }
 
+func mergeSessionFile(sessionPath string, updates map[string]interface{}) {
+	data := map[string]interface{}{}
+	if previous, err := os.ReadFile(sessionPath); err == nil {
+		_ = json.Unmarshal(previous, &data)
+	}
+	for key, value := range updates {
+		data[key] = value
+	}
+	if sessBytes, err := json.MarshalIndent(data, "", "  "); err == nil {
+		_ = os.WriteFile(sessionPath, sessBytes, 0600)
+		_ = os.Chmod(sessionPath, 0600)
+	}
+}
+
+func writeSessionSnapshot(sessionPath string, s *Session, state string, ended time.Time) {
+	mergeSessionFile(sessionPath, map[string]interface{}{
+		"schema_version": 1,
+		"run_id":         s.ID,
+		"target":         s.TargetPath,
+		"state":          state,
+		"permissions": map[string]bool{
+			"network":        s.Permissions.Network,
+			"code_execution": s.Permissions.CodeExecution,
+		},
+		"started_at":  s.StartedAt.Format(time.RFC3339),
+		"ended_at":    ended.Format(time.RFC3339),
+		"report_path": filepath.Join(s.OutputDir, "compliance-report.json"),
+	})
+}
+
+// ControlLogName maps a control id to a file name. filepath.Base("javascript/linting/eslint/.") is "." on Windows.
+func ControlLogName(controlID string) string {
+	name := strings.NewReplacer("/", "__", "\\", "__", ":", "_", "..", "_").Replace(strings.TrimSpace(controlID))
+	name = strings.Trim(name, "._ ")
+	if name == "" {
+		name = "control"
+	}
+	return name + ".log"
+}
+
+// WriteControlLog stores stdout and stderr for one control, including an empty capture.
+func WriteControlLog(runDir, controlID, stdout, stderr string) (string, error) {
+	logs := filepath.Join(runDir, "logs")
+	if err := os.MkdirAll(logs, 0700); err != nil {
+		return "", err
+	}
+	body := stdout
+	if stderr != "" {
+		if body != "" {
+			body += "\n"
+		}
+		body += stderr
+	}
+	logPath := filepath.Join(logs, ControlLogName(controlID))
+	return logPath, os.WriteFile(logPath, []byte(body), 0600)
+}
+
 func mapPresentationStatus(res *report.ExecutionResult) string {
 	if len(res.Diagnostics) > 0 {
 		code := res.Diagnostics[0].Code
 		switch code {
-		case "dependency_failed", "ambiguous", "capability_unavailable", "tool_unavailable":
+		case "capability_unavailable", "tool_unavailable":
+			return "Blocked"
+		case "technology_absent", "not_applicable", "platform_unsupported", "alternative_not_selected":
+			return "Not applicable"
+		case "dependency_failed", "ambiguous":
 			return "Blocked"
 		case "permission_denied", "cancelled_before_start", "cancelled_during_execution":
 			return "Skipped"
@@ -852,28 +895,9 @@ func (sm *SessionManager) GetSession(id string) (*Session, error) {
 	return session, nil
 }
 
-// CleanupStaleSessions purges sessions older than 7 days, retaining up to 20 recent sessions.
+// CleanupStaleSessions keeps at most five recognized session directories.
 func (sm *SessionManager) CleanupStaleSessions() {
-	runsDir := filepath.Join(sm.stateDir, "runs")
-	entries, err := os.ReadDir(runsDir)
-	if err != nil {
-		return
-	}
-
-	cutoff := time.Now().Add(-7 * 24 * time.Hour)
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		path := filepath.Join(runsDir, e.Name())
-		fi, err := e.Info()
-		if err != nil {
-			continue
-		}
-		if fi.ModTime().Before(cutoff) {
-			_ = os.RemoveAll(path)
-		}
-	}
+	_, _ = sessions.Purge(filepath.Join(sm.stateDir, "runs"), sessions.Options{})
 }
 
 // DaemonServer represents the running HTTP/SSE daemon.
@@ -904,7 +928,7 @@ func StartDaemon(cfg DaemonConfig) (*DaemonServer, error) {
 		cfg.StateDir = filepath.Join(home, ".compliance")
 	}
 	if cfg.Version == "" {
-		cfg.Version = "2.0.0"
+		cfg.Version = version.Version
 	}
 
 	lockPath := filepath.Join(cfg.StateDir, "daemon.lock")
@@ -1129,15 +1153,17 @@ func (s *DaemonServer) handlePlan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	opts := engine.ComplianceOptions{
-		RepoRoot:           canonicalTarget,
-		PlatformRoot:       s.cfg.PlatformRoot,
-		CatalogPath:        s.cfg.CatalogPath,
-		AllowNetwork:       req.AllowNetwork,
-		AllowCodeExecution: req.AllowCodeExecution,
-		PlanOnly:           true,
-		SourceAdapter:      "VSCode",
-		RunID:              GenerateRunID(),
-		CandidateResolver:  s.sessions.resolver,
+		RepoRoot:             canonicalTarget,
+		PlatformRoot:         s.cfg.PlatformRoot,
+		CatalogPath:          s.cfg.CatalogPath,
+		AllowNetwork:         req.AllowNetwork,
+		AllowCodeExecution:   req.AllowCodeExecution,
+		DisabledTechnologies: req.DisabledTechnologies,
+		DisabledControls:     req.DisabledControls,
+		PlanOnly:             true,
+		SourceAdapter:        "VSCode",
+		RunID:                GenerateRunID(),
+		CandidateResolver:    s.sessions.resolver,
 	}
 
 	rep, err := engine.RunCompliance(r.Context(), opts)
@@ -1392,10 +1418,62 @@ func (s *DaemonServer) handleValidateReport(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSON(w, http.StatusOK, ValidateReportResponse{
-		SchemaVersion: 1,
-		ReportSHA256:  reportSHA,
-		Presentations: presentations,
+		SchemaVersion:   1,
+		ReportSHA256:    reportSHA,
+		Presentations:   presentations,
+		TotalDurationMs: ReportDurationMs(rep),
 	})
+}
+
+// ReportDurationMs prefers metrics.total_duration_ms, then the sum of executed controls.
+func ReportDurationMs(rep map[string]interface{}) int64 {
+	if metrics, ok := rep["metrics"].(map[string]interface{}); ok {
+		if total, ok := asInt64(metrics["total_duration_ms"]); ok && total >= 0 {
+			return total
+		}
+	}
+	var sum int64
+	seen := false
+	results, _ := rep["execution_results"].([]interface{})
+	for _, raw := range results {
+		res, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		status, _ := res["status"].(string)
+		if status != "success" && status != "fail" && status != "error" {
+			continue
+		}
+		ms, ok := asInt64(res["duration_ms"])
+		if !ok || ms < 0 {
+			continue
+		}
+		sum += ms
+		seen = true
+	}
+	if !seen {
+		return 0
+	}
+	return sum
+}
+
+func asInt64(value interface{}) (int64, bool) {
+	switch n := value.(type) {
+	case float64:
+		if n < 0 || n != float64(int64(n)) {
+			return 0, false
+		}
+		return int64(n), true
+	case int:
+		return int64(n), n >= 0
+	case int64:
+		return n, n >= 0
+	case json.Number:
+		v, err := n.Int64()
+		return v, err == nil && v >= 0
+	default:
+		return 0, false
+	}
 }
 
 // ComputePresentations produces the visual presentation array for UI / ReportPanel display.
@@ -1426,7 +1504,7 @@ func ComputePresentations(rep map[string]interface{}) ([]PresentationItem, error
 		seenResults[ctrlID] = true
 		statusStr, _ := resMap["status"].(string)
 
-		presStatus := "Succeeded"
+		presStatus := "Not applicable"
 		var reasonObj interface{}
 		diags, _ := resMap["diagnostics"].([]interface{})
 		if len(diags) > 0 {
@@ -1434,15 +1512,24 @@ func ComputePresentations(rep map[string]interface{}) ([]PresentationItem, error
 				code, _ := firstDiag["code"].(string)
 				msg, _ := firstDiag["message"].(string)
 				switch code {
-				case "dependency_failed", "ambiguous", "capability_unavailable", "tool_unavailable":
+				case "capability_unavailable", "tool_unavailable", "repository_unconfigured", "platform_unavailable", "dependency_failed", "ambiguous":
 					presStatus = "Blocked"
+				case "user_disabled":
+					presStatus = "Not applicable"
+				case "technology_absent", "not_applicable", "platform_unsupported", "alternative_not_selected":
+					presStatus = "Not applicable"
 				case "permission_denied", "cancelled_before_start", "cancelled_during_execution":
 					presStatus = "Skipped"
 				default:
-					if statusStr == "fail" {
+					switch statusStr {
+					case "success":
+						presStatus = "Succeeded"
+					case "fail":
 						presStatus = "Failed"
-					} else if statusStr == "error" {
+					case "error":
 						presStatus = "Error"
+					case "skipped":
+						presStatus = "Not applicable"
 					}
 				}
 				reasonObj = map[string]interface{}{
@@ -1465,7 +1552,7 @@ func ComputePresentations(rep map[string]interface{}) ([]PresentationItem, error
 					"message": "Contrôle non exécuté selon le motif structuré du backend.",
 				}
 			default:
-				presStatus = "Succeeded"
+				presStatus = "Not applicable"
 			}
 		}
 
@@ -1512,7 +1599,7 @@ func ComputePresentations(rep map[string]interface{}) ([]PresentationItem, error
 			status = "Pending"
 		} else if code == "permission_denied" {
 			status = "Skipped"
-		} else if applicability == "ambiguous" || applicability == "capability_unavailable" || applicability == "tool_unavailable" {
+		} else if applicability == "ambiguous" || applicability == "capability_unavailable" || applicability == "tool_unavailable" || applicability == "repository_unconfigured" {
 			status = "Blocked"
 		} else {
 			status = "Not applicable"

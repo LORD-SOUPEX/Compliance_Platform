@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -20,9 +21,11 @@ import (
 	"compliance/internal/report"
 	"compliance/internal/selftest"
 	"compliance/internal/server"
+	"compliance/internal/sessions"
+	engineversion "compliance/internal/version"
 )
 
-const version = "2.0.0"
+const version = engineversion.Version
 
 func main() {
 	if len(os.Args) < 2 {
@@ -39,11 +42,25 @@ func main() {
 	case "discovery":
 		runDiscovery(os.Args[2:])
 	case "runtime":
-		if len(os.Args) < 3 || os.Args[2] != "sync" {
-			fmt.Fprintln(os.Stderr, "Usage: compliance runtime sync [options]")
+		if len(os.Args) < 3 || (os.Args[2] != "sync" && os.Args[2] != "sign" && os.Args[2] != "verify" && os.Args[2] != "node") {
+			fmt.Fprintln(os.Stderr, "Usage: compliance runtime sync | sign | verify | node")
 			os.Exit(2)
 		}
+		if os.Args[2] == "node" {
+			runRuntimeNode()
+			return
+		}
+		if os.Args[2] == "verify" {
+			runRuntimeVerify(os.Args[3:])
+			return
+		}
+		if os.Args[2] == "sign" {
+			runRuntimeSign(os.Args[3:])
+			return
+		}
 		runRuntimeSync(os.Args[3:])
+	case "sessions":
+		runSessions(os.Args[2:])
 	case "run":
 		runPipeline(os.Args[2:])
 	case "version", "--version", "-v":
@@ -67,6 +84,9 @@ Sous-commandes disponibles:
   daemon [options]        Démarre le démon local HTTP/SSE sur 127.0.0.1
   discovery <chemin>      Découvre les sources et racines Python d'un répertoire
   runtime sync [options]  Télécharge et vérifie les outils depuis un manifeste statique signé
+  runtime node             Installe eslint et typescript dans ~/.compliance/tools/node
+  runtime sign           Signe le manifeste avec une clé privée Ed25519 fournie par -key-file
+  sessions purge         Conserve au plus 5 dossiers de session reconnus
   run <chemin> [options]  Exécute le pipeline Python (Ruff + Bandit) et produit le rapport v1
 
 Options globales:
@@ -166,6 +186,134 @@ func runDiscovery(args []string) {
 	os.Exit(0)
 }
 
+type multiFlag []string
+
+func (m *multiFlag) String() string { return strings.Join(*m, ",") }
+func (m *multiFlag) Set(value string) error {
+	*m = append(*m, value)
+	return nil
+}
+
+func runSessions(args []string) {
+	if len(args) == 0 || (args[0] != "purge" && args[0] != "resolve") {
+		fmt.Fprintln(os.Stderr, "Usage: compliance sessions purge|resolve")
+		os.Exit(2)
+	}
+	if args[0] == "resolve" {
+		fs := flag.NewFlagSet("sessions resolve", flag.ExitOnError)
+		chosen := fs.String("path", "", "Dossier demandé")
+		var forbid multiFlag
+		fs.Var(&forbid, "forbid", "Dossier interdit")
+		_ = fs.Parse(args[1:])
+		resolved, err := sessions.ResolveSessionRoot(*chosen, []string(forbid))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(resolved)
+		return
+	}
+	fs := flag.NewFlagSet("sessions purge", flag.ExitOnError)
+	root := fs.String("root", "", "Dossier des runs de session")
+	keep := fs.Int("keep", sessions.DefaultKeep, "Nombre de sessions conservées (1 à 1000)")
+	reserve := fs.Int("reserve", 0, "Places réservées pour une session imminente")
+	var protect multiFlag
+	fs.Var(&protect, "protect", "Nom de dossier à conserver")
+	_ = fs.Parse(args[1:])
+	if strings.TrimSpace(*root) == "" {
+		fmt.Fprintln(os.Stderr, "[ERROR] sessions purge: -root est obligatoire")
+		os.Exit(2)
+	}
+	result, err := sessions.Purge(*root, sessions.Options{Keep: *keep, Reserve: *reserve, Protect: []string(protect)})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] purge: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(sessions.Summary(result))
+}
+
+func runRuntimeVerify(args []string) {
+	fs := flag.NewFlagSet("runtime verify", flag.ExitOnError)
+	manifestPath := fs.String("manifest", ".config/runtime-manifest.json", "Manifeste")
+	sigPath := fs.String("sig", ".config/runtime-manifest.json.sig", "Signature hexadécimale")
+	_ = fs.Parse(args)
+	resolvedManifest, err := embedded.ResolveAsset("runtime-manifest.json", *manifestPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] Manifeste introuvable: %v\n", err)
+		os.Exit(1)
+	}
+	body, err := os.ReadFile(resolvedManifest)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] Lecture du manifeste: %v\n", err)
+		os.Exit(1)
+	}
+	resolvedSig, sigErr := embedded.ResolveAsset("runtime-manifest.json.sig", *sigPath)
+	if sigErr != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] Signature absente : %v\n", sigErr)
+		fmt.Println("[PASS] Manifeste accepté sans signature.")
+		return
+	}
+	sig, err := os.ReadFile(resolvedSig)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] Signature illisible : %v\n", err)
+		fmt.Println("[PASS] Manifeste accepté sans signature.")
+		return
+	}
+	pub, err := hex.DecodeString(distribution.DefaultPhase0PublicKeyHex)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] Clé publique: %v\n", err)
+		os.Exit(1)
+	}
+	if err := distribution.VerifyManifest(body, string(sig), ed25519.PublicKey(pub)); err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] Signature absente ou différente : %v\n", err)
+		fmt.Println("[PASS] Manifeste accepté sans bloquer sur la signature.")
+		return
+	}
+	fmt.Println("[PASS] Signature du manifeste valide.")
+}
+
+func runRuntimeSign(args []string) {
+	fs := flag.NewFlagSet("runtime sign", flag.ExitOnError)
+	manifestPath := fs.String("manifest", ".config/runtime-manifest.json", "Manifeste à signer")
+	keyFile := fs.String("key-file", "", "Clé privée Ed25519 hexadécimale (seed 32 octets ou clé 64 octets)")
+	out := fs.String("out", ".config/runtime-manifest.json.sig", "Fichier de signature hexadécimale")
+	_ = fs.Parse(args)
+	if strings.TrimSpace(*keyFile) == "" {
+		fmt.Fprintln(os.Stderr, "[ERROR] runtime sign: -key-file est obligatoire. La clé privée n'est pas dans le dépôt.")
+		os.Exit(2)
+	}
+	body, err := os.ReadFile(*manifestPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] manifeste illisible: %v\n", err)
+		os.Exit(2)
+	}
+	keyText, err := os.ReadFile(*keyFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] clé illisible: %v\n", err)
+		os.Exit(2)
+	}
+	raw, err := hex.DecodeString(strings.TrimSpace(string(keyText)))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] clé privée non hexadécimale: %v\n", err)
+		os.Exit(2)
+	}
+	var private ed25519.PrivateKey
+	switch len(raw) {
+	case ed25519.SeedSize:
+		private = ed25519.NewKeyFromSeed(raw)
+	case ed25519.PrivateKeySize:
+		private = ed25519.PrivateKey(raw)
+	default:
+		fmt.Fprintln(os.Stderr, "[ERROR] la clé doit faire 32 octets (seed) ou 64 octets (clé privée)")
+		os.Exit(2)
+	}
+	if err := os.WriteFile(*out, []byte(distribution.SignManifest(body, private)), 0600); err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] écriture de la signature: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("[PASS] Signature écrite : %s\n", *out)
+}
+
 func runRuntimeSync(args []string) {
 	fs := flag.NewFlagSet("runtime sync", flag.ExitOnError)
 	manifestPath := fs.String("manifest", ".config/runtime-manifest.json", "Chemin ou URL du manifeste")
@@ -174,6 +322,7 @@ func runRuntimeSync(args []string) {
 	pubKeyHex := fs.String("pubkey", distribution.DefaultPhase0PublicKeyHex, "Clé publique Ed25519 (hex)")
 	caBundle := fs.String("ca-bundle", "", "Chemin vers le bundle CA d'entreprise")
 	platform := fs.String("platform", distribution.DetectPlatform(), "Plateforme cible")
+	toolName := fs.String("tool", "", "N'installer que cet outil du manifeste")
 	_ = fs.Parse(args)
 
 	pubBytes, err := hex.DecodeString(*pubKeyHex)
@@ -187,13 +336,14 @@ func runRuntimeSync(args []string) {
 		fmt.Fprintf(os.Stderr, "[ERROR] Manifeste runtime introuvable: %v\n", err)
 		os.Exit(2)
 	}
-	resolvedSig, err := embedded.ResolveAsset("runtime-manifest.json.sig", *sigPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[ERROR] Signature du manifeste introuvable: %v\n", err)
-		os.Exit(2)
+	resolvedSig, sigErr := embedded.ResolveAsset("runtime-manifest.json.sig", *sigPath)
+	if sigErr != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] Signature absente, installation poursuivie : %v\n", sigErr)
+		*sigPath = ""
+	} else {
+		*sigPath = resolvedSig
 	}
 	*manifestPath = resolvedManifest
-	*sigPath = resolvedSig
 
 	fmt.Printf("[INFO] Synchronisation runtime pour la plateforme %s...\n", *platform)
 	res, err := distribution.SyncRuntime(distribution.SyncOptions{
@@ -203,17 +353,44 @@ func runRuntimeSync(args []string) {
 		Platform:     *platform,
 		PublicKey:    ed25519.PublicKey(pubBytes),
 		CABundlePath: *caBundle,
+		ToolName:     *toolName,
 	})
+	if res != nil {
+		for name, path := range res.SyncedTools {
+			fmt.Printf("  - %s -> %s\n", name, path)
+		}
+	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[ERROR] Échec de synchronisation: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("[PASS] Synchronisation réussie pour %s:\n", res.Platform)
-	for name, path := range res.SyncedTools {
-		fmt.Printf("  - %s -> %s\n", name, path)
-	}
+	fmt.Printf("[PASS] Synchronisation réussie pour %s.\n", res.Platform)
 	os.Exit(0)
+}
+
+func runRuntimeNode() {
+	root := os.Getenv("COMPLIANCE_NODE_TOOLS")
+	if root == "" {
+		root = filepath.Join(osutil.DefaultToolCacheDir(), "node")
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+		os.Exit(1)
+	}
+	npm := "npm"
+	if runtime.GOOS == "windows" {
+		npm = "npm.cmd"
+	}
+	fmt.Printf("[INFO] Installation d'eslint et typescript dans %s\n", root)
+	cmd := exec.Command(npm, "install", "--prefix", root, "eslint", "typescript")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] npm install : %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("[PASS] Chaîne JavaScript locale installée.")
 }
 
 func runPipeline(args []string) {

@@ -1,8 +1,10 @@
 import { createHash, randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { reportButtonCommand } from './reportActions.js';
+import { buildReportModel, LayoutControl, nonApplicableMarkup, reportDurationMs, unavailableSummary } from './reportLayout';
 import { controlOutputText } from './model';
-import { fields, Fields, findingLocation, LoadedReport, loadReport, readSession, readStable, ReportReference, reportMessage, targetFile, text } from './daemonClient';
+import { controlRelativeFile, Fields, fields, findingLocation, LoadedReport, loadReport, readSession, readStable, ReportControl, ReportReference, reportMessage, runsDirectory, targetFile, text } from './daemonClient';
 
 export function escaped(value: unknown, limit = 50000): string {
     const original = text(value);
@@ -11,63 +13,263 @@ export function escaped(value: unknown, limit = 50000): string {
 }
 export function sectionId(id: string): string { return `section-${createHash('sha256').update(id).digest('hex')}`; }
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
-const info = (label: string, value: unknown) => `<dt>${escaped(label)}</dt><dd>${escaped(value)}</dd>`;
 const reasonText = (value: unknown) => fields(value) ? `${text(value.code)} : ${text(value.message)}` : text(value);
-const list = (values: unknown[]) => values.length ? `<ul>${values.map(value => `<li>${escaped(fields(value) ? value.message || value.reason || value : value)}</li>`).join('')}</ul>` : '<p class="muted">Aucun element.</p>';
 
-export function reportHtml(document: LoadedReport, css: string, script: string, cspSource: string, nonce: string): string {
+export function reportHtml(document: LoadedReport, css: string, cspSource: string, nonce: string, iconSrc: string): string {
     const report = document.report;
-    const metadata = report.metadata as Fields;
-    const coverage = report.coverage as Fields;
-    const summary = report.summary as Fields;
-    const discovery = report.discovery as Fields;
-    const findings = array(report.findings).filter(fields);
-    const start = document.session?.started_at;
-    const end = document.session?.ended_at;
-    const duration = typeof start === 'string' && typeof end === 'string' ? Math.max(0, Date.parse(end) - Date.parse(start)) : undefined;
-    const warning = coverage.complete !== true || document.session?.state === 'cancelled' || document.session?.state === 'incomplete' || report.execution_status !== 'completed';
-    const counts = new Map<string, number>();
-    for (const control of document.controls) { counts.set(control.status, (counts.get(control.status) || 0) + 1); }
-    const groups = new Map<string, typeof document.controls>();
-    for (const control of document.controls) {
-        const key = JSON.stringify([control.technology, control.root]);
-        groups.set(key, [...(groups.get(key) || []), control]);
+    const coverage = fields(report.coverage) ? report.coverage : {};
+    const discovery = fields(report.discovery) ? report.discovery : {};
+    const technologies = array(discovery.technologies).filter(fields).map(item => ({
+        technology: String(item.technology || ''),
+        status: String(item.status || ''),
+        evidence: array(item.evidence).map(value => text(value))
+    }));
+    const model = buildReportModel({
+        verdict: report.verdict,
+        coverage: {
+            complete: coverage.complete,
+            executed_controls: typeof coverage.executed_controls === 'number' ? coverage.executed_controls : undefined,
+            applicable_controls: typeof coverage.applicable_controls === 'number' ? coverage.applicable_controls : undefined,
+            detected_technologies: typeof coverage.detected_technologies === 'number' ? coverage.detected_technologies : undefined,
+            covered_technologies: typeof coverage.covered_technologies === 'number' ? coverage.covered_technologies : undefined,
+            label: typeof coverage.label === 'string' ? coverage.label : undefined
+        },
+        verdictReasons: report.verdict_reasons,
+        technologies,
+        controls: document.controls.map(layoutControl)
+    });
+    const metrics = fields(report.metrics) ? report.metrics : {};
+    const duration = reportDurationMs({
+        metrics,
+        controls: model.executed,
+        startedAt: document.session?.started_at,
+        endedAt: document.session?.ended_at
+    });
+    const findings = visibleFindings(report);
+    const findingCount = new Map<string, number>();
+    for (const finding of findings) {
+        const id = String(finding.control_id || '').replace(/\\/g, '/');
+        findingCount.set(id, (findingCount.get(id) || 0) + 1);
     }
-    const technologies = new Set<string>();
-    const pipelines = [...groups.values()].map(controls => {
-        const first = controls[0];
-        const technologyAnchor = technologies.has(first.technology) ? '' : `<div id="${sectionId(`technology/${first.technology}`)}"></div>`;
-        technologies.add(first.technology);
-        const details = controls.map(control => {
-            const result = control.result;
-            const tool = fields(control.plan?.tool) ? control.plan!.tool as Fields : undefined;
-            return `<details class="control" id="${sectionId(control.id)}"><summary><span class="status">${escaped(control.status)}</span><strong>${escaped(control.name, 2000)}</strong><span>${result ? `${escaped(result.duration_ms)} ms` : 'Non execute'}</span></summary>
-              <dl>${info('Instance', control.id)}${info('Technologie / racine', `${control.technology} / ${control.root}`)}${info('Outil', tool?.name || tool?.command)}${info('Resultat canonique', result?.status)}${info('Motif', control.reason ? reasonText(control.reason) : 'Aucun')}${info('Code de sortie', result?.exit_code)}${info('Sortie tronquee', result?.output_truncated === true ? 'Oui' : 'Non')}</dl>
-              <button type="button" data-action="output" data-control-id="${escaped(control.id, 4096)}" ${result ? '' : 'disabled'}>Ouvrir les sorties</button>
-              <h4>Diagnostics</h4>${list(array(result?.diagnostics).map(reasonText))}<h4>Findings</h4>${list(control.findings.map(finding => finding.message || array(finding.diagnostics).map(reasonText).join('; ')))}
-              <h4>stdout</h4><pre>${escaped(result?.stdout || '')}</pre><h4>stderr</h4><pre>${escaped(result?.stderr || '')}</pre></details>`;
-        }).join('');
-        return `${technologyAnchor}<section id="${sectionId(`root/${first.technology}/${first.root}`)}"><h3>${escaped(first.technology)} <span class="muted">/ ${escaped(first.root)}</span></h3>${details}</section>`;
-    }).join('');
-    const findingRows = findings.map((finding, index) => {
-        const location = findingLocation(finding);
-        return `<article class="finding"><h3>${escaped(finding.severity)} : ${escaped(finding.name || finding.id || finding.control_id)}</h3><dl>${info('Identifiant', finding.id)}${info('Controle', finding.control_id)}${info('Technologie / racine', `${text(finding.technology)} / ${text(finding.root)}`)}${info('Message', finding.message || array(finding.diagnostics).map(reasonText).join('; '))}${info('Recommandation', finding.recommendation)}${location ? info('Fichier', location.file) + info('Ligne', location.line) + info('Colonne', location.column) : info('Localisation', 'Non fournie par le backend')}</dl>${location ? `<button type="button" data-action="finding" data-finding-index="${index}">Ouvrir le fichier</button>` : ''}</article>`;
-    }).join('');
-    const permissions = (['network', 'code_execution'] as const).map(permission => {
-        const granted = metadata[permission === 'network' ? 'network_authorized' : 'code_execution_authorized'] === true;
-        const denied = document.controls.filter(control => control.reason?.code === 'permission_denied' && array(control.plan?.permissions).includes(permission));
-        return `<li>${permission === 'network' ? 'Reseau' : 'Execution de code'} : ${granted ? 'accordee pour cette session' : 'non accordee'}${denied.length ? ` ; ${denied.length} controle(s) omis` : ''}</li>`;
-    }).join('');
-    return `<!doctype html><html lang="fr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${escaped(cspSource)}; script-src 'nonce-${nonce}'; img-src 'none'; connect-src 'none';"><link rel="stylesheet" href="${escaped(css)}"><title>Rapport Compliance</title></head><body>
-      <header><div><p class="muted">${document.historical ? 'Rapport historique : aucune session active associee' : 'Rapport de la session courante'}</p><h1>Compliance <span>${escaped(report.verdict || 'PLAN')}</span></h1></div><nav aria-label="Actions du rapport"><button data-action="refresh">Actualiser</button><button data-action="raw">JSON brut</button><button data-action="folder" ${document.directory ? '' : 'disabled'}>Dossier de session</button></nav></header>
-      ${warning ? '<p class="notice" role="status">Evaluation incomplete ou couverture partielle. Le verdict canonique ne garantit pas une couverture complete.</p>' : ''}
-      <section><h2>Identite</h2><dl>${info('Etat', document.session?.state || report.execution_status)}${info('Target', document.target)}${info('Pipeline source', document.session?.pipeline_source || metadata.pipeline_source || 'Non renseignee dans ce rapport historique')}${info('run_id', document.runId)}${info('Debut', start)}${info('Fin', end || report.generated_at)}${info('Duree totale', duration === undefined ? 'Non renseignee ; durees des controles disponibles' : `${duration} ms`)}${info('Version rapport / moteur', `${text(report.schema_version)} / ${text(report.engine_version)}`)}${info('Catalogue', metadata.catalog_sha256)}${info('Fichier ouvert', document.file)}${info('SHA-256 du rapport', document.sha256)}</dl></section>
-      <section><h2>Resume</h2><div class="metrics">${['Succeeded', 'Failed', 'Error', 'Warning', 'Skipped', 'Blocked', 'Not applicable', 'Pending', 'Running'].map(status => `<div><strong>${counts.get(status) || 0}</strong><span>${status}</span></div>`).join('')}</div><p>Resume canonique : ${escaped(JSON.stringify(summary))}</p><ul>${permissions}</ul></section>
-      <section><h2>Verdict et couverture</h2><p>Verdict du moteur : <strong>${escaped(report.verdict || 'Aucun verdict : plan seul')}</strong>. Couverture : <strong>${coverage.complete === true ? 'complete' : 'partielle'}</strong>.</p>${list(array(report.verdict_reasons))}<dl>${info('Controles planifies', coverage.planned_controls)}${info('Controles executes', coverage.executed_controls)}${info('Controles requis omis', coverage.omitted_required_controls)}${info('Dependances bloquees', coverage.dependency_skips)}</dl><h3>Omissions</h3>${list(array(coverage.limitations))}<h3>Limitations</h3>${list(array(report.limitations))}<h3>Ambiguites et preparation</h3>${list([...array(discovery.ambiguities), ...array(discovery.scan_errors)])}<h3>Capacites et outils indisponibles</h3>${list(document.controls.filter(control => ['Blocked', 'Error', 'Skipped'].includes(control.status)).map(control => `${control.id} : ${control.reason ? reasonText(control.reason) : control.status}`))}</section>
-      <section><h2>Pipelines</h2>${pipelines || '<p>Aucun controle planifie.</p>'}</section><section><h2>Findings</h2>${findingRows || '<p>Aucun finding.</p>'}</section><section><h2>Diagnostics globaux</h2>${list(array(report.diagnostics).map(reasonText))}</section>
-      <script nonce="${nonce}" src="${escaped(script)}"></script></body></html>`;
+    const executedRows = executedMarkup(model.executed, findingCount, findings, !!document.directory);
+    const unavailable = unavailableSummary(document.controls.map(layoutControl));
+    const tools = model.tools.length ? `<details><summary>Outils à provisionner <span>${escaped(new Set(model.tools).size)}</span></summary><ul>${[...new Set(model.tools)].map(tool => `<li>${escaped(tool)}</li>`).join('')}</ul><button type="button" data-action="provision">Installer les outils manquants</button></details>` : '';
+    const unavailableBlock = unavailable.length ? `<details><summary>Indisponibles <span>${escaped(unavailable.length)}</span></summary><ul>${unavailable.map(line => `<li>${escaped(line)}</li>`).join('')}</ul></details>` : '';
+    const absent = nonApplicableMarkup(document.controls.map(layoutControl));
+    const durationText = formatDuration(duration);
+    const sessionLabel = document.historical ? 'Rapport historique' : 'Session courante';
+    const complete = coverage.complete === true;
+    const versionLabel = text(report.engine_version).replace(/^v/, '');
+    return `<!doctype html><html lang="fr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${escaped(cspSource)}; script-src 'nonce-${nonce}'; img-src ${escaped(cspSource)};"><link rel="stylesheet" href="${escaped(css)}"><title>Rapport Compliance</title></head><body data-brand="${escaped(iconSrc)}">
+      <section class="hero">
+        <header class="report-top">
+          <div class="top-row">
+            <div class="brand">
+              <img class="shield" src="${escaped(iconSrc)}" alt="" />
+              <h1>ICP COMPLIANCE</h1>
+              <p class="verdict ${model.verdict.kind}" role="status"><span class="vicon">${verdictIcon(model.verdict.kind)}</span> ${escaped(model.verdict.label)}</p>
+            </div>
+            <div class="pills">
+              <span class="pill" title="${escaped(document.target)}">${svgIcon(icons.folder)} ${escaped(document.target)}</span>
+              <span class="pill">${svgIcon(icons.tag)} v${escaped(versionLabel)}</span>
+              <span class="pill">${svgIcon(icons.clock)} ${escaped(durationText)}</span>
+            </div>
+          </div>
+          <div class="mid-row">
+            <p class="coverage">${complete ? svgIcon(icons.check) : svgIcon(icons.alert)} ${escaped(model.coverageText)}</p>
+            <div class="session-actions">
+              <span class="session-label">${escaped(sessionLabel)}</span>
+              <nav class="actions" aria-label="Actions du rapport">
+                <button type="button" class="primary" data-action="pick">${svgIcon(icons.file)} Ouvrir un rapport…</button>
+                <button type="button" class="ghost" data-action="raw">${svgIcon(icons.braces)} JSON brut</button>
+                <button type="button" class="ghost" data-action="folder" ${document.directory ? '' : 'disabled'}>${svgIcon(icons.folder)} Dossier de session</button>
+              </nav>
+            </div>
+          </div>
+        </header>
+        <div class="kpi-frame" aria-label="Compteurs">${model.cards.map(item => card(item.label, item.value, item.tone)).join('')}</div>
+      </section>
+      <section><h2>Contrôles exécutés</h2><div class="control-list">${executedRows || '<p class="muted">Aucun contrôle exécuté.</p>'}</div></section>
+      ${reasonBlock(model.verdict.detail, model.verdictReasons)}${gapBlock(model.gaps)}${unavailableBlock}${tools}${absent}
+      <script nonce="${nonce}">${reportScript()}</script></body></html>`;
 }
 
+function skippedFinding(finding: Fields): boolean {
+    const file = (findingLocation(finding)?.file || String(finding.file || '')).replace(/\\/g, '/').toLowerCase();
+    return ['/testdata/', '/fixtures/', '/__snapshots__/', '/node_modules/', '/vendor/', '/dist/', '/build/'].some(part => `/${file}/`.includes(part));
+}
+
+function controlIdentity(control: LayoutControl): { capability: string; tool: string; root: string } {
+    const parts = control.id.split('/');
+    return {
+        capability: parts[1] || '',
+        tool: parts[2] || control.name,
+        root: control.root || (parts.length >= 4 ? parts.slice(3).join('/') : '.')
+    };
+}
+
+function sameControl(findingId: string, controlId: string): boolean {
+    return findingId.replace(/\\/g, '/') === controlId.replace(/\\/g, '/');
+}
+
+function formatDuration(duration: number | undefined): string {
+    if (duration === undefined) { return 'Non renseignée'; }
+    return `${String(duration).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} ms`;
+}
+
+const icons = {
+    folder: '<path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 7V5a2 2 0 0 1 2-2h4l2 2"/>',
+    tag: '<path d="M20 13l-7 7-9-9V4h7z"/><circle cx="7.5" cy="7.5" r="1" fill="currentColor" stroke="none"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v6l4 2"/>',
+    file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
+    braces: '<path d="M8 4c-2 0-2 2-2 4v2c0 2-1 2-2 2 1 0 2 0 2 2v2c0 2 0 4 2 4"/><path d="M16 4c2 0 2 2 2 4v2c0 2 1 2 2 2-1 0-2 0-2 2v2c0 2 0 4-2 4"/>',
+    alert: '<path d="M12 3l10 18H2z"/><path d="M12 9v5"/><path d="M12 17h.01"/>',
+    check: '<path d="M5 12l5 5L20 7"/>',
+    cross: '<path d="M6 6l12 12M18 6L6 18"/>'
+};
+
+function svgIcon(pathData: string): string {
+    return `<svg class="ico" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${pathData}</svg>`;
+}
+
+function verdictIcon(kind: string): string {
+    if (kind === 'pass') { return svgIcon(icons.check); }
+    if (kind === 'unevaluated') { return '<span class="ico dash" aria-hidden="true">-</span>'; }
+    return svgIcon(icons.alert);
+}
+
+export function visibleFindings(report: Fields): Fields[] {
+    return array(report.findings).filter(fields).filter(finding => !skippedFinding(finding));
+}
+
+export async function revealFinding(target: string, finding: Fields): Promise<vscode.TextEditor> {
+    const location = findingLocation(finding);
+    if (!location) { throw new Error('Localisation fiable ou confiance absente.'); }
+    const relative = controlRelativeFile(String(finding.root || ''), location.file);
+    const file = await targetFile(target, relative);
+    const opened = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+    const editor = await vscode.window.showTextDocument(opened);
+    if (location.line !== undefined) {
+        if (location.line > opened.lineCount || (location.column !== undefined && location.column - 1 > opened.lineAt(location.line - 1).text.length)) { throw new Error('Position du finding devenue incoherente avec le fichier ; aucune position inventee.'); }
+        const position = new vscode.Position(location.line - 1, (location.column || 1) - 1);
+        editor.selection = new vscode.Selection(position, position);
+        editor.revealRange(new vscode.Range(position, position));
+    }
+    return editor;
+}
+
+function fileTreeMarkup(controlId: string, findings: Fields[]): string {
+    const files = new Map<string, number[]>();
+    findings.forEach((finding, index) => {
+        if (skippedFinding(finding) || !sameControl(String(finding.control_id || ''), controlId)) { return; }
+        const located = findingLocation(finding);
+        const file = located ? controlRelativeFile(String(finding.root || ''), located.file) : '(sans fichier)';
+        files.set(file, [...(files.get(file) || []), index]);
+    });
+    if (!files.size) { return ''; }
+    const nodes = [...files.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([file, indexes]) => {
+        const rows = indexes.map(index => {
+            const finding = findings[index];
+            const location = findingLocation(finding);
+            const rule = String(finding.name || finding.rule_id || '');
+            const message = String(finding.message || array(finding.diagnostics).map(reasonText).join('; '));
+            const open = location ? `<button type="button" data-action="finding" data-finding-index="${index}">Ouvrir à la ligne</button>` : '';
+            return `<tr><td>${escaped(location?.line ?? '')}</td><td>${escaped(rule)}</td><td>${escaped(message, 500)}</td><td>${open}</td></tr>`;
+        }).join('');
+        return `<details class="file-node"><summary><code>${escaped(file)}</code><span>${escaped(indexes.length)} anomalie${indexes.length === 1 ? '' : 's'}</span></summary><div class="finding-table"><table><thead><tr><th>Ligne</th><th>Règle</th><th>Message</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+    }).join('');
+    return `<div class="file-tree">${nodes}</div>`;
+}
+
+function executedMarkup(controls: Array<LayoutControl & { label: string; showOutput: boolean }>, findingCount: Map<string, number>, findings: Fields[], canOpen: boolean): string {
+    const groups = new Map<string, typeof controls>();
+    for (const control of controls) {
+        const identity = controlIdentity(control);
+        const key = `${control.technology}/${identity.capability}/${identity.tool}`;
+        groups.set(key, [...(groups.get(key) || []), control]);
+    }
+    return [...groups.values()].map(rows => {
+        const sample = controlIdentity(rows[0]);
+        const failed = rows.some(control => control.resultStatus !== 'success');
+        const total = rows.reduce((sum, control) => sum + (findingCount.get(control.id) || 0), 0);
+        const lines = rows.map(control => {
+            const identity = controlIdentity(control);
+            const output = control.showOutput && canOpen ? `<button type="button" data-action="output" data-control-id="${escaped(control.id, 4096)}">Ouvrir les sorties</button>` : '';
+            const count = findingCount.get(control.id.replace(/\\/g, '/')) || 0;
+            const head = `<span class="badge ${control.resultStatus === 'success' ? 'pass' : 'fail'}">${escaped(control.label)}</span><span class="root">${escaped(identity.root || '.')}</span><span>${control.durationMs === undefined ? '' : `${escaped(control.durationMs)} ms`}</span><span>${escaped(count)} anomalie${count === 1 ? '' : 's'}</span>${output}`;
+            const tree = fileTreeMarkup(control.id, findings);
+            if (!tree) {
+                return `<div class="control ${control.resultStatus === 'success' ? 'pass' : 'fail'}" id="${sectionId(control.id)}">${head}</div>`;
+            }
+            return `<details class="control ${control.resultStatus === 'success' ? 'pass' : 'fail'}" id="${sectionId(control.id)}"><summary>${head}</summary>${tree}</details>`;
+        }).join('');
+        return `<article class="tool-card ${failed ? 'fail' : 'pass'}"><header><span class="badge ${failed ? 'fail' : 'pass'}">${failed ? 'Échec' : 'Réussi'}</span><div><strong>${escaped(rows[0].technology)} · ${escaped(sample.capability)} · ${escaped(sample.tool)}</strong><p>${escaped(rows.length)} dossier${rows.length === 1 ? '' : 's'} · ${escaped(total)} anomalie${total === 1 ? '' : 's'}</p></div></header><div class="control-list">${lines}</div></article>`;
+    }).join('') || '<p class="muted">Aucun contrôle exécuté.</p>';
+}
+
+function reasonBlock(detail: string, reasons: string[]): string {
+    const lines = [...new Set([detail, ...reasons].map(line => line.trim()).filter(Boolean))];
+    if (!lines.length) { return ''; }
+    return `<section class="reasons"><h2>Raisons du verdict</h2><ul>${lines.map(line => `<li>${escaped(line)}</li>`).join('')}</ul></section>`;
+}
+
+function gapBlock(gaps: string[]): string {
+    if (!gaps.length) { return ''; }
+    return `<details><summary>Lacunes de couverture <span>${escaped(gaps.length)}</span></summary><ul>${gaps.map(line => `<li>${escaped(line)}</li>`).join('')}</ul></details>`;
+}
+
+function reportScript(): string {
+    return `(function () {
+  var api = acquireVsCodeApi();
+  document.addEventListener('click', function (event) {
+    var target = event.target instanceof Element ? event.target : null;
+    if (!target) { return; }
+    var summary = target.closest('summary');
+    if (summary && summary.parentElement && summary.parentElement.tagName === 'DETAILS' && !target.closest('button')) {
+      event.preventDefault();
+      summary.parentElement.open = !summary.parentElement.open;
+      return;
+    }
+    var element = target.closest('button[data-action]');
+    if (!element || element.disabled) { return; }
+    var action = element.getAttribute('data-action');
+    var message = { schema_version: 1, action: action };
+    if (action === 'output') { message.controlId = element.getAttribute('data-control-id'); }
+    if (action === 'finding') { message.index = Number(element.getAttribute('data-finding-index')); }
+    api.postMessage(message);
+  });
+  window.addEventListener('message', function (event) {
+    var message = event.data;
+    if (!message || message.type !== 'focus' || typeof message.id !== 'string') { return; }
+    var node = document.getElementById(message.id);
+    if (!node) { return; }
+    var parent = node;
+    while (parent) { if (parent.tagName === 'DETAILS') { parent.open = true; } parent = parent.parentElement; }
+    node.scrollIntoView({ block: 'start' });
+  });
+  api.postMessage({ schema_version: 1, action: 'ready' });
+})();`;
+}
+
+function card(label: string, value: unknown, tone: string): string {
+    const mark = tone === 'passed' ? `<i class="mark">${svgIcon(icons.check)}</i>` : tone === 'failed' ? `<i class="mark">${svgIcon(icons.cross)}</i>` : '';
+    return `<article class="kpi ${escaped(tone)}"><strong>${escaped(value)}${mark}</strong><span>${escaped(label)}</span></article>`;
+}
+function layoutControl(control: ReportControl): LayoutControl {
+    const diagnostic = array(control.result?.diagnostics).find(fields);
+    return {
+        id: control.id,
+        name: control.name,
+        technology: control.technology,
+        root: control.root,
+        resultStatus: String(control.result?.status || ''),
+        reasonCode: control.reason?.code || (fields(diagnostic) && typeof diagnostic.code === 'string' ? diagnostic.code : ''),
+        reasonMessage: control.reason?.message || (fields(diagnostic) && typeof diagnostic.message === 'string' ? diagnostic.message : ''),
+        durationMs: typeof control.result?.duration_ms === 'number' ? control.result.duration_ms : undefined,
+        stdout: typeof control.result?.stdout === 'string' ? control.result.stdout : '',
+        stderr: typeof control.result?.stderr === 'string' ? control.result.stderr : ''
+    };
+}
 export class ReportPanel implements vscode.Disposable {
     private panel?: vscode.WebviewPanel;
     private document?: LoadedReport;
@@ -76,7 +278,7 @@ export class ReportPanel implements vscode.Disposable {
     private navigationApproved = false;
     private pendingFocus?: string;
     private requestSequence = 0;
-    constructor(private readonly context: vscode.ExtensionContext, private readonly source: string) {}
+    constructor(private readonly context: vscode.ExtensionContext, private readonly source: string, private readonly provision?: (commands: string[]) => Promise<void>) {}
     dispose(): void { this.panel?.dispose(); }
     html(): string | undefined { return this.panel?.webview.html; }
     knownReference(): ReportReference | undefined { return this.last; }
@@ -102,6 +304,7 @@ export class ReportPanel implements vscode.Disposable {
         if (!vscode.workspace.isTrusted) { throw new Error('Approuver la Pipeline source avant sa validation.'); }
         const request = ++this.requestSequence;
         const loaded = await loadReport(this.source, file, reference, historical);
+        if (reference && reference.runId === loaded.runId && !historical) { loaded.historical = false; }
         if (request !== this.requestSequence) { return; }
         if (focus && !loaded.controls.some(control => control.id === focus || `root/${control.technology}/${control.root}` === focus || `technology/${control.technology}` === focus)) { throw new Error('Section de rapport inconnue.'); }
         this.document = loaded; this.reference = reference; this.navigationApproved = !historical;
@@ -116,9 +319,26 @@ export class ReportPanel implements vscode.Disposable {
         }
         const webview = this.panel.webview;
         this.panel.title = `Compliance ${text(loaded.report.verdict || 'PLAN')} : ${loaded.runId.slice(0, 8)}`;
+        const icon = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media/icon.png')).toString();
         webview.html = reportHtml(loaded, webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media/report.css')).toString(),
-            webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, '.extension-build/media/report.js')).toString(), webview.cspSource, randomBytes(16).toString('hex'));
+            webview.cspSource, randomBytes(16).toString('hex'), icon);
         this.panel.reveal();
+    }
+    async pick(): Promise<void> {
+        const folder = runsDirectory(this.source);
+        const selected = await vscode.window.showOpenDialog({
+            defaultUri: vscode.Uri.file(folder),
+            canSelectFiles: true,
+            canSelectFolders: false,
+            canSelectMany: false,
+            filters: { 'compliance-report.json': ['json'] },
+            openLabel: 'Ouvrir le rapport'
+        });
+        if (!selected?.length) { return; }
+        if (path.basename(selected[0].fsPath) !== 'compliance-report.json') {
+            throw new Error('compliance.openReportFile : choisir un fichier nommé compliance-report.json.');
+        }
+        await this.open(selected[0].fsPath);
     }
     async refresh(): Promise<void> {
         if (!this.document) { throw new Error('Aucun rapport ouvert.'); }
@@ -127,8 +347,14 @@ export class ReportPanel implements vscode.Disposable {
     async raw(): Promise<void> {
         if (!this.document) { throw new Error('Aucun rapport ouvert.'); }
         const bytes = await readStable(this.document.file);
-        if (createHash('sha256').update(bytes).digest('hex') !== this.document.sha256) { throw new Error('Rapport modifie ; actualiser avant ouverture du JSON brut.'); }
-        await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ content: bytes.toString('utf8'), language: 'json' }));
+        if (createHash('sha256').update(bytes).digest('hex') !== this.document.sha256) { throw new Error('Rapport modifié ; actualiser avant ouverture du JSON brut.'); }
+        await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(this.document.file)));
+    }
+    async openFolder(): Promise<void> {
+        const document = this.document;
+        if (!document?.directory) { throw new Error('Aucune session associée : le dossier ne peut pas être ouvert.'); }
+        if (this.reference) { await readSession(this.source, this.reference); }
+        await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(document.directory));
     }
     private async handle(value: unknown): Promise<void> {
         const message = reportMessage(value);
@@ -138,12 +364,26 @@ export class ReportPanel implements vscode.Disposable {
             if (this.pendingFocus) { await this.panel?.webview.postMessage({ type: 'focus', id: sectionId(this.pendingFocus) }); this.pendingFocus = undefined; }
             return;
         }
-        if (message.action === 'refresh') { await this.refresh(); return; }
-        if (message.action === 'raw') { await this.raw(); return; }
-        if (message.action === 'folder') {
-            if (!document.directory || !this.reference) { throw new Error('Aucune session associee au rapport historique choisi.'); }
-            await readSession(this.source, this.reference);
-            await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(document.directory)); return;
+        if (message.action === 'provision') {
+            const commands = document.controls.filter(control => control.reason?.code === 'tool_unavailable').map(control => {
+                const tool = fields(control.plan?.tool) ? control.plan?.tool : undefined;
+                return fields(tool) && typeof tool.command === 'string' ? tool.command : '';
+            }).filter(command => command && command !== 'none');
+            if (!this.provision) { throw new Error('compliance.provisionTools : installation indisponible dans cette vue.'); }
+            await this.provision([...new Set(commands)]);
+            return;
+        }
+        if (message.action === 'pick' || message.action === 'raw' || message.action === 'folder') {
+            const command = reportButtonCommand(message.action);
+            if (!command) { throw new Error('Action Webview inconnue.'); }
+            try {
+                if (message.action === 'pick') { await this.pick(); }
+                else if (message.action === 'raw') { await this.raw(); }
+                else { await this.openFolder(); }
+            } catch (error) {
+                throw new Error(`${command} : ${error instanceof Error ? error.message : String(error)}`);
+            }
+            return;
         }
         if (message.action === 'output') {
             const control = document.controls.find(item => item.id === message.controlId);
@@ -151,23 +391,15 @@ export class ReportPanel implements vscode.Disposable {
             await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ content: controlOutputText(document.runId, control.id, control.result), language: 'plaintext' })); return;
         }
         if (message.action !== 'finding') { throw new Error('Action Webview inconnue.'); }
-        const findings = array(document.report.findings).filter(fields);
+        const findings = visibleFindings(document.report);
         const finding = findings[message.index];
         if (!finding) { throw new Error('Finding inconnu.'); }
-        const location = findingLocation(finding);
-        if (!location || !vscode.workspace.isTrusted) { throw new Error('Localisation fiable ou confiance absente.'); }
+        if (!findingLocation(finding) || !vscode.workspace.isTrusted) { throw new Error('Localisation fiable ou confiance absente.'); }
         if (!this.navigationApproved) {
             const approval = await vscode.window.showWarningMessage(`Rapport historique : autoriser la navigation dans cette Target ?\n${document.target}\nAucun controle ne sera execute.`, { modal: true }, 'Autoriser la navigation');
             if (approval !== 'Autoriser la navigation') { return; }
             this.navigationApproved = true;
         }
-        const file = await targetFile(document.target, location.file);
-        const opened = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
-        const editor = await vscode.window.showTextDocument(opened);
-        if (location.line !== undefined) {
-            if (location.line > opened.lineCount || (location.column !== undefined && location.column - 1 > opened.lineAt(location.line - 1).text.length)) { throw new Error('Position du finding devenue incoherente avec le fichier ; aucune position inventee.'); }
-            const position = new vscode.Position(location.line - 1, (location.column || 1) - 1);
-            editor.selection = new vscode.Selection(position, position); editor.revealRange(new vscode.Range(position, position));
-        }
+        await revealFinding(document.target, finding);
     }
 }

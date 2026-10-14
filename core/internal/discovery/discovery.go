@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -15,11 +16,12 @@ import (
 
 // TechnologyRecord represents a detected technology.
 type TechnologyRecord struct {
-	Technology  string   `json:"technology"`
-	Status      string   `json:"status"` // detected, absent, ambiguous
-	Evidence    []string `json:"evidence"`
-	Roots       []string `json:"roots"`
-	Ambiguities []string `json:"ambiguities"`
+	Technology    string   `json:"technology"`
+	Status        string   `json:"status"` // detected, absent, ambiguous
+	Evidence      []string `json:"evidence"`
+	EvidenceTotal int      `json:"evidence_total"`
+	Roots         []string `json:"roots"`
+	Ambiguities   []string `json:"ambiguities"`
 }
 
 // AmbiguityDetail represents an ambiguity with context.
@@ -63,20 +65,13 @@ type DiscoveryMetrics struct {
 	ResolverMs  int64 `json:"resolver_ms"`
 }
 
-// Exactly matches Get-ProjectFile in scripts/quality-gate.ps1
-var excludedDirs = map[string]bool{
-	".git":              true,
-	".venv":             true,
-	".tools":            true,
-	".extension-build":  true,
-	"reports":           true,
-	"__pycache__":       true,
-	".pytest_cache":     true,
-	".mypy_cache":       true,
-	".ruff_cache":       true,
-	".cache":            true,
-	".terraform":        true,
-	".terragrunt-cache": true,
+// excludedDirs remains for callers that only need the built-in directory names.
+var excludedDirs = map[string]bool{}
+
+func init() {
+	for _, name := range defaultSkipDirs {
+		excludedDirs[name] = true
+	}
 }
 
 var allKnownTechnologies = []string{
@@ -112,22 +107,26 @@ var tsMarkers = []string{
 }
 
 var (
-	reDockerFile      = regexp.MustCompile(`^(?i)(Dockerfile|Containerfile)(\..+)?$`)
+	reDockerFile      = regexp.MustCompile(`(?i)(^|[.])(dockerfile|containerfile)([.]|$)`)
 	reDockerCompose   = regexp.MustCompile(`^(?i)(docker-compose|compose)\.(ya?ml)$`)
 	reTerragrunt      = regexp.MustCompile(`^(?i)terragrunt(\.stack)?\.hcl$`)
 	reTsConfig        = regexp.MustCompile(`^(?i)tsconfig(\..+)?\.json$`)
 	reAnsibleHosts    = regexp.MustCompile(`(?i)(?m)^\s*(?:-\s*)?hosts\s*:`)
-	reAnsibleEvidence = regexp.MustCompile(`(?i)(^|/)(ansible\.cfg|galaxy\.yml|requirements\.yml)$|(^|/)meta/runtime\.yml$|(^|/)(roles|playbooks)/`)
+	reAnsibleTasks    = regexp.MustCompile(`(?i)(?m)^\s*(?:-\s*)?tasks\s*:`)
+	reAnsibleRole     = regexp.MustCompile(`(?i)(^|/)roles/[^/]+/tasks/main\.ya?ml$`)
+	reAnsiblePlaybook = regexp.MustCompile(`(?i)(^|/)(playbooks?/)?[^/]+\.ya?ml$`)
 	reKubeKind        = regexp.MustCompile(`(?i)(?m)^\s*kind\s*:\s*(Pod|Deployment|StatefulSet|DaemonSet|ReplicaSet|Job|CronJob|Service|ConfigMap|Secret|Ingress|PersistentVolume|PersistentVolumeClaim|Namespace|ServiceAccount|Role|RoleBinding|ClusterRole|ClusterRoleBinding|CustomResourceDefinition)\s*(?:#.*)?$`)
 	reKubeApi         = regexp.MustCompile(`(?i)(?m)^\s*apiVersion\s*:\s*\S+`)
 )
 
 type techAccumulator struct {
-	technology  string
-	status      string
-	evidence    map[string]bool
-	roots       map[string]bool
-	ambiguities map[string]bool
+	technology    string
+	status        string
+	evidence      map[string]bool
+	markers       map[string]bool
+	evidenceTotal int
+	roots         map[string]bool
+	ambiguities   map[string]bool
 }
 
 func newAccumulator(tech string) *techAccumulator {
@@ -135,17 +134,23 @@ func newAccumulator(tech string) *techAccumulator {
 		technology:  tech,
 		status:      "absent",
 		evidence:    make(map[string]bool),
+		markers:     make(map[string]bool),
 		roots:       make(map[string]bool),
 		ambiguities: make(map[string]bool),
 	}
 }
 
 func (acc *techAccumulator) addEvidence(relFile, relRoot, status, ambiguity string) {
-	acc.evidence[relFile] = true
+	acc.evidenceTotal++
+	if len(acc.evidence) < maxEvidence {
+		acc.evidence[relFile] = true
+	}
 	if relRoot == "" {
 		relRoot = "."
 	}
-	acc.roots[relRoot] = true
+	if _, marked := acc.markers[relFile]; marked || len(acc.roots) < maxEvidence {
+		acc.roots[relRoot] = true
+	}
 	if status == "detected" {
 		acc.status = "detected"
 	} else if acc.status == "absent" {
@@ -156,12 +161,28 @@ func (acc *techAccumulator) addEvidence(relFile, relRoot, status, ambiguity stri
 	}
 }
 
+func (acc *techAccumulator) addMarker(relFile, relRoot, status, ambiguity string) {
+	acc.markers[relFile] = true
+	acc.addEvidence(relFile, relRoot, status, ambiguity)
+}
+
 func (acc *techAccumulator) toRecord() TechnologyRecord {
 	evidenceList := make([]string, 0)
-	for e := range acc.evidence {
+	for e := range acc.markers {
 		evidenceList = append(evidenceList, e)
 	}
 	sort.Strings(evidenceList)
+	rest := make([]string, 0)
+	for e := range acc.evidence {
+		if !acc.markers[e] {
+			rest = append(rest, e)
+		}
+	}
+	sort.Strings(rest)
+	evidenceList = append(evidenceList, rest...)
+	if len(evidenceList) > maxEvidence {
+		evidenceList = evidenceList[:maxEvidence]
+	}
 
 	rootsList := make([]string, 0)
 	for r := range acc.roots {
@@ -183,11 +204,12 @@ func (acc *techAccumulator) toRecord() TechnologyRecord {
 	}
 
 	return TechnologyRecord{
-		Technology:  acc.technology,
-		Status:      finalStatus,
-		Evidence:    evidenceList,
-		Roots:       rootsList,
-		Ambiguities: ambList,
+		Technology:    acc.technology,
+		Status:        finalStatus,
+		Evidence:      evidenceList,
+		EvidenceTotal: acc.evidenceTotal,
+		Roots:         rootsList,
+		Ambiguities:   ambList,
 	}
 }
 
@@ -215,6 +237,7 @@ func DiscoverAll(repoRoot string) (*DiscoveryResult, error) {
 	var discoveredFiles []fileInfo
 	var yamlFiles []fileInfo
 	scanErrors := make([]ScanError, 0)
+	rules := newIgnoreRules(absRepo)
 
 	err = filepath.WalkDir(absRepo, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -224,20 +247,27 @@ func DiscoverAll(repoRoot string) (*DiscoveryResult, error) {
 				Operation: "enumerate",
 				Error:     walkErr.Error(),
 			})
-			return nil
-		}
-		if d.IsDir() {
-			if excludedDirs[d.Name()] {
+			if d != nil && d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-
 		relPath, relErr := filepath.Rel(absRepo, path)
 		if relErr != nil {
 			return nil
 		}
 		normRel := filepath.ToSlash(relPath)
+		if d.IsDir() {
+			if path != absRepo && rules.skipDir(d.Name(), normRel) {
+				return filepath.SkipDir
+			}
+			rules.observeDir(path, normRel)
+			return nil
+		}
+		if rules.skipFile(normRel) {
+			return nil
+		}
+
 		name := d.Name()
 		ext := strings.ToLower(filepath.Ext(name))
 
@@ -292,26 +322,26 @@ func DiscoverAll(repoRoot string) (*DiscoveryResult, error) {
 		}
 	}
 
-	// 5. JavaScript
+	// 5. JavaScript — package.json is the marker. Source files are counted, not all stored.
 	for _, f := range discoveredFiles {
-		if f.ext == ".js" || f.ext == ".jsx" || f.ext == ".mjs" || f.ext == ".cjs" {
+		if strings.EqualFold(f.name, "package.json") || strings.HasPrefix(strings.ToLower(f.name), "vite.config.") || strings.HasPrefix(strings.ToLower(f.name), "eslint.config.") {
+			relRoot := toRelRoot(absRepo, f.dir)
+			accumulators["javascript"].addMarker(f.relPath, relRoot, "detected", "")
+		} else if f.ext == ".js" || f.ext == ".jsx" || f.ext == ".mjs" || f.ext == ".cjs" || f.ext == ".vue" {
 			projRoot := findNearestProjectRoot(f.dir, absRepo, jsMarkers)
 			relRoot := toRelRoot(absRepo, projRoot)
-			accumulators["javascript"].addEvidence(f.relPath, relRoot, "detected", "")
-		} else if strings.EqualFold(f.name, "package.json") {
-			relRoot := toRelRoot(absRepo, f.dir)
 			accumulators["javascript"].addEvidence(f.relPath, relRoot, "detected", "")
 		}
 	}
 
-	// 6. TypeScript
+	// 6. TypeScript — tsconfig is the marker.
 	for _, f := range discoveredFiles {
-		if f.ext == ".ts" || f.ext == ".tsx" || f.ext == ".mts" || f.ext == ".cts" {
+		if reTsConfig.MatchString(f.name) {
+			relRoot := toRelRoot(absRepo, f.dir)
+			accumulators["typescript"].addMarker(f.relPath, relRoot, "detected", "")
+		} else if f.ext == ".ts" || f.ext == ".tsx" || f.ext == ".mts" || f.ext == ".cts" {
 			projRoot := findNearestProjectRoot(f.dir, absRepo, tsMarkers)
 			relRoot := toRelRoot(absRepo, projRoot)
-			accumulators["typescript"].addEvidence(f.relPath, relRoot, "detected", "")
-		} else if reTsConfig.MatchString(f.name) {
-			relRoot := toRelRoot(absRepo, f.dir)
 			accumulators["typescript"].addEvidence(f.relPath, relRoot, "detected", "")
 		}
 	}
@@ -350,22 +380,24 @@ func DiscoverAll(repoRoot string) (*DiscoveryResult, error) {
 		hasTf := fileExists(filepath.Join(projRoot, ".terraform-version"))
 		hasTofu := fileExists(filepath.Join(projRoot, ".opentofu-version")) || fileExists(filepath.Join(projRoot, ".tofurc"))
 
-		if hasTf && !hasTofu {
-			accumulators["terraform"].addEvidence(f.relPath, relRoot, "detected", "")
-			for _, m := range tfMarkers {
-				if m.dir == projRoot {
-					accumulators["terraform"].addEvidence(m.relPath, relRoot, "detected", "")
-				}
-			}
-		} else if hasTofu && !hasTf {
+		useTofu := false
+		switch {
+		case hasTofu && !hasTf:
+			useTofu = true
+		case hasTf && !hasTofu:
+			useTofu = false
+		default:
+			useTofu = preferOpenTofu()
+		}
+		if useTofu {
 			accumulators["opentofu"].addEvidence(f.relPath, relRoot, "detected", "")
-		} else {
-			amb := "Fichiers .tf sans marqueur de selection dans leur racine."
-			if hasTf && hasTofu {
-				amb = "Marqueurs Terraform et OpenTofu contradictoires dans la meme racine."
+			continue
+		}
+		accumulators["terraform"].addEvidence(f.relPath, relRoot, "detected", "")
+		for _, m := range tfMarkers {
+			if m.dir == projRoot {
+				accumulators["terraform"].addEvidence(m.relPath, relRoot, "detected", "")
 			}
-			accumulators["terraform"].addEvidence(f.relPath, relRoot, "ambiguous", amb)
-			accumulators["opentofu"].addEvidence(f.relPath, relRoot, "ambiguous", amb)
 		}
 	}
 
@@ -393,63 +425,27 @@ func DiscoverAll(repoRoot string) (*DiscoveryResult, error) {
 		}
 	}
 
-	// 11. Ansible
+	// 11. Ansible — precise markers only. A directory named roles/ is not enough.
 	for _, f := range discoveredFiles {
-		rel := f.relPath
-		if !reAnsibleEvidence.MatchString(rel) {
+		if strings.EqualFold(f.name, "ansible.cfg") || strings.EqualFold(f.name, "galaxy.yml") || reAnsibleRole.MatchString(f.relPath) {
+			relRoot := toRelRoot(absRepo, f.dir)
+			accumulators["ansible"].addMarker(f.relPath, relRoot, "detected", "")
 			continue
 		}
-
-		ansibleRoot := f.dir
-		if strings.EqualFold(f.name, "ansible.cfg") || strings.EqualFold(f.name, "galaxy.yml") || strings.EqualFold(f.name, "requirements.yml") {
-			ansibleRoot = f.dir
-		} else if idx := strings.Index(rel, "roles/"); idx != -1 {
-			prefix := rel[:idx]
-			if prefix == "" {
-				sub := rel[len("roles/"):]
-				if slashIdx := strings.Index(sub, "/"); slashIdx != -1 {
-					roleName := sub[:slashIdx]
-					ansibleRoot = filepath.Join(absRepo, "roles", roleName)
-				} else {
-					ansibleRoot = absRepo
-				}
-			} else {
-				rootRel := strings.TrimSuffix(prefix, "/")
-				ansibleRoot = filepath.Join(absRepo, filepath.FromSlash(rootRel))
-			}
-		} else if idx := strings.Index(rel, "playbooks/"); idx != -1 {
-			prefix := rel[:idx]
-			rootRel := strings.TrimSuffix(prefix, "/")
-			if rootRel != "" {
-				ansibleRoot = filepath.Join(absRepo, filepath.FromSlash(rootRel))
-			} else {
-				ansibleRoot = absRepo
-			}
-		} else if strings.HasSuffix(rel, "meta/runtime.yml") {
-			ansibleRoot = filepath.Dir(filepath.Dir(f.absPath))
+		if !reAnsiblePlaybook.MatchString(f.relPath) || (f.ext != ".yml" && f.ext != ".yaml") {
+			continue
 		}
-
-		relRoot := toRelRoot(absRepo, ansibleRoot)
-		accumulators["ansible"].addEvidence(f.relPath, relRoot, "detected", "")
-	}
-
-	// Ansible fallback on YAML files if absent
-	if accumulators["ansible"].status == "absent" {
-		for _, f := range yamlFiles {
-			content, readErr := os.ReadFile(f.absPath)
-			if readErr != nil {
-				scanErrors = append(scanErrors, ScanError{
-					Path:      f.relPath,
-					Operation: "read",
-					Error:     readErr.Error(),
-				})
-				continue
-			}
-			if reAnsibleHosts.Match(content) {
-				relRoot := toRelRoot(absRepo, f.dir)
-				amb := "La clé hosts: dans un YAML est un signal faible; le fichier peut être un playbook Ansible ou un YAML générique."
-				accumulators["ansible"].addEvidence(f.relPath, relRoot, "ambiguous", amb)
-			}
+		info, statErr := os.Stat(f.absPath)
+		if statErr != nil || info.Size() > 1024*1024 {
+			continue
+		}
+		content, readErr := os.ReadFile(f.absPath)
+		if readErr != nil {
+			continue
+		}
+		if reAnsibleHosts.Match(content) && reAnsibleTasks.Match(content) {
+			relRoot := toRelRoot(absRepo, f.dir)
+			accumulators["ansible"].addMarker(f.relPath, relRoot, "detected", "")
 		}
 	}
 
@@ -582,6 +578,68 @@ func toRelRoot(repoRoot, dir string) string {
 		return "."
 	}
 	return filepath.ToSlash(rel)
+}
+
+// CollectSources lists files under relRoot, honoring the same exclusions as DiscoverAll.
+// IsContainerFile reports Dockerfiles and Containerfiles, including
+// Dockerfile.*, *.Dockerfile and files nested in a subdirectory.
+func IsContainerFile(name string) bool {
+	return reDockerFile.MatchString(filepath.Base(name))
+}
+
+func CollectSources(repoRoot, relRoot string, match func(name, rel string) bool) ([]string, error) {
+	absRepo, err := osutil.CanonicalPath(repoRoot)
+	if err != nil {
+		return nil, err
+	}
+	start := absRepo
+	if relRoot != "" && relRoot != "." {
+		start = filepath.Join(absRepo, filepath.FromSlash(relRoot))
+	}
+	rules := newIgnoreRules(absRepo)
+	var out []string
+	err = filepath.WalkDir(start, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil || d == nil {
+			return nil
+		}
+		rel, relErr := filepath.Rel(absRepo, path)
+		if relErr != nil {
+			return nil
+		}
+		norm := filepath.ToSlash(rel)
+		if d.IsDir() {
+			if path != start && path != absRepo && rules.skipDir(d.Name(), norm) {
+				return filepath.SkipDir
+			}
+			rules.observeDir(path, norm)
+			return nil
+		}
+		if rules.skipFile(norm) {
+			return nil
+		}
+		if match == nil || match(d.Name(), norm) {
+			out = append(out, path)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// preferOpenTofu is true only when tofu is installed and terraform is not.
+// COMPLIANCE_IAC_DEFAULT forces the choice in tests.
+func preferOpenTofu() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("COMPLIANCE_IAC_DEFAULT"))) {
+	case "terraform":
+		return false
+	case "opentofu", "tofu":
+		return true
+	}
+	return commandExists("tofu") && !commandExists("terraform")
+}
+
+func commandExists(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
 }
 
 func fileExists(path string) bool {

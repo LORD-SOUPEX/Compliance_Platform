@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -22,6 +24,7 @@ import (
 
 var (
 	reVersionFinder = regexp.MustCompile(`\b\d+\.\d+(?:\.\d+)?(?:[a-zA-Z0-9.+-]*)`)
+	ansiEscape      = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
 	defaultRedactionPatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)(?:ghp|glpat)_[a-zA-Z0-9]{20,}`),
@@ -72,8 +75,12 @@ func (r *Redactor) Redact(text string) string {
 
 // Invocation represents the command line execution details for a control.
 type Invocation struct {
-	Executable string   `json:"executable"`
-	Arguments  []string `json:"arguments"`
+	Executable      string       `json:"executable"`
+	Arguments       []string     `json:"arguments"`
+	Followups       []Invocation `json:"-"`
+	Cleanup         []string     `json:"-"`
+	GitleaksReport  string       `json:"-"`
+	ContinueOnError bool         `json:"-"`
 }
 
 // BuildInvocation constructs the executable and arguments for a planned control.
@@ -103,16 +110,12 @@ func BuildInvocation(
 		}
 	}
 
-	var filesInRoot []string
-	prefix := filepath.Clean(root) + string(filepath.Separator)
-	for _, rel := range ctrl.Files {
-		full := filepath.Join(repoRoot, filepath.FromSlash(rel))
-		if strings.EqualFold(filepath.Clean(root), repoRoot) || strings.HasPrefix(strings.ToLower(full), strings.ToLower(prefix)) {
-			filesInRoot = append(filesInRoot, full)
-		}
-	}
+	relRoot, _ := filepath.Rel(repoRoot, root)
+	filesInRoot, _ := discovery.CollectSources(repoRoot, filepath.ToSlash(relRoot), nil)
 
 	var arguments []string
+	var cleanup []string
+	var gitleaksReport string
 
 	switch command {
 	case "ruff":
@@ -128,8 +131,11 @@ func BuildInvocation(
 		if len(catalogArgs) == 0 {
 			return nil, errors.New("arguments Ruff absents du catalogue")
 		}
-		arguments = append(arguments, catalogArgs...)
-		arguments = append(arguments, pyFiles...)
+		prefix := append([]string{}, catalogArgs...)
+		if prefix[0] == "check" && !hasArg(prefix, "--output-format") {
+			prefix = append(prefix, "--output-format", "json")
+		}
+		return invocationWithFiles(executable, prefix, pyFiles), nil
 
 	case "pylint", "bandit":
 		var pyFiles []string
@@ -141,8 +147,19 @@ func BuildInvocation(
 		if len(pyFiles) == 0 {
 			return nil, fmt.Errorf("aucune source Python pour %s", command)
 		}
-		arguments = append(arguments, catalogArgs...)
-		arguments = append(arguments, pyFiles...)
+		prefix := append([]string{}, catalogArgs...)
+		if command == "pylint" {
+			if config := pylintConfig(repoRoot); config != "" {
+				prefix = append(prefix, "--rcfile", config)
+			}
+			if !hasArg(prefix, "--output-format") && !hasArgPrefix(prefix, "--output-format=") {
+				prefix = append(prefix, "--output-format=json")
+			}
+		}
+		if command == "bandit" && !hasArg(prefix, "-f") && !hasArg(prefix, "--format") {
+			prefix = append(prefix, "-f", "json")
+		}
+		return invocationWithFiles(executable, prefix, pyFiles), nil
 
 	case "pytest":
 		arguments = append(arguments, catalogArgs...)
@@ -154,10 +171,17 @@ func BuildInvocation(
 			return nil, errors.New("audit consommateur: requirements.txt requis; le runtime de la plateforme n est pas audite a sa place")
 		}
 		arguments = append(arguments, catalogArgs...)
+		if !hasArg(arguments, "--format") {
+			arguments = append(arguments, "--format", "json")
+		}
 		arguments = append(arguments, "-r", reqPath)
 
-	case "terraform", "tofu", "terragrunt", "tflint":
+	case "terraform", "tofu", "terragrunt":
 		arguments = append(arguments, catalogArgs...)
+
+	case "tflint":
+		arguments = append(arguments, catalogArgs...)
+		arguments = append(arguments, "--format", "json")
 
 	case "shellcheck":
 		var shFiles []string
@@ -169,21 +193,20 @@ func BuildInvocation(
 		if len(shFiles) == 0 {
 			return nil, errors.New("aucun script Shell pour ShellCheck")
 		}
-		arguments = append(arguments, catalogArgs...)
-		arguments = append(arguments, shFiles...)
+		prefix := append([]string{"--format=json"}, catalogArgs...)
+		return invocationWithFiles(executable, prefix, shFiles), nil
 
 	case "hadolint":
 		var containerFiles []string
 		for _, f := range filesInRoot {
-			base := filepath.Base(f)
-			if strings.HasPrefix(strings.ToLower(base), "dockerfile") || strings.HasPrefix(strings.ToLower(base), "containerfile") {
+			if discovery.IsContainerFile(f) {
 				containerFiles = append(containerFiles, f)
 			}
 		}
 		if len(containerFiles) == 0 {
 			return nil, errors.New("validation Compose non implementee par Hadolint")
 		}
-		arguments = containerFiles
+		return invocationWithFiles(executable, nil, containerFiles), nil
 
 	case "ansible-lint":
 		arguments = append(arguments, catalogArgs...)
@@ -194,7 +217,52 @@ func BuildInvocation(
 		if cfg == "" {
 			cfg = ".yamllint.yml"
 		}
-		arguments = []string{"-c", filepath.Join(platformRoot, cfg), root}
+		arguments = []string{"-c", filepath.Join(platformRoot, cfg), "-f", "parsable", root}
+
+	case "eslint":
+		if strings.EqualFold(filepath.Ext(executable), ".cmd") || strings.EqualFold(filepath.Ext(executable), ".bat") {
+			comspec := os.Getenv("COMSPEC")
+			if comspec == "" {
+				comspec = "cmd.exe"
+			}
+			arguments = []string{"/d", "/s", "/c", executable, root}
+			executable = comspec
+		} else {
+			arguments = []string{root}
+		}
+
+	case "gitleaks":
+		reportPath, configPath, sideErr := writeGitleaksSidecars()
+		if sideErr != nil {
+			return nil, sideErr
+		}
+		cleanup = []string{reportPath, configPath}
+		gitleaksReport = reportPath
+		arguments = []string{
+			"detect", "--no-git", "--no-color", "--no-banner", "--redact",
+			"--source", root,
+			"--config", configPath,
+			"--report-format", "json", "--report-path", reportPath,
+		}
+
+	case "tsc":
+		projects := tsconfigProjects(repoRoot)
+		if len(projects) == 0 {
+			return nil, errors.New("aucun tsconfig.json pour la vérification de types")
+		}
+		first := tscInvocation(executable, projects[0])
+		var followups []Invocation
+		for _, project := range projects[1:] {
+			followups = append(followups, tscInvocation(executable, project))
+		}
+		return &Invocation{Executable: first.Executable, Arguments: first.Arguments, Followups: followups}, nil
+
+	case "rumdl":
+		arguments = []string{"check", "--respect-gitignore=true", "--exclude", discovery.ToolExcludeGlobs()}
+		if !markdownConfigPresent(repoRoot) {
+			arguments = append(arguments, "--disable", "MD013")
+		}
+		arguments = append(arguments, root)
 
 	case "pre-commit":
 		hook, _ := ctrl.Parameters["hook"].(string)
@@ -207,21 +275,16 @@ func BuildInvocation(
 		if len(mdFiles) == 0 {
 			return nil, errors.New("aucun fichier Markdown pour le controle")
 		}
-		arguments = append([]string{"run", hook, "--config", filepath.Join(platformRoot, ".pre-commit-config.yaml"), "--files"}, mdFiles...)
+		return invocationWithFiles(executable, []string{"run", hook, "--config", filepath.Join(platformRoot, ".pre-commit-config.yaml"), "--files"}, mdFiles), nil
 
 	case "checkov":
 		framework, _ := ctrl.Parameters["framework"].(string)
 		if framework == "" {
 			return nil, errors.New("framework Checkov absent du catalogue")
 		}
-		arguments = []string{"-d", root, "--framework", framework, "--quiet"}
-		if strings.EqualFold(filepath.Ext(executable), ".cmd") {
-			arguments = append([]string{"-x", executable}, arguments...)
-			pyExe := filepath.Join(platformRoot, ".tools", "python", "python.exe")
-			if _, err := os.Stat(pyExe); err != nil {
-				pyExe = filepath.Join(platformRoot, ".venv", "Scripts", "python.exe")
-			}
-			executable = pyExe
+		arguments = []string{"-d", root, "--framework", framework, "--quiet", "--output", "json"}
+		for _, name := range discovery.SkipDirNames() {
+			arguments = append(arguments, "--skip-path", name)
 		}
 
 	case "trivy":
@@ -242,6 +305,12 @@ func BuildInvocation(
 			"--skip-dirs", ".venv",
 			"--skip-dirs", ".tools",
 			"--skip-dirs", "reports",
+			"--skip-dirs", "testdata",
+			"--skip-dirs", "fixtures",
+			"--skip-dirs", "__snapshots__",
+			"--skip-dirs", "node_modules",
+			"--skip-dirs", "vendor",
+			"--format", "json",
 			root,
 		}
 
@@ -269,9 +338,332 @@ func BuildInvocation(
 	}
 
 	return &Invocation{
-		Executable: executable,
-		Arguments:  arguments,
+		Executable:     executable,
+		Arguments:      arguments,
+		Followups:      nil,
+		Cleanup:        cleanup,
+		GitleaksReport: gitleaksReport,
 	}, nil
+}
+
+func pytestCollectedNothing(command string, exitCode, leaks int) bool {
+	return command == "pytest" && exitCode == 5 && leaks == 0
+}
+
+func pylintConfig(repoRoot string) string {
+	for _, name := range []string{".pylintrc", "pylintrc", ".pylintrc.toml"} {
+		path := filepath.Join(repoRoot, name)
+		info, err := os.Stat(path)
+		if err == nil && !info.IsDir() {
+			return path
+		}
+	}
+	for _, name := range []string{"pyproject.toml", "setup.cfg"} {
+		path := filepath.Join(repoRoot, name)
+		body, err := os.ReadFile(path)
+		if err == nil && bytes.Contains(bytes.ToLower(body), []byte("pylint")) {
+			return path
+		}
+	}
+	return ""
+}
+
+func gitleaksAllowlist() string {
+	names := discovery.SkipDirNames()
+	var builder strings.Builder
+	builder.WriteString("[extend]\nuseDefault = true\n\n[allowlist]\ndescription = \"Dependances et artefacts hors sources\"\npaths = [\n")
+	for _, name := range names {
+		fmt.Fprintf(&builder, "  '''(^|[\\\\/])%s([\\\\/]|$)''',\n", regexp.QuoteMeta(name))
+	}
+	builder.WriteString("  '''\\.(vsix|exe|dll|pdb|pyc|zip)$''',\n]\n")
+	return builder.String()
+}
+
+func writeGitleaksSidecars() (string, string, error) {
+	reportFile, err := os.CreateTemp("", "gitleaks-report-*.json")
+	if err != nil {
+		return "", "", err
+	}
+	reportPath := reportFile.Name()
+	_ = reportFile.Close()
+	configFile, err := os.CreateTemp("", "gitleaks-config-*.toml")
+	if err != nil {
+		_ = os.Remove(reportPath)
+		return "", "", err
+	}
+	if _, err := configFile.WriteString(gitleaksAllowlist()); err != nil {
+		path := configFile.Name()
+		_ = configFile.Close()
+		_ = os.Remove(path)
+		_ = os.Remove(reportPath)
+		return "", "", err
+	}
+	configPath := configFile.Name()
+	if err := configFile.Close(); err != nil {
+		_ = os.Remove(configPath)
+		_ = os.Remove(reportPath)
+		return "", "", err
+	}
+	return reportPath, configPath, nil
+}
+
+func readGitleaksFindings(path, repo string) []report.LocatedLeak {
+	body, err := os.ReadFile(path)
+	if err != nil || len(strings.TrimSpace(string(body))) == 0 {
+		return nil
+	}
+	var rows []struct {
+		Description string `json:"Description"`
+		StartLine   int    `json:"StartLine"`
+		StartColumn int    `json:"StartColumn"`
+		File        string `json:"File"`
+		RuleID      string `json:"RuleID"`
+	}
+	if err := json.Unmarshal(body, &rows); err != nil {
+		return nil
+	}
+	leaks := make([]report.LocatedLeak, 0, len(rows))
+	for _, row := range rows {
+		if strings.TrimSpace(row.File) == "" {
+			continue
+		}
+		file := relativeToRepo(repo, row.File)
+		if discovery.PathHasSkippedDir(file) {
+			continue
+		}
+		leaks = append(leaks, report.LocatedLeak{
+			File:        file,
+			Line:        row.StartLine,
+			Column:      row.StartColumn,
+			RuleID:      row.RuleID,
+			Description: row.Description,
+		})
+	}
+	return leaks
+}
+
+func relativeToRepo(repo, file string) string {
+	cleaned := filepath.Clean(file)
+	if filepath.IsAbs(cleaned) && repo != "" {
+		if rel, err := filepath.Rel(repo, cleaned); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return filepath.ToSlash(rel)
+		}
+	}
+	return filepath.ToSlash(cleaned)
+}
+
+func hasArg(args []string, name string) bool {
+	for _, arg := range args {
+		if arg == name {
+			return true
+		}
+	}
+	return false
+}
+
+func hasArgPrefix(args []string, prefix string) bool {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func argWidth(value string) int {
+	width := len(value) + 1
+	if strings.ContainsAny(value, " \t\"") {
+		width += 2
+	}
+	return width
+}
+
+// splitCommandArgs keeps each command line under the Windows CreateProcess limit.
+func splitCommandArgs(executable string, prefix, files []string) [][]string {
+	const limit = 24000
+	base := len(executable) + 1
+	for _, arg := range prefix {
+		base += argWidth(arg)
+	}
+	var batches [][]string
+	var current []string
+	size := base
+	flush := func() {
+		if len(current) == 0 {
+			return
+		}
+		args := make([]string, 0, len(prefix)+len(current))
+		args = append(args, prefix...)
+		args = append(args, current...)
+		batches = append(batches, args)
+		current = nil
+		size = base
+	}
+	for _, file := range files {
+		width := argWidth(file)
+		if len(current) > 0 && size+width > limit {
+			flush()
+		}
+		current = append(current, file)
+		size += width
+	}
+	flush()
+	if len(batches) == 0 {
+		return [][]string{append([]string{}, prefix...)}
+	}
+	return batches
+}
+
+func invocationWithFiles(executable string, prefix, files []string) *Invocation {
+	batches := splitCommandArgs(executable, prefix, files)
+	followups := make([]Invocation, 0, len(batches)-1)
+	for _, args := range batches[1:] {
+		followups = append(followups, Invocation{Executable: executable, Arguments: args, ContinueOnError: true})
+	}
+	return &Invocation{
+		Executable:      executable,
+		Arguments:       batches[0],
+		Followups:       followups,
+		ContinueOnError: len(batches) > 1,
+	}
+}
+
+func anchorLeaks(leaks []report.LocatedLeak, repo, execRoot string) []report.LocatedLeak {
+	for i := range leaks {
+		if leaks[i].File == "" {
+			continue
+		}
+		leaks[i].File = anchorFindingPath(repo, execRoot, leaks[i].File)
+	}
+	return leaks
+}
+
+// anchorFindingPath rebuilds a tool path that is relative to the control working
+// directory. A leading slash or backslash is not a path from the drive root.
+func anchorFindingPath(repo, execRoot, file string) string {
+	cleaned := strings.TrimSpace(strings.Trim(file, `"'`))
+	if cleaned == "" {
+		return filepath.ToSlash(relativeToRepo(repo, execRoot))
+	}
+	if pathInsideRepo(repo, cleaned) {
+		return relativeToRepo(repo, cleaned)
+	}
+	slash := filepath.ToSlash(cleaned)
+	slash = strings.TrimPrefix(slash, "./")
+	if vol := filepath.VolumeName(cleaned); vol != "" {
+		slash = strings.TrimPrefix(filepath.ToSlash(cleaned), filepath.ToSlash(vol))
+	}
+	slash = strings.TrimLeft(slash, "/")
+	if slash == "" || slash == "." {
+		return filepath.ToSlash(relativeToRepo(repo, execRoot))
+	}
+	return relativeToRepo(repo, filepath.Join(execRoot, filepath.FromSlash(slash)))
+}
+
+func pathInsideRepo(repo, file string) bool {
+	if repo == "" || !filepath.IsAbs(file) {
+		return false
+	}
+	rel, err := filepath.Rel(repo, file)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func stripANSI(value string) string {
+	return ansiEscape.ReplaceAllString(value, "")
+}
+
+func withoutColor(env []string) []string {
+	kept := make([]string, 0, len(env)+2)
+	for _, item := range env {
+		key, _, _ := strings.Cut(item, "=")
+		if strings.EqualFold(key, "NO_COLOR") || strings.EqualFold(key, "CLICOLOR") {
+			continue
+		}
+		kept = append(kept, item)
+	}
+	return append(kept, "NO_COLOR=1", "CLICOLOR=0")
+}
+
+func tscInvocation(executable, project string) Invocation {
+	arguments := []string{"--noEmit", "--pretty", "false", "--project", project}
+	ext := strings.ToLower(filepath.Ext(executable))
+	if ext == ".cmd" || ext == ".bat" {
+		comspec := os.Getenv("COMSPEC")
+		if comspec == "" {
+			comspec = "cmd.exe"
+		}
+		return Invocation{Executable: comspec, Arguments: append([]string{"/d", "/s", "/c", executable}, arguments...)}
+	}
+	return Invocation{Executable: executable, Arguments: arguments}
+}
+
+func tsconfigProjects(repoRoot string) []string {
+	var projects []string
+	_ = filepath.WalkDir(repoRoot, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		name := entry.Name()
+		if entry.IsDir() {
+			switch strings.ToLower(name) {
+			case "node_modules", ".git", "dist", "build", ".tools", "vendor":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		lower := strings.ToLower(name)
+		if strings.HasPrefix(lower, "tsconfig") && strings.HasSuffix(lower, ".json") {
+			projects = append(projects, path)
+		}
+		return nil
+	})
+	sort.Strings(projects)
+	return projects
+}
+
+func explainNonExecution(ctrl *PlannedControl) string {
+	command := ""
+	if ctrl.Tool != nil {
+		command = ctrl.Tool.Command
+	}
+	switch ctrl.Applicability {
+	case "technology_absent":
+		return "Technologie absente : aucun fichier correspondant dans la cible."
+	case "capability_unavailable":
+		return "Pas de contrôle exécutable au catalogue pour cette capacité."
+	case "repository_unconfigured":
+		if ctrl.Reason != "" {
+			return ctrl.Reason
+		}
+		return "Le contrôle n'a pas pu s'exécuter : configuration ou dépendances du dépôt absentes."
+	case "tool_unavailable":
+		if ctrl.Reason != "" {
+			return ctrl.Reason
+		}
+		if command == "" {
+			command = "outil"
+		}
+		return fmt.Sprintf("Outil manquant : %s. L'extension peut l'installer depuis le manifeste, après accord, dans le dossier utilisateur.", command)
+	case "platform_unsupported":
+		return "Contrôle non qualifié pour cette plateforme."
+	case "platform_unavailable":
+		if ctrl.Reason != "" {
+			return ctrl.Reason
+		}
+		return "Outil non disponible sur cette plateforme."
+	case "user_disabled":
+		return "Ignoré par un réglage local de l'extension, pas par le dépôt."
+	case "permission_denied":
+		if ctrl.Reason != "" {
+			return ctrl.Reason
+		}
+		return "Autorisation refusée pour cet effet."
+	default:
+		if ctrl.Reason != "" {
+			return ctrl.Reason
+		}
+		return "Contrôle non exécuté."
+	}
 }
 
 func powershellSettingsArg(ctrl *PlannedControl, platformRoot string) string {
@@ -332,9 +724,10 @@ func ProbeToolVersion(
 		args = []string{"version"}
 	}
 
+	exe, probeArgs := osutil.ScriptCommand(executable, args)
 	res, err := osutil.RunBounded(ctx, osutil.CommandSpec{
-		Executable:       executable,
-		Args:             args,
+		Executable:       exe,
+		Args:             probeArgs,
 		WorkingDirectory: dir,
 		Limits: osutil.ProcessLimits{
 			Timeout:        timeout,
@@ -461,22 +854,17 @@ func ExecuteCompliancePlan(
 				Critical: res.Critical,
 			})
 		} else if ctrl.Applicability != "applicable" {
-			if ctrl.Applicability == "ambiguous" || (ctrl.Required && ctrl.Technology != "powershell" && (ctrl.Applicability == "capability_unavailable" || ctrl.Applicability == "tool_unavailable")) {
-				res.Status = "error"
-				res.Critical = true
-			}
+			res.Status = "skipped"
+			res.Critical = false
 			code := ctrl.ReasonCode
 			if code == "" {
 				code = ctrl.Applicability
 			}
-			msg := ctrl.Reason
-			if msg == "" {
-				msg = "Contrôle non exécuté selon le motif structuré du backend."
-			}
+			msg := explainNonExecution(ctrl)
 			res.Diagnostics = append(res.Diagnostics, report.Diagnostic{
 				Code:     code,
 				Message:  msg,
-				Critical: res.Critical,
+				Critical: false,
 			})
 		} else {
 			if opts.OnControlStart != nil {
@@ -502,6 +890,13 @@ func ExecuteCompliancePlan(
 				})
 			} else {
 				inv, invErr := BuildInvocation(ctrl, execRoot, opts.PlatformRoot, plan.Repository)
+				if inv != nil {
+					defer func() {
+						for _, path := range inv.Cleanup {
+							_ = os.Remove(path)
+						}
+					}()
+				}
 				if invErr != nil {
 					res.Status = "error"
 					res.Critical = ctrl.Required
@@ -535,15 +930,58 @@ func ExecuteCompliancePlan(
 							}
 						}
 
-						procRes, procErr := osutil.RunBounded(ctx, osutil.CommandSpec{
-							Executable:       inv.Executable,
-							Args:             inv.Arguments,
-							WorkingDirectory: execRoot,
-							Limits: osutil.ProcessLimits{
-								Timeout:        effectiveTimeout,
-								MaxOutputBytes: ctrl.MaxOutputBytes,
-							},
-						})
+						calls := append([]Invocation{*inv}, inv.Followups...)
+						var stdoutBuf, stderrBuf strings.Builder
+						exitCode := 0
+						var ran time.Duration
+						var truncated, cancelled, timedOut bool
+						var procErr error
+						for _, call := range calls {
+							exe, args := osutil.ScriptCommand(call.Executable, call.Arguments)
+							procRes, err := osutil.RunBounded(ctx, osutil.CommandSpec{
+								Executable:       exe,
+								Args:             args,
+								WorkingDirectory: execRoot,
+								Env:              withoutColor(osutil.AugmentedEnviron()),
+								Limits: osutil.ProcessLimits{
+									Timeout:        effectiveTimeout,
+									MaxOutputBytes: ctrl.MaxOutputBytes,
+								},
+							})
+							if err != nil {
+								procErr = err
+								break
+							}
+							if stdoutBuf.Len() > 0 && procRes.Stdout != "" {
+								stdoutBuf.WriteString("\n")
+							}
+							stdoutBuf.WriteString(procRes.Stdout)
+							if procRes.Stderr != "" {
+								if stderrBuf.Len() > 0 {
+									stderrBuf.WriteString("\n")
+								}
+								stderrBuf.WriteString(procRes.Stderr)
+							}
+							truncated = truncated || procRes.OutputTruncated
+							ran += procRes.Duration
+							if exitCode == 0 && procRes.ExitCode != 0 {
+								exitCode = procRes.ExitCode
+							}
+							cancelled = procRes.Cancelled
+							timedOut = procRes.TimedOut
+							if cancelled || timedOut || (procRes.ExitCode != 0 && !call.ContinueOnError) {
+								break
+							}
+						}
+						procRes := &osutil.ProcessResult{
+							Stdout:          stdoutBuf.String(),
+							Stderr:          stderrBuf.String(),
+							ExitCode:        exitCode,
+							Duration:        ran,
+							OutputTruncated: truncated,
+							TimedOut:        timedOut,
+							Cancelled:       cancelled,
+						}
 
 						if procErr != nil {
 							res.Status = "error"
@@ -556,8 +994,8 @@ func ExecuteCompliancePlan(
 						} else {
 							exitCode := procRes.ExitCode
 							res.ExitCode = &exitCode
-							stdout := procRes.Stdout
-							stderr := procRes.Stderr
+							stdout := stripANSI(procRes.Stdout)
+							stderr := stripANSI(procRes.Stderr)
 							if opts.Redactor != nil {
 								stdout = opts.Redactor.Redact(stdout)
 								stderr = opts.Redactor.Redact(stderr)
@@ -565,6 +1003,15 @@ func ExecuteCompliancePlan(
 							res.Stdout = stdout
 							res.Stderr = stderr
 							res.OutputTruncated = procRes.OutputTruncated
+							if inv.GitleaksReport != "" {
+								res.Leaks = readGitleaksFindings(inv.GitleaksReport, plan.Repository)
+							}
+							if ctrl.Tool != nil && ctrl.Tool.Command == "rumdl" {
+								res.Leaks = append(res.Leaks, parseRumdlOutput(stdout, plan.Repository)...)
+							} else if ctrl.Tool != nil {
+								res.Leaks = append(res.Leaks, parseToolFindings(ctrl.Tool.Command, stdout, plan.Repository)...)
+							}
+							res.Leaks = anchorLeaks(res.Leaks, plan.Repository, execRoot)
 
 							if res.OutputTruncated {
 								res.Diagnostics = append(res.Diagnostics, report.Diagnostic{
@@ -589,13 +1036,28 @@ func ExecuteCompliancePlan(
 									Message:  fmt.Sprintf("Delai depasse apres %v.", procRes.Duration),
 									Critical: res.Critical,
 								})
-							} else if exitCode == 0 {
+							} else if exitCode == 0 && len(res.Leaks) == 0 {
 								res.Status = "success"
+							} else if ctrl.Tool != nil && pytestCollectedNothing(ctrl.Tool.Command, exitCode, len(res.Leaks)) {
+								res.Status = "success"
+								res.Diagnostics = append(res.Diagnostics, report.Diagnostic{
+									Code:     "no_tests_collected",
+									Message:  "Aucun test collecté dans cette racine. Ce n'est pas un échec de conformité.",
+									Critical: false,
+								})
 							} else {
 								res.Status = "fail"
+								message := fmt.Sprintf("Controle en echec (code %d).", exitCode)
+								if len(res.Leaks) > 0 {
+									kind := "finding(s)"
+									if ctrl.Tool != nil && ctrl.Tool.Command == "gitleaks" {
+										kind = "fuite(s)"
+									}
+									message = fmt.Sprintf("%d %s : fichier, ligne et règle dans le contrôle (code %d).", len(res.Leaks), kind, exitCode)
+								}
 								res.Diagnostics = append(res.Diagnostics, report.Diagnostic{
 									Code:     "exit_nonzero",
-									Message:  fmt.Sprintf("Controle en echec (code %d).", exitCode),
+									Message:  message,
 									Critical: false,
 								})
 							}
@@ -780,6 +1242,10 @@ func RunPythonPipeline(ctx context.Context, opts PipelineOptions) (*report.Repor
 					)
 				}
 			}
+			if len(env) == 0 {
+				env = osutil.AugmentedEnviron()
+			}
+			env = withoutColor(env)
 
 			startCtrl := time.Now()
 			spec := osutil.CommandSpec{
@@ -849,6 +1315,11 @@ func RunPythonPipeline(ctx context.Context, opts PipelineOptions) (*report.Repor
 				opts.ProgressHandler(step.id, status)
 			}
 
+			stdout, stderr := "", ""
+			if res != nil {
+				stdout = strings.TrimSpace(stripANSI(res.Stdout))
+				stderr = strings.TrimSpace(stripANSI(res.Stderr))
+			}
 			catId := step.id
 			results = append(results, report.ExecutionResult{
 				ControlId:        step.id,
@@ -862,8 +1333,8 @@ func RunPythonPipeline(ctx context.Context, opts PipelineOptions) (*report.Repor
 				ExecutionStart:   startCtrl.UTC().Format(time.RFC3339),
 				ExecutionEnd:     endCtrl.UTC().Format(time.RFC3339),
 				DurationMs:       durationMs,
-				Stdout:           strings.TrimSpace(res.Stdout),
-				Stderr:           strings.TrimSpace(res.Stderr),
+				Stdout:           stdout,
+				Stderr:           stderr,
 				ExitCode:         exitCodePtr,
 				OutputTruncated:  res != nil && res.OutputTruncated,
 				Critical:         isCritical,
@@ -874,10 +1345,11 @@ func RunPythonPipeline(ctx context.Context, opts PipelineOptions) (*report.Repor
 
 	complianceMs := time.Since(startTime).Milliseconds() - discoveryMs
 	repMetrics := &report.Metrics{
-		DiscoveryMs:  discoveryMs,
-		ResolverMs:   0,
-		ComplianceMs: complianceMs,
-		ReportingMs:  1,
+		DiscoveryMs:     discoveryMs,
+		ResolverMs:      0,
+		ComplianceMs:    complianceMs,
+		ReportingMs:     1,
+		TotalDurationMs: discoveryMs + complianceMs + 1,
 	}
 
 	runID := fmt.Sprintf("%032x", time.Now().UnixNano())
@@ -917,6 +1389,8 @@ type ComplianceOptions struct {
 	OnPlanReady             func(planReport *report.Report)
 	OnControlStart          func(ctrl *PlannedControl)
 	OnControlDone           func(ctrl *PlannedControl, res *report.ExecutionResult)
+	DisabledTechnologies    []string
+	DisabledControls        []string
 }
 
 // RunCompliance executes the entire Phase 3 compliance workflow:
@@ -980,6 +1454,8 @@ func RunCompliance(ctx context.Context, opts ComplianceOptions) (*report.Report,
 		AllowNetwork:            opts.AllowNetwork,
 		AllowCodeExecution:      opts.AllowCodeExecution,
 		PlatformID:              plat.ID,
+		DisabledTechnologies:    opts.DisabledTechnologies,
+		DisabledControls:        opts.DisabledControls,
 	}
 
 	execPlan, plannedControls, err := BuildCompliancePlan(discResult.Technologies, matrixEntries, resolutionEntries, absRepo, planOpts)
@@ -1044,16 +1520,22 @@ func RunCompliance(ctx context.Context, opts ComplianceOptions) (*report.Report,
 	}
 
 	stageMetrics := &report.Metrics{
-		DiscoveryMs:  discMs,
-		ResolverMs:   resolverMs,
-		ComplianceMs: complianceMs,
-		ReportingMs:  reportingMs,
+		DiscoveryMs:     discMs,
+		ResolverMs:      resolverMs,
+		ComplianceMs:    complianceMs,
+		ReportingMs:     reportingMs,
+		TotalDurationMs: totalMs,
 	}
 
 	var catSha *string
 	if cat.ContentSHA256 != "" {
 		s := cat.ContentSHA256
 		catSha = &s
+	}
+
+	if opts.PlanOnly {
+		discResult.CapabilityMatrix = []interface{}{}
+		discResult.ToolResolution = []interface{}{}
 	}
 
 	rep := report.BuildComplianceReport(report.ReportOptions{
@@ -1073,6 +1555,10 @@ func RunCompliance(ctx context.Context, opts ComplianceOptions) (*report.Report,
 		ScanComplete:                discResult.ScanComplete,
 		Adapter:                     opts.SourceAdapter,
 	})
+	if opts.PlanOnly {
+		rep.Matrix = []interface{}{}
+		rep.Resolver = []interface{}{}
+	}
 
 	return rep, nil
 }

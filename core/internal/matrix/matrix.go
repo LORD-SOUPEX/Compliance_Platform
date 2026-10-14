@@ -188,11 +188,12 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
+		exe, args := osutil.ScriptCommand(exePath, probeArgs)
 		var cmd *exec.Cmd
-		if strings.EqualFold(filepath.Ext(exePath), ".cmd") || strings.EqualFold(filepath.Ext(exePath), ".bat") {
-			cmd = exec.CommandContext(ctx, "cmd.exe", append([]string{"/c", exePath}, probeArgs...)...)
+		if strings.EqualFold(filepath.Ext(exe), ".cmd") || strings.EqualFold(filepath.Ext(exe), ".bat") {
+			cmd = exec.CommandContext(ctx, "cmd.exe", append([]string{"/c", exe}, args...)...)
 		} else {
-			cmd = exec.CommandContext(ctx, exePath, probeArgs...)
+			cmd = exec.CommandContext(ctx, exe, args...)
 		}
 		osutil.SetHideWindow(cmd)
 		out, err := cmd.CombinedOutput()
@@ -274,7 +275,22 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 	}
 
 	// 5. Distribution cache produced by compliance runtime sync.
-	cached := filepath.Join(osutil.DefaultToolCacheDir(), "bin", platform.ID, command+ext)
+	cacheRoot := osutil.DefaultToolCacheDir()
+	venvDir := filepath.Join(cacheRoot, "venv", "bin")
+	if platform.OS == "windows" {
+		venvDir = filepath.Join(cacheRoot, "venv", "Scripts")
+	}
+	for _, cand := range []string{
+		filepath.Join(venvDir, command+ext),
+		filepath.Join(venvDir, command+".cmd"),
+		filepath.Join(venvDir, command+".bat"),
+		filepath.Join(venvDir, command),
+	} {
+		if info, err := os.Stat(cand); err == nil && !info.IsDir() {
+			return probeCommand(cand, true)
+		}
+	}
+	cached := filepath.Join(cacheRoot, "bin", platform.ID, command+ext)
 	if info, err := os.Stat(cached); err == nil && !info.IsDir() {
 		return probeCommand(cached, true)
 	}
@@ -378,7 +394,18 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 		}
 	}
 
-	// 7. Darwin tool directories (Homebrew, pip user, pyenv), then PATH.
+	// 7. Node package scripts live next to the target, not in the platform cache.
+	if repoRoot != "" {
+		binDir := filepath.Join(repoRoot, "node_modules", ".bin")
+		for _, candidateName := range []string{command, command + ".cmd", command + ".exe", command + ".ps1"} {
+			candidate := filepath.Join(binDir, candidateName)
+			if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+				return probeCommand(candidate, false)
+			}
+		}
+	}
+
+	// 8. Darwin tool directories (Homebrew, pip user, pyenv), then PATH.
 	if found := osutil.LookupExecutable(command); found != "" {
 		return probeCommand(found, false)
 	}
@@ -420,13 +447,20 @@ func BuildCapabilityMatrix(
 
 			toolStateList := make([]CandidateToolState, 0)
 			availableTools := make([]string, 0)
-			alternativeSatisfied := false
 
 			for _, tdef := range prof.Tools {
-				skipProbe := disc.Status != "detected" || (prof.SelectionPolicy == "alternative" && alternativeSatisfied)
-				_ = skipProbe
-
-				toolState := resolver.ResolveCandidate(tdef.Name, tdef.Command, platform, repoRoot)
+				var toolState CandidateToolState
+				if disc.Status != "detected" {
+					toolState = CandidateToolState{
+						Name:     tdef.Name,
+						Command:  tdef.Command,
+						Status:   "not_installed",
+						Platform: platform.ID,
+						Reason:   "Technologie non détectée ; sonde d'outil omise.",
+					}
+				} else {
+					toolState = resolver.ResolveCandidate(tdef.Name, tdef.Command, platform, repoRoot)
+				}
 				toolState.CatalogID = tdef.CatalogID
 				toolState.Severity = tdef.Severity
 				toolState.SideEffectLevel = tdef.SideEffectLevel
@@ -444,9 +478,6 @@ func BuildCapabilityMatrix(
 
 				if toolState.Status == "available" {
 					availableTools = append(availableTools, toolState.Name)
-					if prof.SelectionPolicy == "alternative" {
-						alternativeSatisfied = true
-					}
 				}
 			}
 

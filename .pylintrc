@@ -1,0 +1,15 @@
+[MAIN]
+jobs = 1
+
+[FORMAT]
+max-line-length = 120
+
+[MESSAGES CONTROL]
+disable =
+    missing-module-docstring,
+    missing-function-docstring,
+    too-many-locals,
+    too-many-branches,
+    too-many-statements,
+    redefined-outer-name,
+    duplicate-code

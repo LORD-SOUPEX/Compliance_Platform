@@ -21,6 +21,7 @@ export interface Technology {
     status: 'detected' | 'ambiguous' | 'absent';
     roots: string[];
     evidence: string[];
+    evidence_total?: number;
     ambiguities: string[];
 }
 export interface PreparationReport {
@@ -138,6 +139,14 @@ export function parsePreparation(text: string, target: string, allowPermissions 
     return report as unknown as PreparationReport;
 }
 
+export const slowControlMs = 30_000;
+
+export function paceNotice(elapsedMs: number, timeoutSeconds?: number): string | undefined {
+    if (!Number.isFinite(elapsedMs) || elapsedMs < slowControlMs) { return undefined; }
+    const timeout = timeoutSeconds && timeoutSeconds > 0 ? ` Timeout du contrôle : ${timeoutSeconds} s.` : '';
+    return `Contrôle lent ou bloqué depuis ${Math.round(elapsedMs / 1000)} s.${timeout} L'annulation reste disponible.`;
+}
+
 export function projectPlan(report: PreparationReport): PlanNode[] {
     return report.discovery.technologies.filter(technology => technology.status !== 'absent').map(technology => {
         const controls = report.execution_plan.controls.filter(control => control.technology === technology.technology)
@@ -147,7 +156,9 @@ export function projectPlan(report: PreparationReport): PlanNode[] {
         return {
             id: `technology/${technology.technology}`,
             label: technology.technology,
-            description: technology.status,
+            description: technology.evidence_total && technology.evidence_total > technology.evidence.length
+                ? `${technology.status} (${technology.evidence.length}/${technology.evidence_total} preuves)`
+                : technology.status,
             status: blocked ? 'Blocked' : undefined,
             reason: blocked ? {
                 code: report.discovery.scan_complete ? 'ambiguous' : 'incomplete_scan',
@@ -158,7 +169,7 @@ export function projectPlan(report: PreparationReport): PlanNode[] {
                 id: `root/${technology.technology}/${root}`,
                 label: root,
                 children: controls.filter(control => control.root === root).map(control => {
-                    const status: VisualStatus = !report.discovery.scan_complete ? 'Blocked' : control.applicability === 'applicable' ? 'Pending' : control.reason_code === 'permission_denied' ? 'Skipped' :
+                    const status: VisualStatus = !report.discovery.scan_complete ? 'Blocked' : control.applicability === 'applicable' ? 'Pending' : control.reason_code === 'permission_denied' ? 'Warning' :
                         ['not_applicable', 'technology_absent'].includes(control.applicability) ? 'Not applicable' : 'Blocked';
                     return {
                         id: control.id,

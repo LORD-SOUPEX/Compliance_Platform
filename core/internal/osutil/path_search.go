@@ -56,6 +56,20 @@ func PowerShellModuleDirs(goos, home string) []string {
 	return dirs
 }
 
+// ScriptCommand launches a Windows console script with the Python interpreter
+// that sits beside it. A .cmd launcher from pip searches PATH and can bind the
+// Microsoft Store stub instead of the venv that actually contains the package.
+func ScriptCommand(exePath string, args []string) (string, []string) {
+	ext := strings.ToLower(filepath.Ext(exePath))
+	if runtime.GOOS == "windows" && (ext == ".cmd" || ext == ".bat") {
+		python := filepath.Join(filepath.Dir(exePath), "python.exe")
+		if info, err := os.Stat(python); err == nil && !info.IsDir() {
+			return python, append([]string{"-x", exePath}, args...)
+		}
+	}
+	return exePath, args
+}
+
 // DefaultToolCacheDir is the distribution cache written by compliance runtime sync.
 func DefaultToolCacheDir() string {
 	home, err := os.UserHomeDir()

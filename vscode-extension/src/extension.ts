@@ -2,8 +2,10 @@ import * as path from 'node:path';
 import * as fsSync from 'node:fs';
 import { promises as fs } from 'node:fs';
 import * as vscode from 'vscode';
-import { audit, Permissions, prepare, runsDirectory, sessionArtifact, SessionController, validateSource, validateTarget } from './daemonClient';
-import { controlOutputText, PlanNode, projectPlan, VisualStatus } from './model';
+import { audit, DaemonClient, Permissions, prepare, runsDirectory, sessionArtifact, SessionController, setAuditFilters, setExpectedEngineVersion, shutdownComplianceDaemon, validateSource, validateTarget } from './daemonClient';
+import { applicationValue, parseSessionKeep, sessionDirectory } from './localSettings';
+import { classifyProvisionError, consentText, fingerprint, missingToolCommands, selectManifestTools, shouldPrompt, ConsentMemory } from './toolProvision';
+import { controlOutputText, paceNotice, PlanNode, projectPlan, VisualStatus } from './model';
 import { ReportPanel } from './reportPanel';
 
 class PipelineTree implements vscode.TreeDataProvider<PlanNode> {
@@ -53,11 +55,22 @@ function resolvePlatformSource(extensionPath: string): string {
 }
 
 export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNode[]; getReportHtml(): string | undefined } {
+    setExpectedEngineVersion(String((context.extension.packageJSON as { version?: string }).version || ''));
+    const applyFilters = () => {
+        const config = vscode.workspace.getConfiguration('compliance');
+        setAuditFilters(applicationValue(config.inspect<string[]>('disabledTechnologies'), []), applicationValue(config.inspect<string[]>('disabledControls'), []));
+    };
+    applyFilters();
     const source = resolvePlatformSource(context.extensionPath);
     const controller = new SessionController(source);
     const tree = new PipelineTree(controller);
     const output = vscode.window.createOutputChannel('Compliance');
-    const reports = new ReportPanel(context, source);
+    let provisionToolsRef: (commands: string[]) => Promise<boolean> = async () => false;
+    const reports = new ReportPanel(context, source, async commands => {
+        const installed = await provisionToolsRef(commands);
+        if (installed && controller.canRun(vscode.workspace.isTrusted)) { await launch(1); }
+    });
+    provisionToolsRef = commands => provisionTools(commands, 'manual');
     const view = vscode.window.createTreeView('compliance.pipelines', { treeDataProvider: tree, showCollapseAll: true });
     const update = () => {
         tree.refresh();
@@ -66,7 +79,19 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
         void vscode.commands.executeCommand('setContext', 'compliance.hasSession', !!controller.audit);
         void vscode.commands.executeCommand('setContext', 'compliance.hasReport', !!controller.audit?.reportPath || !!reports.knownReference());
     };
-    const ticker = setInterval(() => { if (controller.busy && controller.audit?.snapshot) { tree.refresh(); } }, 1000);
+    const slowLogged = new Set<string>();
+    const ticker = setInterval(() => {
+        if (!(controller.busy && controller.audit?.snapshot)) { return; }
+        for (const control of controller.audit.controls.values()) {
+            if (control.status !== 'Running' || !control.execution_start || slowLogged.has(control.id)) { continue; }
+            const notice = paceNotice(Date.now() - Date.parse(control.execution_start));
+            if (!notice) { continue; }
+            slowLogged.add(control.id);
+            control.reason = { code: 'control_slow', message: notice };
+            output.appendLine(`${control.label} : ${notice}`);
+        }
+        tree.refresh();
+    }, 1000);
     const sourceWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(source, '{.config/control-catalog.json,.tools/runtime/index.json,requirements-dev.lock}'));
     const invalidate = () => {
         controller.cancel(); controller.sourceValid = false; controller.preparation = undefined;
@@ -80,19 +105,39 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
         tree.message = 'Discovery, Matrix et Resolver ; aucun controle execute.';
         update();
         output.appendLine(`Pipeline source : ${source}\nTarget : ${controller.target}`);
+        await purgeSessions(1);
+        const started = Date.now();
         try {
             await validateSource(source);
-            controller.preparation = await prepare(source, controller.target, undefined, controller.abort.signal);
+            output.appendLine(`source validee : ${Date.now() - started} ms`);
+            const detected = Date.now();
+            controller.preparation = await prepare(source, controller.target, undefined, controller.abort.signal, undefined, line => output.appendLine(line));
+            output.appendLine(`detection et plan : ${Date.now() - detected} ms`);
             controller.sourceValid = true;
+            const renderStarted = Date.now();
             tree.status = controller.preparation.report.discovery.scan_complete ? 'Succeeded' : 'Blocked';
-            tree.message = `Plan prepare. Session : ${controller.preparation.directory}`;
+            const waiting = controller.preparation.report.execution_plan.controls.filter(control => control.reason_code === 'permission_denied');
+            tree.message = waiting.length
+                ? `Plan prepare. ${waiting.length} controle(s) attendent une autorisation reseau ou d'execution de code.`
+                : `Plan prepare. Session : ${controller.preparation.directory}`;
+            output.appendLine(`rendu : ${Date.now() - renderStarted} ms`);
             output.appendLine(tree.message);
+            output.appendLine(`preparation visible : ${Date.now() - started} ms`);
         } catch (error) {
             tree.status = 'Error';
             tree.message = error instanceof Error ? error.message : String(error);
             output.appendLine(tree.message);
             await vscode.window.showErrorMessage(tree.message);
         } finally { controller.end(); update(); }
+        const waiting = controller.preparation?.report.execution_plan.controls.filter(control => control.reason_code === 'permission_denied') ?? [];
+        if (waiting.length && !controller.abort?.signal.aborted) {
+            const choice = await vscode.window.showWarningMessage(
+                `${waiting.length} contrôle(s) nécessitent une autorisation (réseau ou exécution de code) avant de s'exécuter. Le plan les signale tant que l'autorisation n'est pas donnée.`,
+                'Autoriser et lancer',
+                'Plus tard'
+            );
+            if (choice === 'Autoriser et lancer') { await launch(); }
+        }
     }
     async function askPermissions(fresh: Awaited<ReturnType<typeof prepare>>): Promise<Permissions> {
         controller.preparation = fresh;
@@ -106,27 +151,102 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
         }
         return permissions;
     }
-    async function launch(): Promise<void> {
+    async function purgeSessions(reserve: number, extra: string[] = []): Promise<void> {
+        const config = vscode.workspace.getConfiguration('compliance');
+        const parsed = parseSessionKeep(applicationValue(config.inspect<number>('maxSessions'), 5));
+        if (parsed.error) { output.appendLine(parsed.error); }
+        const fallback = runsDirectory(source);
+        const chosen = sessionDirectory(applicationValue(config.inspect<string>('sessionsDirectory'), ''), process.env.COMPLIANCE_SESSIONS_DIR, fallback);
+        const protect = [reports.knownReference()?.runId, ...extra].filter((value): value is string => !!value);
+        try {
+            const lines = await new DaemonClient().purgeSessions(source, chosen, parsed.keep, protect, reserve);
+            for (const line of lines) { output.appendLine(line); }
+        } catch (error) {
+            output.appendLine(`purge : ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+    function hostPlatform(): string {
+        const osName = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux';
+        const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+        return `${osName}-${arch}`;
+    }
+    async function provisionTools(commands: string[], trigger: 'auto' | 'manual'): Promise<boolean> {
+        const manifest = JSON.parse(await fs.readFile(path.join(source, '.config', 'runtime-manifest.json'), 'utf8'));
+        const nodeCommands = commands.filter(command => command === 'eslint' || command === 'tsc');
+        const manifestCommands = commands.filter(command => command !== 'eslint' && command !== 'tsc');
+        const known = selectManifestTools(manifest, hostPlatform(), manifestCommands);
+        const unknown = manifestCommands.filter(command => !known.some(tool => tool.command === command));
+        if (unknown.length && trigger === 'manual') {
+            await vscode.window.showErrorMessage(`${unknown.join(', ')} : absent du manifeste. L'extension ne propose ni pip ni Homebrew.`);
+        }
+        if (!known.length && !nodeCommands.length) { return false; }
+        const id = fingerprint([...known.map(tool => tool.command), ...nodeCommands]);
+        const memory = context.globalState.get<ConsentMemory>('compliance.toolConsent');
+        if (!shouldPrompt(memory, id, trigger)) { return false; }
+        const nodeNote = nodeCommands.length ? '\n\neslint et typescript seront installés par npm dans ~/.compliance/tools/node, puis utilisés si la cible n’a pas node_modules/.bin.' : '';
+        const choice = await vscode.window.showWarningMessage(`${known.length ? consentText(known) : 'Installation de la chaîne JavaScript locale.'}${nodeNote}`, { modal: true }, 'Installer', 'Refuser');
+        if (choice !== 'Installer') {
+            await context.globalState.update('compliance.toolConsent', { fingerprint: id, decision: 'refused', installed: false } satisfies ConsentMemory);
+            if (choice === 'Refuser') { await vscode.window.showInformationMessage('Installation refusée. Les contrôles concernés restent non couverts.'); }
+            return false;
+        }
+        try {
+            const client = new DaemonClient();
+            if (known.length) { await client.syncTools(source, known.map(tool => tool.command)); }
+            if (nodeCommands.length) { await client.installNodeToolchain(source); }
+            await context.globalState.update('compliance.toolConsent', { fingerprint: id, decision: 'accepted', installed: true } satisfies ConsentMemory);
+            return true;
+        } catch (error) {
+            await context.globalState.update('compliance.toolConsent', { fingerprint: id, decision: 'accepted', installed: false } satisfies ConsentMemory);
+            await vscode.window.showErrorMessage(classifyProvisionError(error instanceof Error ? error.message : String(error)).message);
+            return false;
+        }
+    }
+    async function provisionFromReport(directory: string): Promise<boolean> {
+        try {
+            return await provisionTools(missingToolCommands(JSON.parse(await fs.readFile(path.join(directory, 'compliance-report.json'), 'utf8'))), 'auto');
+        } catch (error) {
+            output.appendLine(`Provisionnement non proposé : ${error instanceof Error ? error.message : String(error)}`);
+            return false;
+        }
+    }
+    async function launch(depth = 0): Promise<void> {
         if (!controller.canRun(vscode.workspace.isTrusted)) { await vscode.window.showWarningMessage('Target, source valide, preparation et autorisation requises avant l audit.'); return; }
+        let rerun = false;
         try {
             const state = controller.begin(vscode.workspace.isTrusted); update();
             tree.message = 'Nouvelle preparation avant audit ; consentements limites a cette session.';
             output.appendLine(`Session ${state.runId}\nTarget : ${state.target}\nPipeline source : ${source}`);
+            await purgeSessions(1, [state.runId]);
             const patterns = vscode.workspace.getConfiguration('compliance').get<string[]>('reportRedactionPatterns', []);
             for (const pattern of patterns) { new RegExp(pattern); }
-            const directory = await audit(source, state, askPermissions, update, controller.abort!.signal, patterns.length ? patterns.map(pattern => `(?:${pattern})`).join('|') : undefined);
+            const directory = await audit(source, state, askPermissions, update, controller.abort!.signal, patterns.length ? patterns.map(pattern => `(?:${pattern})`).join('|') : undefined, undefined, line => output.appendLine(line));
             tree.message = `${state.status} ; session : ${directory}`; output.appendLine(tree.message);
-            if (state.reportPath) {
-                try { await reports.openSession({ runId: state.runId, target: state.target, source }); }
-                catch (error) { tree.message = `Rapport non ouvert : ${String(error)} ; dossier de session conserve.`; output.appendLine(tree.message); await vscode.window.showErrorMessage(tree.message); }
+            if (depth === 0) { rerun = await provisionFromReport(directory); }
+            if (!rerun && state.reportPath) {
+                const reference = { runId: state.runId, target: state.target, source };
+                try { await reports.openSession(reference); }
+                catch (error) {
+                    try { await reports.open(path.join(directory, 'compliance-report.json'), reference, false); }
+                    catch (fallback) { tree.message = `Rapport non ouvert : ${String(fallback)} ; dossier de session conserve.`; output.appendLine(`${String(error)} ; ${tree.message}`); await vscode.window.showErrorMessage(tree.message); }
+                }
             }
         } catch (error) { controller.audit?.fail(String(error)); tree.message = String(error); output.appendLine(tree.message); await vscode.window.showErrorMessage(tree.message); }
-        finally { controller.end(); update(); }
+        finally { await purgeSessions(0, [controller.audit?.runId || '']); controller.end(); update(); }
+        if (rerun) {
+            output.appendLine('Outils installés ; nouvel audit.');
+            await launch(depth + 1);
+        }
     }
-    context.subscriptions.push(tree, output, view, reports, { dispose: () => { controller.cancel(); clearInterval(ticker); } },
+    context.subscriptions.push(tree, output, view, reports, { dispose: () => { controller.cancel(); clearInterval(ticker); void shutdownComplianceDaemon(); } },
         sourceWatcher, sourceWatcher.onDidChange(invalidate), sourceWatcher.onDidCreate(invalidate), sourceWatcher.onDidDelete(invalidate),
         vscode.workspace.onDidGrantWorkspaceTrust(update),
         vscode.commands.registerCommand('compliance.showLogs', () => output.show()),
+        vscode.commands.registerCommand('compliance.reset', async () => {
+            await shutdownComplianceDaemon();
+            output.appendLine('Démon arrêté. Les sessions et rapports sont conservés.');
+            await vscode.window.showInformationMessage('Démon Compliance arrêté. Les rapports sont conservés.');
+        }),
         vscode.commands.registerCommand('compliance.refreshPlan', refresh),
         vscode.commands.registerCommand('compliance.runAudit', launch),
         vscode.commands.registerCommand('compliance.cancelAudit', () => { controller.cancel(); output.appendLine('Annulation demandee au backend.'); update(); }),
@@ -136,7 +256,8 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
                 if (state) {
                     if (!state.terminal || !state.reportPath) { throw new Error('Rapport de la session courante non disponible ; consulter ses journaux.'); }
                     await reports.openSession({ runId: state.runId, target: state.target, source }, focus);
-                } else { await reports.openSession(undefined, focus, true); }
+                } else if (reports.knownReference()) { await reports.openSession(reports.knownReference(), focus, false); }
+                else { await reports.openSession(undefined, focus, true); }
             } catch (error) { await vscode.window.showErrorMessage(String(error)); }
         }),
         vscode.commands.registerCommand('compliance.openReportFile', async (selected?: vscode.Uri) => {

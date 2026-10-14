@@ -78,8 +78,8 @@
         },
         "archive_sha256": {
           "type": "string",
-          "pattern": "^[a-f0-9]{64}$",
-          "description": "Empreinte SHA-256 en minuscules de l'archive téléchargée"
+          "pattern": "^$|^[a-f0-9]{64}$",
+          "description": "Empreinte SHA-256 en minuscules de l'archive téléchargée. Vide si l'outil s'installe par pip."
         },
         "binary_in_archive": {
           "type": "string",
@@ -88,8 +88,17 @@
         },
         "binary_sha256": {
           "type": "string",
-          "pattern": "^[a-f0-9]{64}$",
-          "description": "Empreinte SHA-256 en minuscules du binaire extrait et rendu exécutable"
+          "pattern": "^$|^[a-f0-9]{64}$",
+          "description": "Empreinte SHA-256 en minuscules du binaire extrait. Vide si l'outil s'installe par pip."
+        },
+        "install": {
+          "type": "string",
+          "enum": ["binary", "pip", "runtime"],
+          "description": "binary extrait l'exécutable, pip installe un paquet Python dans le venv, runtime extrait CPython."
+        },
+        "package": {
+          "type": "string",
+          "description": "Nom du paquet pip lorsque install vaut pip."
         },
         "version_args": {
           "type": "array",

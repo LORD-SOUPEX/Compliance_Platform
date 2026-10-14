@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"compliance/internal/discovery"
+	"compliance/internal/distribution"
+	"compliance/internal/embedded"
 	"compliance/internal/matrix"
 	"compliance/internal/osutil"
 	"compliance/internal/report"
@@ -53,6 +55,8 @@ type PlanOptions struct {
 	AllowCodeExecution      bool
 	CustomDependencies      map[string][]string
 	PlatformID              string
+	DisabledTechnologies    []string
+	DisabledControls        []string
 }
 
 // BuildCompliancePlan creates an ExecutionPlan following the exact PowerShell contract.
@@ -193,6 +197,8 @@ func BuildCompliancePlan(
 						applicability = "not_applicable"
 					} else if hasAlternative && len(selected) == 0 {
 						applicability = "not_applicable"
+					} else if candidate != nil && candidate.Command != "" && candidate.Command != "none" && candidate.Status != "available" {
+						applicability = "tool_unavailable"
 					} else if candidate == nil || capability.Availability == "unavailable" || capability.Availability == "unconfigured" {
 						applicability = "capability_unavailable"
 					} else if candidate.Status != "available" {
@@ -206,7 +212,22 @@ func BuildCompliancePlan(
 					if candidate != nil && candidate.Reason != "" {
 						reason = candidate.Reason
 					}
-					if applicability == "not_applicable" {
+					if applicability == "not_applicable" && hasAlternative && len(selected) == 0 {
+						var chosen []string
+						for _, st := range resolution.SelectedTools {
+							for _, capName := range st.Capabilities {
+								if capName == capability.Name {
+									chosen = append(chosen, st.Command)
+									break
+								}
+							}
+						}
+						if len(chosen) > 0 {
+							reason = fmt.Sprintf("Alternative non retenue : %s couvre déjà %s.", strings.Join(chosen, ", "), capability.Name)
+						} else {
+							reason = "Capacite non requise ou candidat non retenu par le resolver."
+						}
+					} else if applicability == "not_applicable" {
 						reason = "Capacite non requise ou candidat non retenu par le resolver."
 					}
 					if applicability == "ambiguous" {
@@ -351,6 +372,67 @@ func BuildCompliancePlan(
 						}
 					}
 
+					if listed(opts.DisabledTechnologies, tech.Technology) || (catalogCtrl != nil && listed(opts.DisabledControls, catalogCtrl.ID)) {
+						applicability = "user_disabled"
+						reasonCode = "user_disabled"
+						reason = "Ignoré par un réglage local de l'extension, pas par le dépôt."
+					}
+
+					if (command == "eslint" || command == "tsc") && applicability != "technology_absent" && applicability != "ambiguous" && applicability != "platform_unsupported" && applicability != "permission_denied" && applicability != "user_disabled" {
+						localBin := nodeToolBin(cleanRepo, command)
+						switch {
+						case localBin == "":
+							applicability = "tool_unavailable"
+							reasonCode = "tool_unavailable"
+							reason = fmt.Sprintf("Outil du dépôt introuvable : node_modules/.bin/%s. Installez les dépendances (npm install) dans la cible, ou la chaîne locale avec compliance runtime node.", command)
+						case command == "eslint" && !eslintConfigured(cleanRepo):
+							applicability = "repository_unconfigured"
+							reasonCode = "repository_unconfigured"
+							reason = "Configuration ESLint absente du dépôt. Ajoutez eslint.config.js ou .eslintrc, puis relancez."
+						case command == "tsc" && len(tsconfigProjects(cleanRepo)) == 0:
+							applicability = "repository_unconfigured"
+							reasonCode = "repository_unconfigured"
+							reason = "Aucun tsconfig.json dans le dépôt. La vérification de types ne peut pas s'exécuter."
+						default:
+							if candidate == nil {
+								copy := matrix.CandidateToolState{Name: command, Command: command}
+								candidate = &copy
+							}
+							candidate.Status = "available"
+							candidate.Source = &localBin
+							candidate.RuntimeManaged = false
+							if applicability != "applicable" {
+								applicability = "applicable"
+								reasonCode = "applicable"
+								reason = ""
+							}
+						}
+					}
+
+					if applicability == "tool_unavailable" && candidate != nil && candidate.Status == "incompatible" {
+						applicability = "platform_unsupported"
+						reasonCode = "platform_unsupported"
+						if command == "ansible-lint" {
+							reason = "ansible-lint est réservé à Linux et macOS. Sur Windows, yamllint couvre les playbooks Ansible."
+						} else if candidate.Reason != "" {
+							reason = candidate.Reason
+						} else {
+							reason = fmt.Sprintf("Outil non pris en charge sur cette plateforme : %s.", command)
+						}
+					} else if applicability == "tool_unavailable" && command != "eslint" && command != "tsc" && command != "none" {
+						if candidate != nil && candidate.Status == "runtime_error" && candidate.Reason != "" {
+							reason = candidate.Reason
+							reasonCode = "tool_unavailable"
+						} else if manifestPath, err := embedded.ResolveAsset("runtime-manifest.json", ".config/runtime-manifest.json"); err == nil && distribution.ToolListed(manifestPath, opts.PlatformID, command) {
+							reason = fmt.Sprintf("Outil installable depuis le manifeste : %s.", command)
+							reasonCode = "tool_unavailable"
+						} else {
+							applicability = "platform_unavailable"
+							reasonCode = "platform_unavailable"
+							reason = fmt.Sprintf("Outil non disponible sur cette plateforme : %s.", command)
+						}
+					}
+
 					controlID := fmt.Sprintf("%s/%s/%s/%s", tech.Technology, capability.Name, command, root)
 					if controlIDs[controlID] {
 						return nil, nil, fmt.Errorf("identifiant de controle duplique: %s", controlID)
@@ -402,6 +484,8 @@ func BuildCompliancePlan(
 			}
 		}
 	}
+
+	controls = collapseRepoWideTools(controls)
 
 	if len(controls) > maxControls {
 		return nil, nil, fmt.Errorf("limite du plan depassee: %d controles maximum", maxControls)
@@ -811,6 +895,133 @@ func ValidateStepGuardrails(p *Pipeline, step *PipelineStep, ctx GuardrailContex
 	}
 
 	return nil
+}
+
+func collapseRepoWideTools(controls []*PlannedControl) []*PlannedControl {
+	kept := make([]*PlannedControl, 0, len(controls))
+	index := make(map[string]int)
+	for _, ctrl := range controls {
+		command := "none"
+		if ctrl.Tool != nil && ctrl.Tool.Command != "" {
+			command = ctrl.Tool.Command
+		}
+		if !repoWideCommand(command) {
+			kept = append(kept, ctrl)
+			continue
+		}
+		key := ctrl.Technology + "\x00" + ctrl.Capability + "\x00" + command
+		if pos, ok := index[key]; ok {
+			current := kept[pos]
+			if preferRoot(ctrl.Root, current.Root) {
+				ctrl.Files = unionStrings(ctrl.Files, current.Files)
+				kept[pos] = ctrl
+			} else {
+				current.Files = unionStrings(current.Files, ctrl.Files)
+			}
+			continue
+		}
+		index[key] = len(kept)
+		kept = append(kept, ctrl)
+	}
+	for i := range kept {
+		kept[i].ExecutionOrder = i + 1
+	}
+	return kept
+}
+
+func listed(values []string, want string) bool {
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), want) {
+			return true
+		}
+	}
+	return false
+}
+
+func nodeToolBin(repo, command string) string {
+	if local := repositoryNodeBin(repo, command); local != "" {
+		return local
+	}
+	return managedNodeBin(command)
+}
+
+func repositoryNodeBin(repo, command string) string {
+	return nodeExecutable(filepath.Join(repo, "node_modules", ".bin"), command)
+}
+
+func managedNodeBin(command string) string {
+	root := os.Getenv("COMPLIANCE_NODE_TOOLS")
+	if root == "" {
+		root = filepath.Join(osutil.DefaultToolCacheDir(), "node")
+	}
+	return nodeExecutable(filepath.Join(root, "node_modules", ".bin"), command)
+}
+
+func nodeExecutable(binDir, command string) string {
+	for _, name := range []string{command, command + ".cmd", command + ".exe", command + ".ps1"} {
+		candidate := filepath.Join(binDir, name)
+		info, err := os.Stat(candidate)
+		if err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func eslintConfigured(repo string) bool {
+	names := []string{
+		"eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", "eslint.config.ts",
+		".eslintrc", ".eslintrc.js", ".eslintrc.cjs", ".eslintrc.yaml", ".eslintrc.yml", ".eslintrc.json",
+	}
+	for _, name := range names {
+		info, err := os.Stat(filepath.Join(repo, name))
+		if err == nil && !info.IsDir() {
+			return true
+		}
+	}
+	body, err := os.ReadFile(filepath.Join(repo, "package.json"))
+	if err != nil {
+		return false
+	}
+	var pkg map[string]interface{}
+	if json.Unmarshal(body, &pkg) != nil {
+		return false
+	}
+	_, ok := pkg["eslintConfig"]
+	return ok
+}
+
+func repoWideCommand(command string) bool {
+	switch command {
+	case "", "none", "eslint", "tsc", "gitleaks":
+		return true
+	default:
+		return false
+	}
+}
+
+func preferRoot(candidate, current string) bool {
+	if candidate == "." && current != "." {
+		return true
+	}
+	if current == "." {
+		return false
+	}
+	return len(candidate) < len(current)
+}
+
+func unionStrings(left, right []string) []string {
+	seen := make(map[string]bool, len(left)+len(right))
+	out := make([]string, 0, len(left)+len(right))
+	for _, value := range append(append([]string{}, left...), right...) {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func platformSupported(support []string, platformID string) bool {

@@ -1,4 +1,4 @@
-# Compliance Platform
+# ICP - IaC Compliance Platform
 
 ## Vue d'ensemble
 
@@ -10,33 +10,58 @@ Le moteur d'exécution autonome écrit en Go (`core/`) et son démon local HTTP/
 
 ## Fonctionnalités Clés & Capacités
 
-- **Moteur Go autonome multi-OS (v2.0.0)** : Discovery, Capability Matrix, Tool Resolver, Compliance Engine, Reporting canonique et serveur local (démon HTTP/SSE).
+- **Moteur Go local** : Discovery, Capability Matrix, Tool Resolver, Compliance Engine, rapport canonique et démon HTTP/SSE. Le binaire est cross-compilé pour six cibles. **Seul Windows x64 est qualifié** sur cette machine ; Linux et macOS sont expérimentaux (binaires présents, selftest physique non fait).
 - **Extension VS Code intégrée** : Interface TreeView locale connectée au démon local via HTTP et streaming d'événements temps réel (SSE), avec lecteur de rapports interactif natif et visualisations de findings.
 - **Sécurité et confinement stricts** : Démon éphémère ou persistant sur `127.0.0.1:0`, jeton Bearer 256 bits généré localement, validation stricte des en-têtes `Host` et `Origin`, approbation explicite des dossiers cibles (*workspace approval*), confinement des processus enfants (Job Objects sous Windows, process groups POSIX sous Linux/macOS) et annulation immédiate sans processus orphelin.
-- **Résolution d'outils découplée** : Binaires locaux (`.tools/bin/`), Python autonome (`.tools/python/`), cache `~/.compliance/tools/bin/<plateforme>/`, préfixes macOS (Homebrew, `~/.local/bin`, pyenv) puis PATH. Un VS Code lancé depuis le Dock trouve les outils Homebrew sans hériter de `~/.zshrc`.
+- **Résolution d'outils découplée** : Binaires locaux (`.tools/bin/`), Python autonome (`.tools/python/`), cache `~/.compliance/tools/venv` puis `~/.compliance/tools/bin/<plateforme>/`, préfixes macOS (Homebrew, `~/.local/bin`, pyenv) puis PATH. Sur Windows, un script `.cmd` du venv (par exemple `checkov.cmd`) est lancé avec le `python.exe` voisin. Un VS Code lancé depuis le Dock trouve les outils Homebrew sans hériter de `~/.zshrc`.
 - **Autonomie hors dépôt** : Le catalogue et les schémas sont embarqués dans le binaire (`//go:embed`) et dans le VSIX. `compliance selftest` fonctionne sans clone Git.
 - **Validation autonome intégrée (`compliance selftest`)** : Suite d'auto-test en 20 étapes vérifiant le cycle de vie du démon, la sécurité, l'exécution et l'annulation sur port éphémère.
-- **Catalogue de 28 contrôles standardisés** couvrant les écosystèmes majeurs du développement et des infrastructures cloud modernes.
+- **Catalogue** : le tableau ci-dessous est la liste exécutable. Un test échoue s'il diverge de `.config/control-catalog.json`.
 
 ---
 
 ## Technologies et Contrôles Couverts
 
-La plateforme détecte automatiquement les technologies suivantes et planifie les contrôles adaptés selon la disponibilité locale des outils :
+ESLint et `tsc` viennent du `node_modules` de la cible, ou de `~/.compliance/tools/node` après `compliance runtime node`. Sans configuration ESLint, le contrôle n'est pas marqué réussi. Les outils de répertoire (Terraform, etc.) restent un contrôle par racine. Le rapport regroupe ces racines sous une carte par outil. Chaque racine se déroule vers les fichiers touchés, puis vers la ligne, la règle et le message. Checkov, TFLint, ShellCheck, Trivy et `terraform fmt` alimentent ces listes. Une technologie déjà exécutée sur une racine n'apparaît pas dans les contrôles non applicables. Markdown utilise `rumdl check`. Sans configuration Markdown du dépôt, la règle de longueur de ligne MD013 est désactivée. `pytest` qui ne collecte aucun test (code 5) n'est pas un échec. Gitleaks ignore les dossiers d'artefacts et les binaires. `testdata`, `fixtures` et `__snapshots__` ne sont ni des racines ni des anomalies.
 
-| Écosystème | Technologies & Preuves | Capacités & Outils Associés |
-| :--- | :--- | :--- |
-| **Python** | `requirements.txt`, `pyproject.toml`, `setup.py`, `Pipfile` | Formatage et lint (`ruff`), lint (`pylint`), tests (`pytest`), sécurité AST (`bandit`), audit des dépendances (`pip-audit`) |
-| **Conteneurs** | `Dockerfile`, `Containerfile` | Lint Dockerfile (`hadolint`), scan de vulnérabilités (`trivy`) |
-| **Kubernetes** | Manifestes YAML Kubernetes | Sécurité et politique (`checkov`), scan (`trivy`) |
-| **Ansible** | `playbook.yml`, `roles/`, `ansible.cfg` | Lint (`ansible-lint`), YAML (`yamllint`) |
-| **Terraform & OpenTofu** | `*.tf`, `*.tofu` | Formatage (`terraform fmt`, `tofu fmt`), lint (`tflint`), sécurité (`checkov`) |
-| **Terragrunt** | `terragrunt.hcl` | Formatage HCL (`terragrunt hcl fmt`) |
-| **Helm** | `Chart.yaml`, `values.yaml` | Sécurité et politique (`checkov`), scan (`trivy`) |
-| **Shell** | Scripts `.sh` | Analyse statique (`shellcheck`) |
-| **Documentation** | Fichiers Markdown `.md` | Lint (`markdownlint`, via la commande `pre-commit`) |
-| **PowerShell** | Scripts `.ps1`, `.psm1`, `.psd1` | Analyse statique (`PSScriptAnalyzer`, exécuté par `pwsh` ou Windows PowerShell) |
-| **JavaScript & TypeScript** | `.js`, `.jsx`, `.ts`, `.tsx` | Technologie détectée ; aucun outil de lint n'est configuré dans le catalogue |
+Les outils du manifeste peuvent être téléchargés en HTTPS après accord (version, source, dossier utilisateur). Une signature ou une somme SHA-256 différente ne bloque pas l'installation. Ce n'est pas le cas à l'installation du VSIX. Voir `docs/outils.md`.
+
+Les sessions conservées vont de 1 à 1000 (`compliance.maxSessions`, défaut 5). Extension installée : `~/.compliance/sessions/runs` (`%USERPROFILE%` sous Windows, `$HOME` ailleurs). Développement depuis le dépôt : `<dépôt>/.tools/state/runs`. `COMPLIANCE_SESSIONS_DIR` remplace ce chemin. Le démon utilise `~/.compliance` ou `COMPLIANCE_STATE_DIR`.
+
+<!-- catalog-controls:start -->
+| Identifiant | Technologie | Outil |
+| --- | --- | --- |
+| terraform.format.terraform | terraform | terraform |
+| terraform.lint.tflint | terraform | tflint |
+| terraform.security.checkov | terraform | checkov |
+| opentofu.format.tofu | opentofu | tofu |
+| opentofu.lint.tflint | opentofu | tflint |
+| opentofu.security.checkov | opentofu | checkov |
+| terragrunt.format.terragrunt | terragrunt | terragrunt |
+| ansible.lint.ansible-lint | ansible | ansible-lint |
+| ansible.lint.yamllint | ansible | yamllint |
+| python.format.ruff | python | ruff |
+| python.lint.ruff | python | ruff |
+| python.lint.pylint | python | pylint |
+| python.test.pytest | python | pytest |
+| python.security.bandit | python | bandit |
+| python.dependencies.pip-audit | python | pip-audit |
+| powershell.lint.psscriptanalyzer | powershell | Invoke-ScriptAnalyzer |
+| docker.lint.hadolint | docker | hadolint |
+| docker.security.trivy | docker | trivy |
+| kubernetes.security.checkov | kubernetes | checkov |
+| kubernetes.security.trivy | kubernetes | trivy |
+| kubernetes.policy.checkov | kubernetes | checkov |
+| helm.security.checkov | helm | checkov |
+| helm.security.trivy | helm | trivy |
+| helm.policy.checkov | helm | checkov |
+| shell.lint.shellcheck | shell | shellcheck |
+| javascript.lint.eslint | javascript | eslint |
+| javascript.security.gitleaks | javascript | gitleaks |
+| typescript.lint.eslint | typescript | eslint |
+| typescript.check.tsc | typescript | tsc |
+| markdown.lint.rumdl | markdown | rumdl |
+<!-- catalog-controls:end -->
 
 ---
 
@@ -44,7 +69,7 @@ La plateforme détecte automatiquement les technologies suivantes et planifie le
 
 Le dépôt est organisé de manière modulaire, sans dette technique ni scripts obsolètes :
 
-```
+```text
 Compliance_Platform/
 ├── core/                               # Moteur d'audit autonome en Go
 │   ├── cmd/
@@ -67,17 +92,18 @@ Compliance_Platform/
 │   │   ├── model.ts                    # Modèles d'état et normalisation multi-OS
 │   │   └── reportPanel.ts              # Panneau Webview interactif de visualisation
 │   ├── package_vsix.py                 # Packaging OPC universel et cross-compilation
-│   ├── package.json                    # Manifeste d'extension VS Code (v2.0.0)
+│   ├── package.json                    # Manifeste d'extension VS Code (v2.0.13)
 │   └── tsconfig.json
 ├── .config/                            # Contrats de configuration partagés
-│   ├── control-catalog.json            # Spécification canonique des 28 contrôles
+│   ├── control-catalog.json            # Catalogue des contrôles (voir le tableau ci-dessus)
 │   ├── platform-support.json           # Matrice d'éligibilité et statuts multi-OS
-│   └── runtime-manifest.json           # Manifeste signé des binaires d'outils
+│   └── runtime-manifest.json           # Manifeste des binaires d'outils (signature facultative)
 ├── docs/                               # Documentation technique exhaustive
-│   ├── utilisation.md                  # Guide d'audit pas à pas (CLI et VS Code)
-│   ├── architecture-current.md         # Architecture actuelle, flux SSE et sécurité
-│   ├── daemon-api.md                   # Contrat d'API REST et streaming SSE du démon
-│   └── maintenance.md                  # Maintenance, packaging VSIX et hors-ligne
+│   ├── extension.md                    # Page Marketplace, copiée dans le VSIX
+│   ├── architecture.md                 # Architecture, flux et sécurité
+│   ├── outils.md                       # Catalogue, manifeste et réglages
+│   ├── developpement.md                # Tests, packaging, signature
+│   └── CHANGELOG.md                    # Historique publié avec l'extension
 ├── .gitignore                          # Règles d'exclusion Git (0 binaire versionné)
 ├── go.work                             # Espace de travail Go multi-modules
 └── README.md                           # Documentation de référence du projet
@@ -103,15 +129,18 @@ flowchart TD
 ```
 
 ### 1. Gestion de la Casse et Normalisation Multi-OS
+
 - Les comparaisons de chemins (`server.go` et `model.ts`) sont insensibles à la casse sur **Windows** et **macOS** (`runtime.GOOS == "windows" || runtime.GOOS == "darwin"`), et strictement sensibles sur **Linux**.
 - `osutil.CanonicalPath` résout les liens symboliques, y compris le plus long ancêtre existant. Sur macOS, `/var` et `/tmp` sont donc ramenés à `/private/var` et `/private/tmp` avant l'approbation d'un workspace.
 - Tous les chemins sont normalisés via `filepath.ToSlash` pour garantir l'uniformité des contrats JSON et des identifiants de contrôles.
 
 ### 2. Routage HTTP/SSE Résilient (RFC 3986)
+
 - L'endpoint `GET /api/v1/runs/{id}/logs/{control_id...}` gère nativement les identifiants hiérarchiques avec slashs (ex. `python/linting/ruff/.`).
 - Gestion résiliente de la troncature des dot-segments par les proxys HTTP clients : si le segment final `/.` est normalisé en routeur, le moteur résout automatiquement la variante exacte enregistrée dans la session.
 
 ### 3. Packaging VSIX Universel à la Volée
+
 - Le script `package_vsix.py` (intégré à `npm run package`) synchronise `.config/` vers l'embed Go, cross-compile les binaires natifs pour 6 architectures, pose le mode Unix `0755` sur les binaires POSIX du VSIX, et embarque `extension/.config/` :
   - `windows-x64` (`compliance-windows-amd64.exe`)
   - `windows-arm64` (`compliance-windows-arm64.exe`)
@@ -154,7 +183,8 @@ compliance run -repo "/chemin/du/projet" -report reports/audit.json
 
 ### 4. Audit dans VS Code
 
-L'extension locale s'installe via le package VSIX autonome multi-OS (`vscode-extension/dist/compliance-local-pipelines-2.0.0.vsix`) :
+L'extension locale s'installe via le VSIX (`vscode-extension/dist/compliance-local-pipelines-2.0.13.vsix`). Seul Windows x64 est qualifié :
+
 - Sélection de la cible d'audit (Target externe).
 - Préparation et inspection du plan ordonnancé.
 - Demande explicite des permissions (réseau, exécution de code).
@@ -178,8 +208,7 @@ L'extension locale s'installe via le package VSIX autonome multi-OS (`vscode-ext
 
 ## Documentation Technique
 
-- [Tutoriel d'utilisation](docs/utilisation.md) : Auditer un projet externe via l'extension ou la CLI.
-- [Architecture et contrats techniques](docs/architecture-current.md) : Description du moteur autonome, du résolveur et du modèle de sécurité.
-- [Spécification de l'API Démon](docs/daemon-api.md) : Endpoints HTTP, format des requêtes, authentification et flux SSE.
-- [Maintenance et packaging](docs/maintenance.md) : Packaging VSIX, gestion des outils et fonctionnement hors-ligne.
-- [Extension VS Code](vscode-extension/README.md) : Guide spécifique de l'extension et de son intégration.
+- [Extension (page Marketplace)](docs/extension.md)
+- [Architecture](docs/architecture.md)
+- [Outils, catalogue et réglages](docs/outils.md)
+- [Développement et release](docs/developpement.md)

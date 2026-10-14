@@ -3,7 +3,7 @@ import * as fsSync from 'node:fs';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { execFileSync, spawn, ChildProcess } from 'node:child_process';
+import { execFile, execFileSync, spawn, ChildProcess } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
     containsPath,
@@ -15,6 +15,11 @@ import {
     Reason,
     VisualStatus
 } from './model';
+import { daemonBinaryDirectory, isOurDaemonImage } from './daemonLifecycle.js';
+import { groupUnavailableLines } from './reportLayout';
+import { engineVersionMismatch, expectedEngineVersion } from './engineVersion.js';
+
+export { engineVersionMismatch, expectedEngineVersion, setExpectedEngineVersion } from './engineVersion.js';
 
 export interface DaemonState {
     pid: number;
@@ -115,21 +120,22 @@ export class DaemonClient {
 
             const health = await this.getHealth();
             if (health && health.status === 'ok') {
-                return health;
+                if (!engineVersionMismatch(health.version, expectedEngineVersion())) {
+                    return health;
+                }
+                await this.shutdown();
             }
         } catch {
             // Daemon not running or invalid state file
         }
 
-        const complianceBin = await this.findComplianceBinary(platformRoot);
-        if (!complianceBin) {
-            throw new Error('Binaire "compliance" introuvable. Exécuter la compilation Go dans core/.');
-        }
+        const staged = await this.stagedRuntime(platformRoot);
 
-        const args = ['daemon', '-state-dir', this.stateDir!, '-platform-root', platformRoot];
+        const args = ['daemon', '-state-dir', this.stateDir!, '-platform-root', staged.platformRoot];
         let spawnError: Error | undefined;
         let earlyExit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
-        this.daemonProcess = spawn(complianceBin, args, {
+        this.daemonProcess = spawn(staged.binary, args, {
+            cwd: staged.cwd,
             detached: true,
             windowsHide: true,
             stdio: 'ignore'
@@ -153,6 +159,9 @@ export class DaemonClient {
 
                 const health = await this.getHealth();
                 if (health && health.status === 'ok') {
+                    if (engineVersionMismatch(health.version, expectedEngineVersion())) {
+                        throw new Error(`Démon ${health.version} encore actif ; version attendue ${expectedEngineVersion()}.`);
+                    }
                     return health;
                 }
             } catch {
@@ -199,6 +208,69 @@ export class DaemonClient {
         return null;
     }
 
+    private async stagedRuntime(platformRoot: string): Promise<{ binary: string; platformRoot: string; cwd: string }> {
+        const sourceBin = await this.findComplianceBinary(platformRoot);
+        if (!sourceBin) { throw new Error('Binaire "compliance" introuvable. Exécuter la compilation Go dans core/.'); }
+        return stageDaemonRuntime(sourceBin, platformRoot);
+    }
+
+    public async purgeSessions(platformRoot: string, root: string, keep: number, protect: string[], reserve = 0): Promise<string[]> {
+        const staged = await this.stagedRuntime(platformRoot);
+        const bounded = Math.min(1000, Math.max(1, keep || 5));
+        const args = ['sessions', 'purge', '-root', root, '-keep', String(bounded), '-reserve', String(reserve)];
+        for (const name of protect) { if (name) { args.push('-protect', name); } }
+        const output = await new Promise<string>((resolve, reject) => {
+            execFile(staged.binary, args, { cwd: staged.cwd, windowsHide: true }, (error, stdout, stderr) => {
+                if (error) { reject(new Error(String(stderr || error.message))); return; }
+                resolve(String(stdout));
+            });
+        });
+        return output.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    }
+
+    public async installNodeToolchain(platformRoot: string): Promise<void> {
+        const staged = await this.stagedRuntime(platformRoot);
+        await new Promise<void>((resolve, reject) => {
+            const child = spawn(staged.binary, ['runtime', 'node'], { cwd: staged.cwd, windowsHide: true });
+            let stderr = '';
+            child.stderr?.on('data', chunk => { stderr += String(chunk); });
+            child.on('error', reject);
+            child.on('close', code => {
+                if (code === 0) { resolve(); }
+                else { reject(new Error(stderr.trim() || `runtime node a quitté avec le code ${code}`)); }
+            });
+        });
+    }
+
+    public async syncTools(platformRoot: string, tools: string[]): Promise<void> {
+        const staged = await this.stagedRuntime(platformRoot);
+        const manifest = path.join(staged.platformRoot, '.config', 'runtime-manifest.json');
+        const signature = path.join(staged.platformRoot, '.config', 'runtime-manifest.json.sig');
+        const installed: string[] = [];
+        const failed: string[] = [];
+        for (const tool of tools) {
+            try {
+                await new Promise<void>((resolve, reject) => {
+                    const child = spawn(staged.binary, ['runtime', 'sync', '-manifest', manifest, '-sig', signature, '-tool', tool], { cwd: staged.cwd, windowsHide: true });
+                    let stderr = '';
+                    child.stderr?.on('data', chunk => { stderr += String(chunk); });
+                    child.on('error', reject);
+                    child.on('close', code => {
+                        if (code === 0) { resolve(); }
+                        else { reject(new Error(stderr.trim() || `runtime sync a quitté avec le code ${code}`)); }
+                    });
+                });
+                installed.push(tool);
+            } catch (error) {
+                const detail = error instanceof Error ? error.message : String(error);
+                failed.push(`${tool} (${detail})`);
+            }
+        }
+        if (failed.length) {
+            throw new Error(`${installed.length} outil(s) installé(s), ${failed.length} échec : ${failed.join(' ; ')}`);
+        }
+    }
+
     public async getHealth(): Promise<DaemonHealth> {
         return this.request<DaemonHealth>('GET', '/api/v1/health');
     }
@@ -226,7 +298,9 @@ export class DaemonClient {
             allow_network: !!options.allowNetwork,
             allow_code_execution: !!options.allowCodeExecution,
             confirm_apply_destroy: !!options.confirmApplyDestroy,
-            redaction_patterns: options.redactionPatterns || []
+            redaction_patterns: options.redactionPatterns || [],
+            disabled_technologies: auditFilters.technologies,
+            disabled_controls: auditFilters.controls
         });
     }
 
@@ -355,11 +429,12 @@ export class DaemonClient {
     }
 
     public async shutdown(): Promise<void> {
+        await postShutdown(this.port, this.token);
         try {
-            await this.request('POST', '/api/v1/shutdown');
-        } catch {
-            // Démon déjà arrêté
-        }
+            const state = JSON.parse(await fs.readFile(path.join(this.stateDir!, 'daemon.json'), 'utf8')) as DaemonState;
+            await killDaemonPid(state.pid, true);
+        } catch { /* état déjà retiré */ }
+        await killStagedDaemons();
     }
 
     private request<T>(method: string, path: string, body?: any): Promise<T> {
@@ -407,6 +482,128 @@ export class DaemonClient {
             req.end();
         });
     }
+}
+
+const auditFilters = { technologies: [] as string[], controls: [] as string[] };
+export function setAuditFilters(technologies: string[], controls: string[]): void {
+    auditFilters.technologies = technologies;
+    auditFilters.controls = controls;
+}
+
+export async function shutdownComplianceDaemon(stateDir?: string): Promise<void> {
+    const dir = stateDir || process.env.COMPLIANCE_STATE_DIR || path.join(os.homedir(), '.compliance');
+    const client = new DaemonClient(dir);
+    let state: DaemonState | undefined;
+    let token = '';
+    try {
+        state = JSON.parse(await fs.readFile(path.join(dir, 'daemon.json'), 'utf8')) as DaemonState;
+        token = (await fs.readFile(state.token_path, 'utf8')).trim();
+        client.setConnection(state.port, token);
+    } catch { /* pas de démon enregistré */ }
+    if (state) { await postShutdown(state.port, token); }
+    if (state?.pid) { await killDaemonPid(state.pid, true); }
+    await killStagedDaemons();
+}
+
+function postShutdown(port: number, token: string): Promise<void> {
+    return new Promise(resolve => {
+        if (!port || !token) { resolve(); return; }
+        const req = http.request({
+            hostname: '127.0.0.1', port, path: '/api/v1/shutdown', method: 'POST', timeout: 500,
+            headers: { Host: `127.0.0.1:${port}`, Authorization: `Bearer ${token}` },
+            agent: false
+        }, response => { response.resume(); resolve(); });
+        req.on('timeout', () => { req.destroy(); resolve(); });
+        req.on('error', () => resolve());
+        req.end();
+    });
+}
+
+async function stageDaemonRuntime(source: string, platformRoot: string): Promise<{ binary: string; platformRoot: string; cwd: string }> {
+    const cwd = process.env.COMPLIANCE_STATE_DIR || path.join(os.homedir(), '.compliance');
+    const dir = daemonBinaryDirectory(os.homedir(), expectedEngineVersion() || 'dev');
+    await fs.mkdir(cwd, { recursive: true });
+    await fs.mkdir(dir, { recursive: true });
+    const dest = path.join(dir, path.basename(source));
+    let current = false;
+    try {
+        const [from, to] = await Promise.all([fs.stat(source), fs.stat(dest)]);
+        current = from.size === to.size && from.mtimeMs <= to.mtimeMs;
+    } catch { current = false; }
+    if (!current) { await fs.copyFile(source, dest); }
+    prepareComplianceBinary(dest);
+    await copyConfig(configDirectory(platformRoot), path.join(dir, '.config'));
+    return { binary: dest, platformRoot: dir, cwd };
+}
+
+function configDirectory(platformRoot: string): string | undefined {
+    const candidates = [path.join(platformRoot, '.config'), path.join(__dirname, '..', '..', '.config'), path.join(__dirname, '..', '.config')];
+    return candidates.find(candidate => fsSync.existsSync(path.join(candidate, 'control-catalog.json')));
+}
+
+async function copyConfig(source: string | undefined, destination: string): Promise<void> {
+    if (!source) { return; }
+    await fs.mkdir(destination, { recursive: true });
+    for (const name of await fs.readdir(source)) {
+        const from = path.join(source, name);
+        const info = await fs.stat(from);
+        if (!info.isFile()) { continue; }
+        const to = path.join(destination, name);
+        let same = false;
+        try {
+            const existing = await fs.stat(to);
+            same = existing.size === info.size && existing.mtimeMs >= info.mtimeMs;
+        } catch { same = false; }
+        if (!same) { await fs.copyFile(from, to); }
+    }
+}
+
+async function killDaemonPid(pid: number, force = false): Promise<void> {
+    const image = await daemonImage(pid);
+    if (image && !isOurDaemonImage(path.basename(image))) { return; }
+    if (!image && !force) { return; }
+    try { process.kill(pid); } catch { /* déjà arrêté */ }
+}
+
+async function killStagedDaemons(): Promise<void> {
+    const home = (process.env.COMPLIANCE_STATE_DIR || path.join(os.homedir(), '.compliance')).toLowerCase();
+    for (const row of await listedComplianceProcesses()) {
+        const image = row.image.toLowerCase();
+        const ours = isOurDaemonImage(path.basename(row.image));
+        const staged = image.includes(home) || (image.includes('.vscode') && image.includes('compliance-platform'));
+        if (ours && staged) {
+            try { process.kill(row.pid); } catch { /* déjà arrêté */ }
+        }
+    }
+}
+
+async function listedComplianceProcesses(): Promise<Array<{ pid: number; image: string }>> {
+    if (process.platform !== 'win32') { return []; }
+    const text = await execText('powershell.exe', ['-NoProfile', '-Command', "Get-CimInstance Win32_Process | Where-Object { $_.Name -like 'compliance*.exe' } | ForEach-Object { $_.ProcessId.ToString() + '|' + $_.ExecutablePath }"]);
+    return text.split(/\r?\n/).map(line => {
+        const [pid, image] = line.split('|');
+        return { pid: Number(pid), image: (image || '').trim() };
+    }).filter(row => Number.isInteger(row.pid) && row.pid > 0 && row.image);
+}
+
+export async function daemonImage(pid: number): Promise<string> {
+    if (process.platform === 'linux') {
+        return fs.readlink(`/proc/${pid}/exe`).catch(() => '');
+    }
+    if (process.platform === 'darwin') {
+        return execText('ps', ['-p', String(pid), '-o', 'comm=']);
+    }
+    return execText('powershell.exe', ['-NoProfile', '-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${Number(pid)}").ExecutablePath`]).then(text => text.trim());
+}
+
+function execText(command: string, args: string[]): Promise<string> {
+    return new Promise(resolve => {
+        const child = spawn(command, args, { windowsHide: true });
+        let out = '';
+        child.stdout?.on('data', chunk => { out += String(chunk); });
+        child.on('error', () => resolve(''));
+        child.on('close', () => resolve(out));
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -488,8 +685,11 @@ export class AuditState {
                 this.status = 'Error'; this.reason = reason(data.reason) ? data.reason : { code: 'preparation_error', message: 'Session backend en erreur.' }; this.terminal = true; break;
             case 'session_completed':
                 if (!this.snapshot || !this.reportPath || [...this.controls.values()].some(control => control.duration_ms === undefined)) { throw new Error('Session terminee sans resultats complets.'); }
-                this.status = data.verdict === 'FAIL' ? 'Failed' : record(data.coverage) && data.coverage.complete === true ? 'Succeeded' : 'Warning';
-                if (this.status === 'Warning') { this.reason = { code: 'coverage_incomplete', message: 'Audit termine avec couverture partielle.' }; }
+                this.status = data.verdict === 'FAIL' ? 'Failed' : data.verdict === 'PASS' && record(data.coverage) && data.coverage.complete === true ? 'Succeeded' : 'Warning';
+                if (this.status === 'Warning') {
+                    const reasons = Array.isArray(data.verdict_reasons) ? data.verdict_reasons.filter((item: unknown) => typeof item === 'string') : [];
+                    this.reason = { code: data.verdict == null ? 'not_evaluated' : 'coverage_incomplete', message: String(reasons[0] || (data.verdict == null ? 'Non évalué : couverture nulle, aucun contrôle exécuté.' : 'Audit terminé avec une couverture partielle.')) };
+                }
                 this.terminal = true; break;
             default: this.reason = { code: 'unknown_event', message: `Evenement non reconnu : ${event.type}` }; break;
         }
@@ -505,7 +705,9 @@ export class AuditState {
         if (!record(value) || value.schema_version !== 1 || !record(value.metadata) || value.metadata.run_id !== this.runId ||
             !isSameDirectory(String(value.repository), this.target) || !Array.isArray(value.execution_results) || !record(value.coverage) || !record(value.summary) ||
             !Array.isArray(value.findings) || !Array.isArray(value.diagnostics) || !Array.isArray(value.limitations) ||
-            !['completed', 'blocked', 'error'].includes(String(value.execution_status)) || !['PASS', 'FAIL'].includes(String(value.verdict))) { throw new Error('Rapport final invalide ou d une autre session.'); }
+            !['completed', 'blocked', 'error'].includes(String(value.execution_status)) || !['PASS', 'FAIL', null].includes(value.verdict as string | null)) { throw new Error('Rapport final invalide ou d une autre session.'); }
+        const summary = value.summary as { success?: number; fail?: number; error?: number };
+        if (value.verdict === 'PASS' && (summary.success || 0) + (summary.fail || 0) + (summary.error || 0) === 0) { throw new Error('PASS sans contrôle exécuté.'); }
         const ids = new Set<string>();
         for (const result of value.execution_results) {
             if (!record(result) || typeof result.control_id !== 'string' || ids.has(result.control_id) ||
@@ -567,6 +769,7 @@ export function isInstalledExtensionSource(source: string): boolean {
 }
 
 export function runsDirectory(source: string): string {
+    if (process.env.COMPLIANCE_SESSIONS_DIR) { return process.env.COMPLIANCE_SESSIONS_DIR; }
     if (isInstalledExtensionSource(source)) {
         return path.join(os.homedir(), '.compliance', 'sessions', 'runs');
     }
@@ -631,7 +834,7 @@ export async function validateTarget(source: string, target: string): Promise<st
     return canonicalTarget;
 }
 
-export async function prepare(source: string, target: string, client?: DaemonClient, _signal?: AbortSignal, sessionDirectory?: string): Promise<Preparation> {
+export async function prepare(source: string, target: string, client?: DaemonClient, _signal?: AbortSignal, sessionDirectory?: string, log?: (line: string) => void): Promise<Preparation> {
     const canonicalSource = await fs.realpath(source);
     const canonicalTarget = await validateTarget(canonicalSource, target);
     const id = randomUUID();
@@ -644,10 +847,17 @@ export async function prepare(source: string, target: string, client?: DaemonCli
 
     const daemon = client || new DaemonClient();
     try {
+        const daemonStarted = Date.now();
         await daemon.ensureDaemon(canonicalSource);
+        log?.(`demon : ${Date.now() - daemonStarted} ms`);
         await daemon.approveWorkspace(canonicalTarget);
+        const planStarted = Date.now();
         const plan = await daemon.getPlan(canonicalTarget);
-        await fs.writeFile(reportPath, JSON.stringify(plan, null, 2), 'utf8');
+        const body = JSON.stringify(plan);
+        log?.(`plan recu : ${Date.now() - planStarted} ms, ${Buffer.byteLength(body)} octets`);
+        const writeStarted = Date.now();
+        await fs.writeFile(reportPath, body, 'utf8');
+        log?.(`ecriture plan.json : ${Date.now() - writeStarted} ms`);
         return { report: plan, directory, target: canonicalTarget };
     } catch (daemonErr) {
         const message = daemonErr instanceof Error ? daemonErr.message : String(daemonErr);
@@ -683,6 +893,15 @@ async function atomicJson(file: string, value: unknown): Promise<void> {
     await fs.rename(temporary, file);
 }
 
+function sessionHeadline(state: AuditState, cancelled: boolean): string {
+    if (cancelled) { return 'annulée'; }
+    if (state.status === 'Failed') { return 'terminée — Échec'; }
+    if (state.status === 'Succeeded') { return 'terminée — Réussi'; }
+    if (state.reason?.code === 'not_evaluated') { return `terminée — Non évalué${state.reason.message ? ` — ${state.reason.message}` : ''}`; }
+    if (state.status === 'Warning') { return `terminée — Partiel${state.reason?.message ? ` — ${state.reason.message}` : ''}`; }
+    return `terminée — ${state.status}`;
+}
+
 async function stream(
     source: string,
     target: string,
@@ -693,7 +912,8 @@ async function stream(
     redaction: string | undefined,
     changed: () => void,
     signal: AbortSignal,
-    daemon: DaemonClient
+    daemon: DaemonClient,
+    log?: (line: string) => void
 ): Promise<void> {
     await daemon.ensureDaemon(source);
     await daemon.approveWorkspace(target);
@@ -714,9 +934,36 @@ async function stream(
     signal.addEventListener('abort', cancelHandler, { once: true });
 
     try {
+        const executed: string[] = [];
+        const absent: string[] = [];
+        const unavailable: string[] = [];
         await daemon.streamEvents(run.run_id, (ev) => {
             try {
                 state.receive(ev);
+                if (log && ev && typeof ev === 'object') {
+                    const event = ev as { type?: string; control_id?: string; data?: Record<string, unknown> | null };
+                    const data = event.data || {};
+                    const result = data.result as { status?: string } | undefined;
+                    const reason = data.reason as { code?: string; message?: string } | undefined;
+                    if (event.type === 'control_started') {
+                        log(`exécuté en cours : ${event.control_id ?? ''}`);
+                    } else if (event.type === 'control_completed') {
+                        const code = reason?.code || '';
+                        const id = event.control_id ?? '';
+                        const technology = id.split('/')[0] || '';
+                        if (result?.status === 'success' || result?.status === 'fail' || result?.status === 'error') { executed.push(technology); }
+                        if (result?.status === 'success') { log(`exécuté OK : ${id}`); }
+                        else if (result?.status === 'fail') { log(`exécuté KO : ${id}`); }
+                        else if (result?.status === 'error') { log(`erreur : ${id} — ${reason?.message || ''}`); }
+                        else if (code === 'technology_absent') { absent.push(technology); }
+                        else { unavailable.push(`${id} — ${reason?.message || 'indisponible'}`); }
+                    } else if (event.type === 'session_completed' || event.type === 'session_cancelled') {
+                        const technologies = technologiesAbsentFromRun(executed, absent);
+                        if (technologies.length) { log(`ignorés (technologie absente) : ${technologies.join(', ')}`); }
+                        for (const line of groupUnavailableLines(unavailable)) { log(`indisponible : ${line}`); }
+                        log(`session ${sessionHeadline(state, event.type === 'session_cancelled')}`);
+                    }
+                }
                 changed();
             } catch {
                 // Ignorer les erreurs d'événement hors séquence en transit
@@ -744,7 +991,8 @@ export async function audit(
     changed: () => void,
     signal: AbortSignal,
     redaction?: string,
-    client?: DaemonClient
+    client?: DaemonClient,
+    log?: (line: string) => void
 ): Promise<string> {
     const daemon = client || new DaemonClient();
     const target = await validateTarget(source, state.target);
@@ -768,7 +1016,7 @@ export async function audit(
     const heartbeat = setInterval(() => { void fs.writeFile(path.join(directory, 'heartbeat'), '', 'utf8').catch(() => undefined); }, 1000);
     try {
         await validateSource(source, daemon);
-        const fresh = await prepare(source, target, daemon, signal, directory);
+        const fresh = await prepare(source, target, daemon, signal, directory, log);
         if (!fresh.report.discovery.scan_complete) { throw new Error('Discovery incomplete ; audit interdit.'); }
         const permissions = await ask(fresh);
         if (signal.aborted) {
@@ -781,7 +1029,7 @@ export async function audit(
         metadata.permissions = permissions;
         metadata.catalog_sha256 = fresh.report.metadata.catalog_sha256 || '';
         await atomicJson(path.join(directory, 'session.json'), metadata);
-        await stream(source, target, state, directory, permissions, metadata.catalog_sha256, redaction, changed, signal, daemon);
+        await stream(source, target, state, directory, permissions, metadata.catalog_sha256, redaction, changed, signal, daemon, log);
         if (!state.reportPath) {
             const candidate = path.join(directory, 'compliance-report.json');
             try {
@@ -811,10 +1059,11 @@ export async function audit(
         clearInterval(heartbeat);
         if (!state.terminal) { state.fail('Session sans evenement terminal.'); metadata.state = 'incomplete'; }
         if (state.status === 'Skipped') { metadata.state = 'cancelled'; }
-        if (metadata.state === 'incomplete' || metadata.state === 'cancelled') {
-            metadata.ended_at = new Date().toISOString();
-            await atomicJson(path.join(directory, 'session.json'), metadata);
-        }
+        else if (state.status === 'Error') { metadata.state = 'incomplete'; }
+        else if (metadata.state === 'preparing') { metadata.state = 'completed'; }
+        metadata.ended_at = new Date().toISOString();
+        metadata.report_path = path.join(directory, 'compliance-report.json');
+        await atomicJson(path.join(directory, 'session.json'), metadata);
         changed();
     }
 }
@@ -839,12 +1088,12 @@ export interface LoadedReport {
 }
 
 export interface ReportReference { runId: string; target: string; source: string }
-export type ReportMessage = { schema_version: 1; action: 'ready' | 'refresh' | 'raw' | 'folder' } | { schema_version: 1; action: 'output'; controlId: string } | { schema_version: 1; action: 'finding'; index: number };
+export type ReportMessage = { schema_version: 1; action: 'ready' | 'pick' | 'raw' | 'folder' | 'provision' } | { schema_version: 1; action: 'output'; controlId: string } | { schema_version: 1; action: 'finding'; index: number };
 
 export function reportMessage(value: unknown): ReportMessage {
     if (!fields(value) || value.schema_version !== 1 || typeof value.action !== 'string') { throw new Error('Message Webview invalide.'); }
     const keys = Object.keys(value).sort().join(',');
-    if (['ready', 'refresh', 'raw', 'folder'].includes(value.action) && keys === 'action,schema_version') { return value as ReportMessage; }
+    if (['ready', 'pick', 'raw', 'folder', 'provision'].includes(value.action) && keys === 'action,schema_version') { return value as ReportMessage; }
     if (value.action === 'output' && keys === 'action,controlId,schema_version' && typeof value.controlId === 'string' && value.controlId.length > 0 && value.controlId.length <= 4096) { return value as ReportMessage; }
     if (value.action === 'finding' && keys === 'action,index,schema_version' && Number.isSafeInteger(value.index) && Number(value.index) >= 0) { return value as ReportMessage; }
     throw new Error('Action ou arguments Webview non autorises.');
@@ -935,17 +1184,30 @@ export async function readSession(source: string, reference: ReportReference): P
     if (!/^[a-f0-9]{32}$/.test(reference.runId) || path.relative(source, reference.source) !== '') { throw new Error('Reference de session invalide ou d une autre Pipeline source.'); }
     const directory = path.join(runsDirectory(source), reference.runId);
     const session = json(await readStable(path.join(directory, 'session.json'), 1024 * 1024));
-    if (!fields(session) || session.schema_version !== 1 || session.run_id !== reference.runId || session.target !== reference.target ||
-        typeof session.pipeline_source !== 'string' || path.relative(source, session.pipeline_source) !== '' ||
+    if (!fields(session) || session.schema_version !== 1 || session.run_id !== reference.runId || typeof session.target !== 'string' || !isSameDirectory(session.target, reference.target) ||
+        typeof session.pipeline_source !== 'string' || !isSameDirectory(session.pipeline_source, source) ||
         !['completed', 'cancelled', 'failed', 'incomplete'].includes(String(session.state)) ||
-        typeof session.report_path !== 'string' || path.relative(path.join(directory, 'compliance-report.json'), session.report_path) !== '' ||
+        typeof session.report_path !== 'string' || !isSameDirectory(session.report_path, path.join(directory, 'compliance-report.json')) ||
         typeof session.started_at !== 'string' || !Number.isFinite(Date.parse(session.started_at)) ||
         !fields(session.permissions) || typeof session.permissions.network !== 'boolean' || typeof session.permissions.code_execution !== 'boolean') { throw new Error('Session non finalisee ou incoherente ; consulter ses journaux.'); }
     return { directory, session };
 }
 
+async function sessionNearReport(file: string): Promise<{ directory: string; session: Fields } | undefined> {
+    const resolved = path.resolve(file);
+    if (path.basename(resolved) !== 'compliance-report.json') { return undefined; }
+    const directory = path.dirname(resolved);
+    try {
+        const session = json(await readStable(path.join(directory, 'session.json'), 1024 * 1024));
+        if (!fields(session) || session.schema_version !== 1) { return undefined; }
+        return { directory, session };
+    } catch {
+        return undefined;
+    }
+}
+
 export async function loadReport(source: string, file: string, reference?: ReportReference, historical = !reference, client?: DaemonClient): Promise<LoadedReport> {
-    const associated = reference ? await readSession(source, reference) : undefined;
+    const associated = reference ? await readSession(source, reference) : await sessionNearReport(file);
     if (associated && path.relative(path.join(associated.directory, 'compliance-report.json'), path.resolve(file)) !== '') { throw new Error('Rapport hors session attendue.'); }
     const bytes = await readStable(file);
     const raw = json(bytes);
@@ -963,6 +1225,13 @@ export async function loadReport(source: string, file: string, reference?: Repor
         const envelope = await daemon.validateReport(raw, digest);
         if (!fields(envelope) || envelope.schema_version !== 1 || envelope.report_sha256 !== digest) { throw new Error('Validation non rattachee aux octets du rapport.'); }
         const displayed = displayReport(raw, envelope.presentations);
+        if (typeof envelope.total_duration_ms === 'number' && Number.isFinite(envelope.total_duration_ms) && envelope.total_duration_ms >= 0) {
+            const metrics = fields(displayed.report.metrics) ? displayed.report.metrics : {};
+            if (typeof metrics.total_duration_ms !== 'number') {
+                metrics.total_duration_ms = envelope.total_duration_ms;
+                displayed.report.metrics = metrics;
+            }
+        }
         if (reference && ((displayed.report.metadata as Fields).run_id !== reference.runId || !isSameDirectory(String(displayed.report.repository), reference.target))) { throw new Error('Identite run_id ou Target incoherente avec la session.'); }
         if (associated && fields(associated.session.permissions)) {
             const metadata = displayed.report.metadata as Fields;
@@ -972,9 +1241,25 @@ export async function loadReport(source: string, file: string, reference?: Repor
             (displayed.report.verdict === 'PASS' || (displayed.report.coverage as Fields).complete === true)) { throw new Error('Rapport interrompu presente comme un PASS complet.'); }
         const after = createHash('sha256').update(await readStable(file)).digest('hex');
         if (after !== digest) { throw new Error('Rapport modifie pendant sa validation ; actualiser.'); }
-        return { ...displayed, file: path.resolve(file), sha256: digest, historical, session: associated?.session, directory: associated?.directory,
+        const directory = associated?.directory || (path.basename(path.resolve(file)) === 'compliance-report.json' ? path.dirname(path.resolve(file)) : undefined);
+        return { ...displayed, file: path.resolve(file), sha256: digest, historical, session: associated?.session, directory,
             target: String(displayed.report.repository), runId: String((displayed.report.metadata as Fields).run_id) };
     } finally { await fs.rm(staging, { recursive: true, force: true }); }
+}
+
+export function technologiesAbsentFromRun(executed: string[], absent: string[]): string[] {
+    const ran = new Set(executed.filter(Boolean));
+    return [...new Set(absent.filter(Boolean))].filter(name => !ran.has(name));
+}
+
+export function controlRelativeFile(root: string, file: string): string {
+    let cleaned = file.replace(/\\/g, '/').trim();
+    if (!/^[A-Za-z]:/.test(cleaned)) { cleaned = cleaned.replace(/^\/+/, ''); }
+    const rootClean = root.replace(/\\/g, '/').replace(/^\.\/+/, '').replace(/^\/+/, '');
+    if (!rootClean || rootClean === '.' || cleaned.toLowerCase() === rootClean.toLowerCase() || cleaned.toLowerCase().startsWith(`${rootClean.toLowerCase()}/`)) {
+        return cleaned;
+    }
+    return `${rootClean}/${cleaned}`;
 }
 
 export interface FindingLocation { file: string; line?: number; column?: number }

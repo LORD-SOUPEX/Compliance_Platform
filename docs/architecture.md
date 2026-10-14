@@ -1,6 +1,8 @@
 # Architecture et contrats techniques
 
-Pour utiliser la plateforme sur un projet, consulter le [tutoriel d'utilisation](utilisation.md). Les commandes d'administration et de packaging sont décrites dans [Maintenance](maintenance.md), et les spécifications de l'API locale dans [l'API du démon](daemon-api.md).
+Version courante : 2.0.13. Les chiffres de contrôles figés dans d'anciennes notes (notamment « 28 contrôles ») sont obsolètes. La liste actuelle est le tableau `catalog-controls` des README, vérifié contre `.config/control-catalog.json`.
+
+Le guide d'usage est le [README](../README.md). Le packaging et la signature sont dans [développement](developpement.md). Les outils sont dans [outils](outils.md).
 
 ## Parcours Compliance autonome (Go)
 
@@ -29,8 +31,8 @@ Le moteur reçoit un dossier local cible (la *Target*), sans compte de forge ni 
 | :--- | :--- | :--- |
 | **Discovery** | Inventaire des technologies, preuves, racines, ambiguïtés et erreurs de scan | `core/internal/discovery` |
 | **Capability Matrix** | Matrice des contrôles applicables, profils et états préliminaires | `core/internal/matrix` |
-| **Tool Resolver** | `.tools/bin/`, Python autonome, cache `~/.compliance/tools/bin/<plateforme>/`, préfixes macOS, PATH | `core/internal/distribution`, `core/internal/matrix`, `core/internal/osutil` |
-| **Catalogue de contrôles** | 28 contrôles, profils, permissions, timeouts, paramètres et dépendances | [`.config/control-catalog.json`](../.config/control-catalog.json), `core/internal/matrix` |
+| **Tool Resolver** | `.tools/bin/`, Python autonome, venv `~/.compliance/tools/venv`, cache `~/.compliance/tools/bin/<plateforme>/`, préfixes macOS, PATH | `core/internal/distribution`, `core/internal/matrix`, `core/internal/osutil` |
+| **Catalogue de contrôles** | Identifiants, outils et plateformes de [`.config/control-catalog.json`](../.config/control-catalog.json). Le nombre vivant est celui du fichier, pas un chiffre de documentation. | `core/internal/matrix` |
 | **Compliance Engine** | Ordonnancement déterministe (DAG), exécution, verdict, limitations | `core/internal/engine` |
 | **Serveur & Démon local** | API REST/SSE locale sur port éphémère, jeton Bearer 256 bits, contrôle Host/Origin | `core/internal/server` |
 | **Client VS Code** | Interface TreeView, pilotage du démon, streaming SSE temps réel, lecteur de rapports | `vscode-extension/src/daemonClient.ts` (`SessionController`), `vscode-extension/src/reportPanel.ts` |
@@ -41,14 +43,18 @@ Le moteur reçoit un dossier local cible (la *Target*), sans compte de forge ni 
 
 ## Résolution d'outils (Tool Resolver multi-niveaux)
 
-Le résolveur d'outils est entièrement découplé de l'environnement virtuel historique (`.venv`) et applique une recherche ordonnée et déterministe :
+Le résolveur d'outils est découplé de l'environnement virtuel du dépôt cible (`.venv`) et applique une recherche ordonnée :
 
-1. **Binaires autonomes (`.tools/bin/<command>[.exe]`)** : Outils du catalogue pré-positionnés ou synchronisés (`ruff`, `hadolint`, `tflint`, `terraform`, `tofu`, `terragrunt`, `shellcheck`, `trivy`) et le binaire `compliance`.
-2. **Environnement Python autonome (`.tools/python/Scripts/` ou `.tools/python/bin/`)** : Outils Python installés dans la distribution autonome locale (`bandit`, `pylint`, `pytest`, `pip-audit`, `checkov`).
-3. **Cache runtime du dépôt (`.tools/runtime/<platform>/<command>/...`)** puis **cache de distribution (`~/.compliance/tools/bin/<macos-x64|macos-arm64|...>/<command>`)** produit par `compliance runtime sync`.
-4. **Préfixes macOS**, consultés aussi quand VS Code est lancé depuis le Dock : `/opt/homebrew/bin`, `/opt/homebrew/sbin`, `/usr/local/bin`, `/usr/local/sbin`, `~/.local/bin`, `~/Library/Python/*/bin`, `~/.pyenv/shims`.
-5. **Modules PowerShell** : `PSScriptAnalyzer` via `.tools/powershell-modules/`, `PSModulePath`, et sur macOS/Linux `~/.local/share/powershell/Modules` ainsi que `/usr/local/share/powershell/Modules` (et `/opt/homebrew/share/powershell/Modules` sur Darwin). L'exécution hors Windows utilise `pwsh`, pas `powershell.exe`.
-6. **PATH du processus** : dernier recours, via `exec.LookPath`. Le PATH transmis aux outils est enrichi des préfixes macOS.
+1. **Binaires autonomes (`.tools/bin/<command>[.exe]`)** : Outils du catalogue pré-positionnés (`ruff`, `hadolint`, `tflint`, `terraform`, `tofu`, `terragrunt`, `shellcheck`, `trivy`, `rumdl`) et le binaire `compliance`.
+2. **Python autonome du dépôt (`.tools/python/Scripts/` ou `.tools/python/bin/`)** : `.exe`, puis `.cmd`, puis le nom nu.
+3. **Cache runtime du dépôt (`.tools/runtime/<platform>/<command>/...`)**.
+4. **Venv de distribution (`~/.compliance/tools/venv/Scripts` ou `bin`)** produit par `compliance runtime sync` après le CPython du manifeste : `.exe`, `.cmd`, `.bat`, puis le nom nu. `checkov` y est un `checkov.cmd`. Le moteur le lance avec le `python.exe` du même dossier (`python.exe -x checkov …`), pas via le raccourci Windows Store.
+5. **Cache de binaires (`~/.compliance/tools/bin/<plateforme>/<command>`)** pour les archives du manifeste.
+6. **Modules PowerShell** pour `Invoke-ScriptAnalyzer` : `.tools/powershell-modules/`, `PSModulePath`, et sur macOS/Linux `~/.local/share/powershell/Modules` ainsi que `/usr/local/share/powershell/Modules` (et `/opt/homebrew/share/powershell/Modules` sur Darwin). L'exécution hors Windows utilise `pwsh`.
+7. **Scripts npm du dépôt** (`node_modules/.bin`) pour ESLint et `tsc`.
+8. **Préfixes macOS puis PATH** : `/opt/homebrew/bin`, `/opt/homebrew/sbin`, `/usr/local/bin`, `/usr/local/sbin`, `~/.local/bin`, `~/Library/Python/*/bin`, `~/.pyenv/shims`, puis `exec.LookPath`. Un VS Code lancé depuis le Dock trouve Homebrew sans hériter de `~/.zshrc`.
+
+Sur Windows, `ansible`, `ansible-lint` et `molecule` sont marqués incompatibles avant cette recherche : la présence du paquet ne prouve pas que le contrôleur s'exécute. Le plan ne les propose pas comme installables depuis le manifeste. `ansible-lint` est réservé à Linux et macOS ; `yamllint` couvre Ansible sur Windows. Une commande qui reçoit une longue liste de fichiers est découpée sous 24 000 caractères et les sorties sont agrégées.
 
 ---
 
@@ -71,6 +77,6 @@ Le démon HTTP/SSE local (`core/internal/server`) implémente un modèle de séc
 
 Le rapport Compliance v1 émis par le moteur Go respecte strictement le contrat JSON [`.config/compliance-report.schema.json`](../.config/compliance-report.schema.json) :
 
-- **Structure normalisée** : `metadata`, `discovery`, `matrix`, `resolver`, `execution_plan`, `execution_results`, `findings`, `diagnostics`, `summary`, `coverage`, `limitations`, `verdict`, `verdict_reasons`, `advisory: true`.
+- **Structure normalisée** : `metadata`, `discovery`, `matrix`, `resolver`, `execution_plan`, `execution_results`, `findings`, `diagnostics`, `summary`, `coverage`, `limitations`, `verdict`, `verdict_reasons`, `advisory: true`. L'interface déroule les anomalies dans la carte du contrôle (dossier, fichier, ligne). Un chemin remonté comme `/fichier` ou `\fichier` est joint au dossier du contrôle avant d'être rendu relatif à la Target. `pytest` avec le code 5 et zéro anomalie est enregistré en succès. Ruff, Pylint, Bandit, pytest, pip-audit et yamllint ont le même format de finding que Checkov et TFLint.
 - **Validation native via le démon (`POST /api/v1/reports/validate`)** : Le démon effectue une validation en mémoire de la structure du rapport, compare son empreinte SHA-256 avec les octets stables du fichier, et calcule les présentations visuelles des contrôles pour l'interface utilisateur.
 - **Sécurisation anti-TOCTOU** : Le lecteur de rapport de l'extension vérifie que le fichier n'a subi aucune modification concurrente pendant la phase de validation.

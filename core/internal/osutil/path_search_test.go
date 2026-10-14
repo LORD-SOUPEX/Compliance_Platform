@@ -3,6 +3,7 @@ package osutil
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -47,6 +48,29 @@ func TestPowerShellModuleDirs(t *testing.T) {
 	}
 	if got := PowerShellModuleDirs("windows", home); len(got) != 0 {
 		t.Fatalf("windows module dirs = %v, want empty", got)
+	}
+}
+
+func TestScriptCommandUsesSiblingPython(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "checkov.cmd")
+	if err := os.WriteFile(script, []byte("@echo off\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" {
+		exe, args := ScriptCommand(script, []string{"--version"})
+		if exe != script || len(args) != 1 || args[0] != "--version" {
+			t.Fatalf("posix = %s %v", exe, args)
+		}
+		return
+	}
+	python := filepath.Join(dir, "python.exe")
+	if err := os.WriteFile(python, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	exe, args := ScriptCommand(script, []string{"--version"})
+	if exe != python || len(args) != 3 || args[0] != "-x" || args[1] != script || args[2] != "--version" {
+		t.Fatalf("windows = %s %v", exe, args)
 	}
 }
 

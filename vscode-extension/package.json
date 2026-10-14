@@ -1,61 +1,245 @@
 {
   "name": "compliance-local-pipelines",
-  "displayName": "ICP - Iac Compliance Platform",
-  "description": "Audit local de conformité pour Python, Terraform, conteneurs, Kubernetes, Helm, Ansible et Shell.",
-  "version": "2.0.0",
+  "displayName": "ICP - IaC Compliance Platform",
+  "description": "Audit local de dépôts (IaC, conteneurs, Python, JavaScript, TypeScript, Markdown) par un démon Go, sans service cloud.",
+  "version": "2.0.13",
   "publisher": "compliance-platform",
   "license": "MIT",
   "icon": "media/icon.png",
-  "categories": ["Linters", "Testing"],
-  "keywords": ["compliance", "lint", "security", "terraform", "python", "kubernetes", "docker", "ansible"],
+  "categories": [
+    "Linters",
+    "Testing"
+  ],
+  "keywords": [
+    "compliance",
+    "iac",
+    "lint",
+    "security",
+    "terraform",
+    "python",
+    "kubernetes",
+    "docker",
+    "ansible",
+    "javascript",
+    "typescript",
+    "markdown"
+  ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/LORD-SOUPEX/Compliance_Platform.git"
+    "url": "https://github.com/LORD-SOUPEX/Compliance_Platform.git",
+    "directory": "vscode-extension"
   },
-  "engines": { "vscode": "^1.81.0" },
+  "engines": {
+    "vscode": "^1.81.0"
+  },
   "scripts": {
     "compile": "tsc -p tsconfig.json",
     "pretest": "node -e \"const { spawnSync } = require('child_process'); const py = process.platform === 'win32' ? (spawnSync('where.exe', ['py']).status === 0 ? 'py' : 'python') : 'python3'; const res = spawnSync(py, ['package_vsix.py', '--ensure-binaries'], { stdio: 'inherit' }); process.exit(res.status || 0);\"",
-    "test": "tsc --noEmit && node -e \"const { spawnSync } = require('child_process'); const path = require('path'); const py = process.platform === 'win32' ? (spawnSync('where.exe', ['py']).status === 0 ? 'py' : 'python') : 'python3'; const check = spawnSync(py, ['package_vsix.py', '--check-vsix'], { stdio: 'inherit' }); if (check.status) process.exit(check.status); const bin = process.platform === 'win32' ? path.join(__dirname, '..', '.tools', 'bin', 'compliance.exe') : path.join(__dirname, '..', '.tools', 'bin', 'compliance'); const res = spawnSync(bin, ['selftest'], { stdio: 'inherit' }); process.exit(res.status || 0);\"",
+    "test": "tsc -p tsconfig.json && node scripts/debug-check.js",
+    "test:webview": "node ./scripts/run-webview-test.js",
+    "vscode:uninstall": "node ./scripts/uninstall.js",
+    "reinstall": "node ./scripts/reinstall.js",
     "package": "node -e \"const { spawnSync } = require('child_process'); const py = process.platform === 'win32' ? (spawnSync('where.exe', ['py']).status === 0 ? 'py' : 'python') : 'python3'; const res = spawnSync(py, ['package_vsix.py'], { stdio: 'inherit' }); process.exit(res.status || 0);\""
   },
   "main": "./.extension-build/src/extension.js",
   "capabilities": {
-    "untrustedWorkspaces": { "supported": "limited", "description": "La preparation des outils exige un workspace approuve." },
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "La preparation des outils exige un workspace approuve."
+    },
     "virtualWorkspaces": false
   },
   "contributes": {
     "commands": [
-      { "command": "compliance.selectTarget", "title": "Compliance: Selectionner une Target", "icon": "$(folder-opened)" },
-      { "command": "compliance.refreshPlan", "title": "Compliance: Actualiser la preparation", "icon": "$(refresh)" },
-      { "command": "compliance.runAudit", "title": "Compliance: Lancer l'audit", "icon": "$(play)", "enablement": "compliance.canRun" },
-      { "command": "compliance.cancelAudit", "title": "Compliance: Annuler l'audit", "icon": "$(debug-stop)", "enablement": "compliance.auditActive" },
-      { "command": "compliance.openLastReport", "title": "Compliance: Ouvrir le rapport de la derniere session", "icon": "$(preview)", "enablement": "compliance.hasReport" },
-      { "command": "compliance.openReportFile", "title": "Compliance: Ouvrir un rapport existant", "icon": "$(go-to-file)" },
-      { "command": "compliance.refreshReport", "title": "Compliance: Actualiser le rapport", "icon": "$(refresh)" },
-      { "command": "compliance.openRawReport", "title": "Compliance: Ouvrir le JSON brut", "icon": "$(json)" },
-      { "command": "compliance.openControlOutput", "title": "Compliance: Ouvrir les sorties du controle", "icon": "$(output)" },
-      { "command": "compliance.openSessionFolder", "title": "Compliance: Ouvrir le dossier de la session", "icon": "$(folder-opened)", "enablement": "compliance.hasSession" },
-      { "command": "compliance.showLogs", "title": "Compliance: Ouvrir les messages de session", "icon": "$(output)" }
+      {
+        "command": "compliance.selectTarget",
+        "category": "ICP",
+        "title": "Sélectionner la cible à auditer",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "compliance.refreshPlan",
+        "category": "ICP",
+        "title": "Recalculer la découverte et le plan",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "compliance.runAudit",
+        "category": "ICP",
+        "title": "Lancer l'audit de la cible",
+        "icon": "$(play)",
+        "enablement": "compliance.canRun"
+      },
+      {
+        "command": "compliance.cancelAudit",
+        "category": "ICP",
+        "title": "Annuler l'audit en cours",
+        "icon": "$(debug-stop)",
+        "enablement": "compliance.auditActive"
+      },
+      {
+        "command": "compliance.openLastReport",
+        "category": "ICP",
+        "title": "Ouvrir le rapport de la dernière session",
+        "icon": "$(preview)",
+        "enablement": "compliance.hasReport"
+      },
+      {
+        "command": "compliance.openReportFile",
+        "category": "ICP",
+        "title": "Ouvrir un rapport JSON existant",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "compliance.refreshReport",
+        "category": "ICP",
+        "title": "Recharger le rapport affiché",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "compliance.openRawReport",
+        "category": "ICP",
+        "title": "Ouvrir compliance-report.json",
+        "icon": "$(json)"
+      },
+      {
+        "command": "compliance.openControlOutput",
+        "category": "ICP",
+        "title": "Ouvrir les sorties du contrôle",
+        "icon": "$(output)"
+      },
+      {
+        "command": "compliance.openSessionFolder",
+        "category": "ICP",
+        "title": "Ouvrir le dossier de session",
+        "icon": "$(folder-opened)",
+        "enablement": "compliance.hasSession"
+      },
+      {
+        "command": "compliance.showLogs",
+        "category": "ICP",
+        "title": "Ouvrir le journal Output",
+        "icon": "$(output)"
+      },
+      {
+        "command": "compliance.reset",
+        "category": "ICP",
+        "title": "Réinitialiser le démon local",
+        "icon": "$(debug-restart)"
+      }
     ],
-    "views": { "explorer": [{ "id": "compliance.pipelines", "name": "Compliance Pipelines", "icon": "$(list-tree)" }] },
-    "viewsWelcome": [{ "view": "compliance.pipelines", "contents": "[Selectionner une Target](command:compliance.selectTarget)" }],
+    "views": {
+      "explorer": [
+        {
+          "id": "compliance.pipelines",
+          "name": "Compliance Pipelines",
+          "icon": "$(list-tree)"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "compliance.pipelines",
+        "contents": "[Selectionner une Target](command:compliance.selectTarget)"
+      }
+    ],
     "menus": {
       "view/title": [
-        { "command": "compliance.selectTarget", "when": "view == compliance.pipelines", "group": "navigation@1" },
-        { "command": "compliance.refreshPlan", "when": "view == compliance.pipelines", "group": "navigation@2" },
-        { "command": "compliance.showLogs", "when": "view == compliance.pipelines", "group": "navigation@3" },
-        { "command": "compliance.runAudit", "when": "view == compliance.pipelines", "group": "navigation@4" },
-        { "command": "compliance.cancelAudit", "when": "view == compliance.pipelines", "group": "navigation@5" },
-        { "command": "compliance.openSessionFolder", "when": "view == compliance.pipelines", "group": "navigation@6" },
-        { "command": "compliance.openLastReport", "when": "view == compliance.pipelines", "group": "navigation@7" },
-        { "command": "compliance.openReportFile", "when": "view == compliance.pipelines", "group": "report@1" }
+        {
+          "command": "compliance.selectTarget",
+          "when": "view == compliance.pipelines",
+          "group": "navigation@1"
+        },
+        {
+          "command": "compliance.refreshPlan",
+          "when": "view == compliance.pipelines",
+          "group": "navigation@2"
+        },
+        {
+          "command": "compliance.showLogs",
+          "when": "view == compliance.pipelines",
+          "group": "navigation@3"
+        },
+        {
+          "command": "compliance.runAudit",
+          "when": "view == compliance.pipelines",
+          "group": "navigation@4"
+        },
+        {
+          "command": "compliance.cancelAudit",
+          "when": "view == compliance.pipelines",
+          "group": "navigation@5"
+        },
+        {
+          "command": "compliance.openSessionFolder",
+          "when": "view == compliance.pipelines",
+          "group": "navigation@6"
+        },
+        {
+          "command": "compliance.openLastReport",
+          "when": "view == compliance.pipelines",
+          "group": "navigation@7"
+        },
+        {
+          "command": "compliance.openReportFile",
+          "when": "view == compliance.pipelines",
+          "group": "report@1"
+        }
       ],
-      "view/item/context": [{ "command": "compliance.openControlOutput", "when": "view == compliance.pipelines && viewItem == complianceControlOutput", "group": "inline" }]
+      "view/item/context": [
+        {
+          "command": "compliance.openControlOutput",
+          "when": "view == compliance.pipelines && viewItem == complianceControlOutput",
+          "group": "inline"
+        }
+      ]
     },
     "configuration": {
       "title": "Compliance",
-      "properties": { "compliance.reportRedactionPatterns": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Motifs de masquage transmis au backend pour les sorties et rapports de session." } }
+      "properties": {
+        "compliance.reportRedactionPatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Motifs de masquage des sorties de session.",
+          "scope": "application",
+          "markdownDescription": "Expressions régulières appliquées par le moteur aux sorties avant écriture. Réglage d'application : un dépôt ne peut pas l'imposer."
+        },
+        "compliance.maxSessions": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 1000,
+          "scope": "application",
+          "description": "Nombre de sessions conservées, de 1 à 1000. Le moteur n'écrase pas une valeur de cette plage.",
+          "markdownDescription": "Entier de 1 à 1000, défaut 5. Une valeur dans cette plage est appliquée telle quelle. Une valeur hors bornes est refusée et le défaut 5 est utilisé. Un dépôt ne peut pas imposer ce réglage."
+        },
+        "compliance.sessionsDirectory": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Dossier des rapports de session.",
+          "markdownDescription": "Vide : dossier utilisateur `~/.compliance/sessions/runs`. Priorité : ce réglage, puis COMPLIANCE_SESSIONS_DIR, puis le défaut. Un dossier non dédié reçoit un sous-dossier compliance-sessions."
+        },
+        "compliance.disabledTechnologies": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "scope": "application",
+          "description": "Technologies ignorées, par exemple markdown.",
+          "markdownDescription": "Technologies à ne pas auditer. Le dépôt ne peut pas remplir cette liste."
+        },
+        "compliance.disabledControls": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "scope": "application",
+          "description": "Identifiants de contrôles ignorés.",
+          "markdownDescription": "Identifiants du catalogue à ne pas exécuter. Réglage de la machine, jamais lu depuis le dépôt."
+        }
+      }
     }
   },
   "devDependencies": {

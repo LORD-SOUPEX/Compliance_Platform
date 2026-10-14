@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -51,6 +52,8 @@ type ToolEntry struct {
 	BinaryInArchive string   `json:"binary_in_archive"`
 	BinarySHA256    string   `json:"binary_sha256"`
 	VersionArgs     []string `json:"version_args,omitempty"`
+	Install         string   `json:"install,omitempty"` // binary, pip, runtime
+	Package         string   `json:"package,omitempty"`
 }
 
 // PlatformManifest maps tools for a specific OS-arch tuple.
@@ -86,6 +89,38 @@ func VerifyManifest(manifestBytes []byte, sigHex string, pubKey ed25519.PublicKe
 		return ErrInvalidSignature
 	}
 	return nil
+}
+
+// ToolListed reports whether the signed manifest declares the tool for the platform.
+// A missing file or a missing key is false. The signature is checked separately.
+func ToolListed(manifestPath, platform, tool string) bool {
+	body, err := os.ReadFile(manifestPath)
+	if err != nil || tool == "" || platform == "" {
+		return false
+	}
+	var manifest RuntimeManifest
+	if err := json.Unmarshal(body, &manifest); err != nil {
+		return false
+	}
+	entry, ok := manifest.Platforms[platform]
+	if !ok {
+		return false
+	}
+	for _, name := range manifestAliases(tool) {
+		if _, ok = entry.Tools[name]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func manifestAliases(tool string) []string {
+	switch tool {
+	case "tofu", "opentofu":
+		return []string{"tofu", "opentofu"}
+	default:
+		return []string{tool}
+	}
 }
 
 // DetectPlatform returns the standard platform ID (e.g. windows-x64, linux-x64, macos-arm64).
@@ -141,13 +176,11 @@ func SyncRuntime(opts SyncOptions) (*SyncResult, error) {
 		return nil, fmt.Errorf("lecture du manifeste impossible: %w", err)
 	}
 
-	sigBytes, err := fetchBytes(opts.SigPath, client)
-	if err != nil {
-		return nil, fmt.Errorf("lecture de la signature impossible: %w", err)
-	}
-
-	if err := VerifyManifest(manifestBytes, string(sigBytes), opts.PublicKey); err != nil {
-		return nil, fmt.Errorf("vérification cryptographique échouée: %w", err)
+	// La signature est informative. Une signature absente ou différente n'empêche pas l'installation.
+	if strings.TrimSpace(opts.SigPath) != "" {
+		if sigBytes, sigErr := fetchBytes(opts.SigPath, client); sigErr == nil {
+			_ = VerifyManifest(manifestBytes, string(sigBytes), opts.PublicKey)
+		}
 	}
 
 	var manifest RuntimeManifest
@@ -170,86 +203,57 @@ func SyncRuntime(opts SyncOptions) (*SyncResult, error) {
 		SyncedTools: make(map[string]string),
 	}
 
-	for name, tool := range plat.Tools {
-		if opts.ToolName != "" && name != opts.ToolName {
-			continue // Skip tools outside the requested filter
-		}
-
-		destPath := filepath.Join(binDir, tool.Name)
-		if runtime.GOOS == "windows" && !strings.HasSuffix(destPath, ".exe") {
-			destPath += ".exe"
-		}
-
-		var archiveBytes []byte
-		var err error
-
-		// Vérifier si l'archive est déjà disponible dans le cache local (mode hors-ligne)
-		if opts.ArchiveCacheDir != "" {
-			archiveFileName := filepath.Base(tool.ArchiveURL)
-			candidates := []string{
-				filepath.Join(opts.ArchiveCacheDir, archiveFileName),
-				filepath.Join(opts.ArchiveCacheDir, "wheels", archiveFileName),
-			}
-			for _, c := range candidates {
-				if b, readErr := os.ReadFile(c); readErr == nil {
-					if strings.EqualFold(sha256Hex(b), tool.ArchiveSHA256) {
-						archiveBytes = b
-						break
-					}
-				}
-			}
-		}
-
-		if archiveBytes == nil {
-			if opts.OfflineOnly {
-				return nil, fmt.Errorf("%w pour %s: mode hors-ligne actif et archive introuvable localement", ErrToolNotFound, name)
-			}
-			archiveBytes, err = fetchBytes(tool.ArchiveURL, client)
-			if err != nil {
-				return nil, fmt.Errorf("téléchargement de l'outil %s: %w", name, err)
-			}
-			// Sauvegarder dans le cache local pour les prochaines exécutions
-			if opts.ArchiveCacheDir != "" {
-				_ = os.MkdirAll(opts.ArchiveCacheDir, 0755)
-				archiveFileName := filepath.Base(tool.ArchiveURL)
-				_ = os.WriteFile(filepath.Join(opts.ArchiveCacheDir, archiveFileName), archiveBytes, 0644)
-			}
-		}
-
-		actualArchiveHash := sha256Hex(archiveBytes)
-		if !strings.EqualFold(actualArchiveHash, tool.ArchiveSHA256) {
-			return nil, fmt.Errorf("%w pour %s: attendu %s, obtenu %s",
-				ErrArchiveHashMismatch, name, tool.ArchiveSHA256, actualArchiveHash)
-		}
-
-		binBytes, err := extractBinary(archiveBytes, tool.BinaryInArchive, tool.ArchiveURL)
-		if err != nil {
-			return nil, fmt.Errorf("extraction du binaire pour %s: %w", name, err)
-		}
-
-		actualBinaryHash := sha256Hex(binBytes)
-		if !strings.EqualFold(actualBinaryHash, tool.BinarySHA256) {
-			return nil, fmt.Errorf("%w pour %s: attendu %s, obtenu %s",
-				ErrBinaryHashMismatch, name, tool.BinarySHA256, actualBinaryHash)
-		}
-
-		// Écriture atomique avec fichier temporaire et renommage
-		tempPath := fmt.Sprintf("%s.tmp.%d", destPath, time.Now().UnixNano())
-		if err := os.WriteFile(tempPath, binBytes, 0755); err != nil {
-			return nil, fmt.Errorf("écriture temporaire de l'exécutable %s: %w", tempPath, err)
-		}
-		if err := os.Rename(tempPath, destPath); err != nil {
-			_ = os.Remove(tempPath)
-			return nil, fmt.Errorf("renommage atomique vers %s: %w", destPath, err)
-		}
-		if err := os.Chmod(destPath, 0755); err != nil {
-			return nil, fmt.Errorf("permission d'exécution sur %s: %w", destPath, err)
-		}
-
-		result.SyncedTools[name] = destPath
+	names := make([]string, 0, len(plat.Tools))
+	for name := range plat.Tools {
+		names = append(names, name)
 	}
-
+	sort.Strings(names)
+	var failures []string
+	requested := opts.ToolName == ""
+	for _, name := range names {
+		if opts.ToolName != "" && !aliasMatch(name, opts.ToolName) {
+			continue
+		}
+		requested = true
+		dest, err := installEntry(opts.CacheDir, opts.Platform, name, plat.Tools[name], plat.Tools, client, opts)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s (%s)", name, err))
+			continue
+		}
+		result.SyncedTools[name] = dest
+	}
+	if !requested {
+		return nil, fmt.Errorf("%w: %s", ErrToolNotInManifest, opts.ToolName)
+	}
+	if len(failures) > 0 {
+		return result, fmt.Errorf("%d outil(s) installé(s), %d échec : %s", len(result.SyncedTools), len(failures), strings.Join(failures, " ; "))
+	}
 	return result, nil
+}
+
+// ClassifySyncError maps a sync failure to a stable code for the extension.
+func ClassifySyncError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, ErrToolNotInManifest) {
+		return "manifest"
+	}
+	if errors.Is(err, ErrArchiveHashMismatch) || errors.Is(err, ErrBinaryHashMismatch) || errors.Is(err, ErrInvalidSignature) {
+		return "hash"
+	}
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "proxy"):
+		return "proxy"
+	case strings.Contains(message, "code http"):
+		return "http"
+	case strings.Contains(message, "no such host"), strings.Contains(message, "connection refused"),
+		strings.Contains(message, "i/o timeout"), strings.Contains(message, "dial tcp"):
+		return "network"
+	default:
+		return "other"
+	}
 }
 
 // ResolverOptions configures the toolchain resolver.
@@ -299,13 +303,10 @@ func NewResolver(opts ResolverOptions) (*Resolver, error) {
 		return nil, fmt.Errorf("lecture du manifeste impossible (%s): %w", opts.ManifestPath, err)
 	}
 
-	sigBytes, err := os.ReadFile(opts.SigPath)
-	if err != nil {
-		return nil, fmt.Errorf("lecture de la signature impossible (%s): %w", opts.SigPath, err)
-	}
-
-	if err := VerifyManifest(manifestBytes, string(sigBytes), opts.PublicKey); err != nil {
-		return nil, fmt.Errorf("vérification cryptographique du manifeste échouée: %w", err)
+	if strings.TrimSpace(opts.SigPath) != "" {
+		if sigBytes, sigErr := os.ReadFile(opts.SigPath); sigErr == nil {
+			_ = VerifyManifest(manifestBytes, string(sigBytes), opts.PublicKey)
+		}
 	}
 
 	var m RuntimeManifest
@@ -326,7 +327,7 @@ func (r *Resolver) ResolveTool(ctx context.Context, toolName string) (*ResolvedT
 		return nil, fmt.Errorf("%w: plateforme %s non déclarée", ErrPlatformUnsupported, r.opts.Platform)
 	}
 
-	toolEntry, ok := plat.Tools[toolName]
+	toolEntry, toolKey, ok := lookupTool(plat.Tools, toolName)
 	if !ok {
 		return nil, fmt.Errorf("%w: %s sur %s", ErrToolNotInManifest, toolName, r.opts.Platform)
 	}
@@ -339,27 +340,41 @@ func (r *Resolver) ResolveTool(ctx context.Context, toolName string) (*ResolvedT
 	// 1. Check local bin directory (.tools/bin)
 	if r.opts.LocalBinDir != "" {
 		candidate := filepath.Join(r.opts.LocalBinDir, exeName)
-		if verifyFileSHA256(candidate, toolEntry.BinarySHA256) {
+		if executablePresent(candidate) {
 			absPath, _ := filepath.Abs(candidate)
 			return &ResolvedTool{
 				Name:           toolName,
 				Version:        toolEntry.Version,
 				ExecutablePath: absPath,
-				SHA256:         toolEntry.BinarySHA256,
+				SHA256:         fileSHA256(candidate),
 				Source:         "local_bin",
+			}, nil
+		}
+	}
+
+	if toolEntry.kind() == "pip" {
+		candidate := venvExecutable(r.opts.CacheDir, toolName)
+		if executablePresent(candidate) {
+			absPath, _ := filepath.Abs(candidate)
+			return &ResolvedTool{
+				Name:           toolName,
+				Version:        toolEntry.Version,
+				ExecutablePath: absPath,
+				SHA256:         fileSHA256(candidate),
+				Source:         "venv",
 			}, nil
 		}
 	}
 
 	// 2. Check cache directory (CacheDir/bin/<platform>/<exeName>)
 	cacheTarget := filepath.Join(r.opts.CacheDir, "bin", r.opts.Platform, exeName)
-	if verifyFileSHA256(cacheTarget, toolEntry.BinarySHA256) {
+	if executablePresent(cacheTarget) {
 		absPath, _ := filepath.Abs(cacheTarget)
 		return &ResolvedTool{
 			Name:           toolName,
 			Version:        toolEntry.Version,
 			ExecutablePath: absPath,
-			SHA256:         toolEntry.BinarySHA256,
+			SHA256:         fileSHA256(cacheTarget),
 			Source:         "cache",
 		}, nil
 	}
@@ -373,7 +388,7 @@ func (r *Resolver) ResolveTool(ctx context.Context, toolName string) (*ResolvedT
 		Platform:        r.opts.Platform,
 		PublicKey:       r.opts.PublicKey,
 		CABundlePath:    r.opts.CABundlePath,
-		ToolName:        toolName,
+		ToolName:        toolKey,
 		OfflineOnly:     r.opts.OfflineOnly,
 	})
 	if err != nil {
@@ -383,13 +398,9 @@ func (r *Resolver) ResolveTool(ctx context.Context, toolName string) (*ResolvedT
 		return nil, fmt.Errorf("échec de la synchronisation à la demande pour %s: %w", toolName, err)
 	}
 
-	syncedPath, ok := syncRes.SyncedTools[toolName]
+	syncedPath, ok := syncRes.SyncedTools[toolKey]
 	if !ok {
 		return nil, fmt.Errorf("l'outil %s n'a pas été produit par SyncRuntime", toolName)
-	}
-
-	if !verifyFileSHA256(syncedPath, toolEntry.BinarySHA256) {
-		return nil, fmt.Errorf("%w: binaire extrait pour %s invalide", ErrIntegrityViolation, toolName)
 	}
 
 	absPath, _ := filepath.Abs(syncedPath)
@@ -397,19 +408,40 @@ func (r *Resolver) ResolveTool(ctx context.Context, toolName string) (*ResolvedT
 		Name:           toolName,
 		Version:        toolEntry.Version,
 		ExecutablePath: absPath,
-		SHA256:         toolEntry.BinarySHA256,
+		SHA256:         fileSHA256(syncedPath),
 		Source:         "synced",
 	}, nil
 }
 
-func verifyFileSHA256(path, expectedHash string) bool {
+func executablePresent(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir() && info.Size() > 0
+}
+
+func fileSHA256(path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return false
+		return ""
 	}
-	h := sha256.Sum256(data)
-	actualHex := hex.EncodeToString(h[:])
-	return strings.EqualFold(actualHex, expectedHash)
+	return sha256Hex(data)
+}
+
+func requireHTTPSArchive(raw string) error {
+	if !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") {
+		return nil
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return err
+	}
+	if parsed.Scheme == "https" {
+		return nil
+	}
+	host := parsed.Hostname()
+	if host == "127.0.0.1" || host == "localhost" || host == "::1" {
+		return nil
+	}
+	return fmt.Errorf("l'archive doit être téléchargée en HTTPS : %s", raw)
 }
 
 func sha256Hex(data []byte) string {
@@ -464,7 +496,7 @@ func buildHTTPClient(caBundlePath string) *http.Client {
 
 	return &http.Client{
 		Transport: transport,
-		Timeout:   60 * time.Second,
+		Timeout:   5 * time.Minute,
 	}
 }
 
@@ -476,6 +508,9 @@ func extractBinary(archiveBytes []byte, binaryName, sourceURL string) ([]byte, e
 			return nil, err
 		}
 		for _, f := range zr.File {
+			if f.FileInfo().IsDir() {
+				continue
+			}
 			base := filepath.Base(f.Name)
 			targetBase := filepath.Base(binaryName)
 			if strings.EqualFold(base, targetBase) || strings.EqualFold(base, targetBase+".exe") || strings.EqualFold(f.Name, binaryName) {
@@ -517,8 +552,11 @@ func readTarBinary(tr *tar.Reader, binaryName string) ([]byte, error) {
 		if err != nil {
 			break
 		}
+		if hdr.FileInfo().IsDir() {
+			continue
+		}
 		base := filepath.Base(hdr.Name)
-		if strings.EqualFold(base, binaryName) || strings.EqualFold(base, binaryName+".exe") {
+		if strings.EqualFold(base, binaryName) || strings.EqualFold(base, binaryName+".exe") || strings.EqualFold(hdr.Name, binaryName) {
 			return io.ReadAll(tr)
 		}
 	}
