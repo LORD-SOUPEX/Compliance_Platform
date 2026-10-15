@@ -466,7 +466,7 @@ def publish_github_release(tag: str, assets: list[Path], repo_slug: str = REPO_S
             str(gh_bin), "release", "create", tag,
             "--repo", repo_slug,
             "--title", "Compliance Platform Tools Registry v1",
-            "--notes", "Self-hosted relocatable tools registry for Compliance Platform v2.0.15.",
+            "--notes", "Self-hosted relocatable tools registry for Compliance Platform v2.0.16.",
         ]
         subprocess.run(create_cmd, env=env, check=True)
 
@@ -763,7 +763,7 @@ def main():
 
     manifest = {
         "schema_version": 3,
-        "manifest_version": "2.0.15",
+        "manifest_version": "2.0.16",
         "registry_base_url": registry_base_url,
         "platforms": manifest_platforms,
     }

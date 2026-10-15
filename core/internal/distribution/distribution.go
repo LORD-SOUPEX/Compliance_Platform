@@ -219,10 +219,12 @@ func SyncRuntime(opts SyncOptions) (*SyncResult, error) {
 		return nil, fmt.Errorf("lecture du manifeste impossible: %w", err)
 	}
 
-	// La signature est informative. Une signature absente ou différente n'empêche pas l'installation.
+	// La signature est informative. Une signature absente ou différente n'empêche pas l'installation, mais émet un avertissement.
 	if strings.TrimSpace(opts.SigPath) != "" {
 		if sigBytes, sigErr := fetchBytes(opts.SigPath, client, opts.RegistryToken); sigErr == nil {
-			_ = VerifyManifest(manifestBytes, string(sigBytes), opts.PublicKey)
+			if vErr := VerifyManifest(manifestBytes, string(sigBytes), opts.PublicKey); vErr != nil {
+				fmt.Fprintf(os.Stderr, "[WARN] Signature Ed25519 du manifeste non vérifiée: %v. Installation maintenue sans blocage.\n", vErr)
+			}
 		}
 	}
 
@@ -352,7 +354,9 @@ func NewResolver(opts ResolverOptions) (*Resolver, error) {
 
 	if strings.TrimSpace(opts.SigPath) != "" {
 		if sigBytes, sigErr := os.ReadFile(opts.SigPath); sigErr == nil {
-			_ = VerifyManifest(manifestBytes, string(sigBytes), opts.PublicKey)
+			if vErr := VerifyManifest(manifestBytes, string(sigBytes), opts.PublicKey); vErr != nil {
+				fmt.Fprintf(os.Stderr, "[WARN] Signature Ed25519 locale du manifeste non vérifiée: %v. Résolution maintenue sans blocage.\n", vErr)
+			}
 		}
 	}
 

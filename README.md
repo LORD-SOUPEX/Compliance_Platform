@@ -4,7 +4,7 @@
 
 Compliance Platform est un outil local d'audit autonome de dépôts multi-technologies. Il découvre automatiquement les technologies présentes dans un projet cible externe, évalue les capacités d'outillage disponibles et exécute un plan de contrôles de conformité selon un catalogue partagé, en générant un rapport JSON canonique et un verdict consultatif.
 
-Le moteur d'exécution autonome écrit en Go (`core/`) et son démon local HTTP/SSE constituent l'unique autorité et source de vérité du produit. Le projet fonctionne à **100 % en local**, sans dépendance envers une forge distante ni pipeline CI distante.
+Le moteur d'exécution autonome écrit en Go (`core/`) et son démon local HTTP/SSE constituent l'unique autorité et source de vérité du produit. Le moteur fonctionne à **100 % en local** pour l'audit, sans dépendance envers une forge distante ni pipeline CI distante. L'approvisionnement des outils s'effectue via le registre auto-hébergé `tools-v1` ou le `PATH` local.
 
 ---
 
@@ -12,10 +12,10 @@ Le moteur d'exécution autonome écrit en Go (`core/`) et son démon local HTTP/
 
 - **Moteur Go local** : Discovery, Capability Matrix, Tool Resolver, Compliance Engine, rapport canonique et démon HTTP/SSE. Le binaire est cross-compilé pour six cibles. **Seul Windows x64 est qualifié** sur cette machine ; Linux et macOS sont expérimentaux (binaires présents, selftest physique non fait).
 - **Extension VS Code intégrée** : Interface TreeView locale connectée au démon local via HTTP et streaming d'événements temps réel (SSE), avec lecteur de rapports interactif natif et visualisations de findings.
-- **Sécurité et confinement stricts** : Démon éphémère ou persistant sur `127.0.0.1:0`, jeton Bearer 256 bits généré localement, validation stricte des en-têtes `Host` et `Origin`, approbation explicite des dossiers cibles (*workspace approval*), confinement des processus enfants (Job Objects sous Windows, process groups POSIX sous Linux/macOS) et annulation immédiate sans processus orphelin.
-- **Résolution d'outils découplée et registre auto-hébergé** : Registre d'archives précompilées et autonomes hébergées sur la release GitHub `tools-v1` (`https://github.com/LORD-SOUPEX/Compliance_Platform/releases/tag/tools-v1`), sans dépendance envers PyPI, npm ou PowerShell Gallery à l'exécution. Les outils natifs sont reconditionnés pour 5 plateformes (`windows-x64`, `linux-x64`, `linux-arm64`, `macos-x64`, `macos-arm64`), le bundle Python 100 % relocalisable s'exécute via son interpréteur relatif (`python -m <module>`), et le module `PSScriptAnalyzer` est téléchargeable en 1 clic.
+- **Sécurité et confinement stricts** : Démon éphémère ou persistant sur `127.0.0.1:0`, jeton Bearer 256 bits généré localement, validation stricte des en-têtes `Host` et `Origin`, approbation explicite des dossiers cibles (*workspace approval*), confinement des processus enfants (Job Objects sous Windows avec vérification stricte, process groups POSIX sous Linux/macOS) et annulation immédiate sans processus orphelin.
+- **Résolution d'outils découplée et registre auto-hébergé** : Registre d'archives précompilées et autonomes hébergées sur la release GitHub `tools-v1` (`https://github.com/LORD-SOUPEX/Compliance_Platform/releases/tag/tools-v1`), sans dépendance envers PyPI, npm ou PowerShell Gallery à l'exécution. Les 10 outils natifs sont fournis pour 5 plateformes (`windows-x64`, `linux-x64`, `linux-arm64`, `macos-x64`, `macos-arm64`). Les bundles complets pré-assemblés Python (`checkov`, `bandit`, `pylint`, `pytest`, `pip-audit`, `yamllint`), Node (`eslint`, `tsc`) et `PSScriptAnalyzer` sont publiés et qualifiés pour `windows-x64`. Sur Linux et macOS, les bundles complets peuvent être construits sur un hôte POSIX via `scripts/build_and_publish_tools.py` ou résolus via le `PATH` système.
 - **Ordre strict de résolution des outils** :
-  1. Pour `eslint`/`tsc` : `node_modules/.bin` de la Target en priorité, sinon bundle `~/.compliance/tools/node`.
+  1. Pour `eslint`/`tsc` : `node_modules/.bin` de la Target en priorité, sinon bundle `~/.compliance/tools/node` téléchargé depuis le registre.
   2. Pour tous les autres outils : `.tools/bin` (dev local) ➔ `~/.compliance/tools/{bin,python,node,powershell-modules}` (registre installé) ➔ `PATH` système.
 - **Autonomie hors dépôt** : Le catalogue et les schémas sont embarqués dans le binaire (`//go:embed`) et dans le VSIX. `compliance selftest` fonctionne sans clone Git.
 - **Validation autonome intégrée (`compliance selftest`)** : Suite d'auto-test en 20 étapes vérifiant le cycle de vie du démon, la sécurité, l'exécution et l'annulation sur port éphémère.
@@ -27,7 +27,7 @@ Le moteur d'exécution autonome écrit en Go (`core/`) et son démon local HTTP/
 
 ESLint et `tsc` viennent du `node_modules` de la cible, ou de `~/.compliance/tools/node` après synchronisation. Sans configuration ESLint, le contrôle n'est pas marqué réussi. Les outils de répertoire (Terraform, etc.) restent un contrôle par racine. Le rapport regroupe ces racines sous une carte par outil. Chaque racine se déroule vers les fichiers touchés, puis vers la ligne, la règle et le message. Checkov, TFLint, ShellCheck, Trivy et `terraform fmt` alimentent ces listes. Une technologie déjà exécutée sur une racine n'apparaît pas dans les contrôles non applicables. Markdown utilise `rumdl check`. Sans configuration Markdown du dépôt, la règle de longueur de ligne MD013 est désactivée. `pytest` qui ne collecte aucun test (code 5) n'est pas un échec. Gitleaks ignore les dossiers d'artefacts et les binaires. `testdata`, `fixtures` et `__snapshots__` ne sont ni des racines ni des anomalies.
 
-Les outils du registre `tools-v1` peuvent être téléchargés en HTTPS après accord (version, source, dossier utilisateur). Une signature ou une somme SHA-256 différente ne bloque pas l'installation. Ce n'est pas le cas à l'installation du VSIX. Les entreprises peuvent configurer un miroir privé via `compliance.registryUrl` (ou variable d'environnement `COMPLIANCE_REGISTRY_URL`) et `compliance.registryToken` (`COMPLIANCE_REGISTRY_TOKEN`). Voir `docs/outils.md`.
+Les outils du registre `tools-v1` peuvent être téléchargés en HTTPS après accord (version, source, dossier utilisateur). Une signature ou une somme SHA-256 différente génère un avertissement journalisé mais ne bloque pas l'installation. Ce n'est pas le cas à l'installation du VSIX. Les entreprises peuvent configurer un miroir privé via `compliance.registryUrl` (ou variable d'environnement `COMPLIANCE_REGISTRY_URL`) et `compliance.registryToken` (`COMPLIANCE_REGISTRY_TOKEN`). Voir `docs/outils.md`.
 
 Les sessions conservées vont de 1 à 1000 (`compliance.maxSessions`, défaut 5). Extension installée : `~/.compliance/sessions/runs` (`%USERPROFILE%` sous Windows, `$HOME` ailleurs). Développement depuis le dépôt : `<dépôt>/.tools/state/runs`. `COMPLIANCE_SESSIONS_DIR` remplace ce chemin. Le démon utilise `~/.compliance` ou `COMPLIANCE_STATE_DIR`.
 
@@ -95,7 +95,7 @@ Compliance_Platform/
 │   │   ├── model.ts                    # Modèles d'état et normalisation multi-OS
 │   │   └── reportPanel.ts              # Panneau Webview interactif de visualisation
 │   ├── package_vsix.py                 # Packaging OPC universel et cross-compilation
-│   ├── package.json                    # Manifeste d'extension VS Code (v2.0.15)
+│   ├── package.json                    # Manifeste d'extension VS Code (v2.0.16)
 │   └── tsconfig.json
 ├── .config/                            # Contrats de configuration partagés
 │   ├── control-catalog.json            # Catalogue des contrôles (voir le tableau ci-dessus)
@@ -186,7 +186,7 @@ compliance run -repo "/chemin/du/projet" -report reports/audit.json
 
 ### 4. Audit dans VS Code
 
-L'extension locale s'installe via le VSIX (`vscode-extension/dist/compliance-local-pipelines-2.0.15.vsix`). Seul Windows x64 est qualifié :
+L'extension locale s'installe via le VSIX (`vscode-extension/dist/compliance-local-pipelines-2.0.16.vsix`). Seul Windows x64 est qualifié :
 
 - Sélection de la cible d'audit (Target externe).
 - Préparation et inspection du plan ordonnancé.

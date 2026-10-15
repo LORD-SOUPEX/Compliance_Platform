@@ -571,7 +571,9 @@ func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req Create
 		OnPlanReady: func(planRep *report.Report) {
 			if b, err := json.MarshalIndent(planRep, "", "  "); err == nil {
 				planPath := filepath.Join(s.OutputDir, "execution-plan.json")
-				_ = os.WriteFile(planPath, b, 0600)
+				if wErr := os.WriteFile(planPath, b, 0600); wErr != nil {
+					fmt.Fprintf(os.Stderr, "[ERROR] Écriture de %s : %v\n", planPath, wErr)
+				}
 			}
 			s.emitEvent("plan_available", nil, nil, nil, planRep)
 		},
@@ -622,7 +624,10 @@ func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req Create
 				}
 			}
 
-			logPath, _ := WriteControlLog(s.OutputDir, ctrl.ID, res.Stdout, res.Stderr)
+			logPath, lErr := WriteControlLog(s.OutputDir, ctrl.ID, res.Stdout, res.Stderr)
+			if lErr != nil {
+				fmt.Fprintf(os.Stderr, "[ERROR] Écriture des logs de contrôle %s : %v\n", ctrl.ID, lErr)
+			}
 
 			s.emitEvent("control_completed", &ctrlID, &tech, &root, map[string]interface{}{
 				"status":      presStatus,
@@ -654,7 +659,9 @@ func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req Create
 		reportPath := filepath.Join(s.OutputDir, "compliance-report.json")
 		if rep != nil {
 			if b, err := json.MarshalIndent(rep, "", "  "); err == nil {
-				_ = os.WriteFile(reportPath, b, 0600)
+				if wErr := os.WriteFile(reportPath, b, 0600); wErr != nil {
+					fmt.Fprintf(os.Stderr, "[ERROR] Écriture de %s : %v\n", reportPath, wErr)
+				}
 			}
 		}
 
@@ -691,13 +698,17 @@ func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req Create
 
 	reportPath := filepath.Join(s.OutputDir, "compliance-report.json")
 	if repBytes, mErr := json.MarshalIndent(rep, "", "  "); mErr == nil {
-		_ = os.WriteFile(reportPath, repBytes, 0600)
+		if wErr := os.WriteFile(reportPath, repBytes, 0600); wErr != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] Écriture de %s : %v\n", reportPath, wErr)
+		}
 	}
 
 	planPath := filepath.Join(s.OutputDir, "execution-plan.json")
 	if _, err := os.Stat(planPath); os.IsNotExist(err) {
 		if planBytes, pErr := json.MarshalIndent(rep, "", "  "); pErr == nil {
-			_ = os.WriteFile(planPath, planBytes, 0600)
+			if wErr := os.WriteFile(planPath, planBytes, 0600); wErr != nil {
+				fmt.Fprintf(os.Stderr, "[ERROR] Écriture de %s : %v\n", planPath, wErr)
+			}
 		}
 	}
 
@@ -726,8 +737,11 @@ func mergeSessionFile(sessionPath string, updates map[string]interface{}) {
 		data[key] = value
 	}
 	if sessBytes, err := json.MarshalIndent(data, "", "  "); err == nil {
-		_ = os.WriteFile(sessionPath, sessBytes, 0600)
-		_ = os.Chmod(sessionPath, 0600)
+		if wErr := os.WriteFile(sessionPath, sessBytes, 0600); wErr != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] Écriture de %s : %v\n", sessionPath, wErr)
+		} else {
+			_ = os.Chmod(sessionPath, 0600)
+		}
 	}
 }
 

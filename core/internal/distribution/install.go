@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -72,6 +73,10 @@ func installBundle(cacheDir, platform, key string, tool ToolEntry, client *http.
 	if err != nil {
 		return "", err
 	}
+	actualSHA := fmt.Sprintf("%x", sha256.Sum256(body))
+	if tool.ArchiveSHA256 != "" && !strings.EqualFold(actualSHA, tool.ArchiveSHA256) {
+		fmt.Fprintf(os.Stderr, "[WARN] Somme SHA-256 divergente pour l'archive de %s (obtenu: %s, attendu: %s). Installation maintenue sans blocage.\n", key, actualSHA, tool.ArchiveSHA256)
+	}
 	if err := extractTree(body, archiveURL, cacheDir); err != nil {
 		return "", fmt.Errorf("extraction du bundle pour %s: %w", key, err)
 	}
@@ -88,9 +93,19 @@ func installBinary(cacheDir, platform, key string, tool ToolEntry, client *http.
 	if err != nil {
 		return "", err
 	}
+	actualSHA := fmt.Sprintf("%x", sha256.Sum256(body))
+	if tool.ArchiveSHA256 != "" && !strings.EqualFold(actualSHA, tool.ArchiveSHA256) {
+		fmt.Fprintf(os.Stderr, "[WARN] Somme SHA-256 divergente pour l'archive de %s (obtenu: %s, attendu: %s). Installation maintenue sans blocage.\n", key, actualSHA, tool.ArchiveSHA256)
+	}
 	binBytes, err := extractBinary(body, tool.BinaryInArchive, archiveURL)
 	if err != nil {
 		return "", fmt.Errorf("extraction du binaire pour %s: %w", key, err)
+	}
+	if tool.BinarySHA256 != "" {
+		actualBinSHA := fmt.Sprintf("%x", sha256.Sum256(binBytes))
+		if !strings.EqualFold(actualBinSHA, tool.BinarySHA256) {
+			fmt.Fprintf(os.Stderr, "[WARN] Somme SHA-256 divergente pour le binaire de %s (obtenu: %s, attendu: %s). Installation maintenue sans blocage.\n", key, actualBinSHA, tool.BinarySHA256)
+		}
 	}
 	binDir := filepath.Join(cacheDir, "bin", platform)
 	if err := os.MkdirAll(binDir, 0755); err != nil {
@@ -355,21 +370,34 @@ func extractTarTree(tr *tar.Reader, dest string) error {
 				return err
 			}
 		case tar.TypeSymlink, tar.TypeLink:
+			rawLink := strings.TrimSpace(hdr.Linkname)
+			if filepath.IsAbs(rawLink) || strings.HasPrefix(rawLink, "/") || strings.HasPrefix(rawLink, "\\") || filepath.VolumeName(rawLink) != "" {
+				return fmt.Errorf("lien symbolique absolu interdit dans l'archive: %s -> %s", hdr.Name, hdr.Linkname)
+			}
+			linkTarget := filepath.Clean(strings.ReplaceAll(rawLink, "\\", "/"))
+			if filepath.IsAbs(linkTarget) || strings.HasPrefix(linkTarget, "/") || strings.HasPrefix(linkTarget, "\\") || filepath.VolumeName(linkTarget) != "" {
+				return fmt.Errorf("lien symbolique absolu interdit dans l'archive: %s -> %s", hdr.Name, hdr.Linkname)
+			}
+			resolvedTarget := filepath.Clean(filepath.Join(filepath.Dir(target), filepath.FromSlash(linkTarget)))
+			rel, err := filepath.Rel(dest, resolvedTarget)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+				return fmt.Errorf("lien symbolique sortant du répertoire de destination interdit: %s -> %s", hdr.Name, hdr.Linkname)
+			}
 			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 				return err
 			}
 			_ = os.Remove(target)
 			if err := os.Symlink(hdr.Linkname, target); err != nil {
-				source := hdr.Linkname
-				if !filepath.IsAbs(source) {
-					source = filepath.Join(filepath.Dir(target), source)
-				}
-				data, readErr := os.ReadFile(source)
-				if readErr != nil {
-					continue
-				}
-				if err := os.WriteFile(target, data, 0755); err != nil {
-					return err
+				// Repli sécurisé pour les environnements sans privilèges de lien symbolique (ex: Windows non-dev) :
+				// uniquement si la source résolue existe DÉJÀ à l'intérieur de la destination vérifiée.
+				sourceInfo, statErr := os.Stat(resolvedTarget)
+				if statErr == nil && !sourceInfo.IsDir() {
+					data, readErr := os.ReadFile(resolvedTarget)
+					if readErr == nil {
+						if err := os.WriteFile(target, data, 0755); err != nil {
+							return err
+						}
+					}
 				}
 			}
 		}
@@ -390,7 +418,7 @@ func writeFile(path string, r io.Reader, mode os.FileMode) error {
 
 func safeJoin(dest, name string) (string, error) {
 	clean := filepath.Clean(strings.ReplaceAll(name, "\\", "/"))
-	if clean == "." || strings.HasPrefix(clean, "../") || clean == ".." || filepath.IsAbs(clean) {
+	if clean == "." || strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "..\\") || clean == ".." || filepath.IsAbs(clean) || strings.HasPrefix(clean, "/") || strings.HasPrefix(clean, "\\") {
 		return "", fmt.Errorf("chemin d'archive refusé: %s", name)
 	}
 	target := filepath.Join(dest, filepath.FromSlash(clean))

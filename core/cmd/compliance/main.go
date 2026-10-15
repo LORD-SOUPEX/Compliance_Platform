@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -374,27 +373,23 @@ func runRuntimeSync(args []string) {
 }
 
 func runRuntimeNode() {
-	root := os.Getenv("COMPLIANCE_NODE_TOOLS")
-	if root == "" {
-		root = filepath.Join(osutil.DefaultToolCacheDir(), "node")
+	opts := distribution.SyncOptions{
+		CacheDir: defaultCacheDir(),
+		Platform: distribution.DetectPlatform(),
+		ToolName: "node",
 	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+	if manifestPath, err := embedded.ResolveAsset("runtime-manifest.json", ".config/runtime-manifest.json"); err == nil {
+		opts.ManifestPath = manifestPath
+	}
+	if sigPath, err := embedded.ResolveAsset("runtime-manifest.json.sig", ".config/runtime-manifest.json.sig"); err == nil {
+		opts.SigPath = sigPath
+	}
+	res, err := distribution.SyncRuntime(opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] Installation du bundle Node depuis le registre: %v\n", err)
 		os.Exit(1)
 	}
-	npm := "npm"
-	if runtime.GOOS == "windows" {
-		npm = "npm.cmd"
-	}
-	fmt.Printf("[INFO] Installation d'eslint et typescript dans %s\n", root)
-	cmd := exec.Command(npm, "install", "--prefix", root, "eslint", "typescript")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "[ERROR] npm install : %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Println("[PASS] Chaîne JavaScript locale installée.")
+	fmt.Printf("[PASS] Bundle Node installé depuis le registre (%s).\n", res.Platform)
 }
 
 func runPipeline(args []string) {

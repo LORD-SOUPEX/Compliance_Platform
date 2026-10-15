@@ -228,18 +228,8 @@ export class DaemonClient {
         return output.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
     }
 
-    public async installNodeToolchain(platformRoot: string): Promise<void> {
-        const staged = await this.stagedRuntime(platformRoot);
-        await new Promise<void>((resolve, reject) => {
-            const child = spawn(staged.binary, ['runtime', 'node'], { cwd: staged.cwd, windowsHide: true });
-            let stderr = '';
-            child.stderr?.on('data', chunk => { stderr += String(chunk); });
-            child.on('error', reject);
-            child.on('close', code => {
-                if (code === 0) { resolve(); }
-                else { reject(new Error(stderr.trim() || `runtime node a quitté avec le code ${code}`)); }
-            });
-        });
+    public async installNodeToolchain(platformRoot: string, options?: { registryUrl?: string; registryToken?: string }): Promise<void> {
+        await this.syncTools(platformRoot, ['node'], options);
     }
 
     public async syncTools(platformRoot: string, tools: string[], options?: { registryUrl?: string; registryToken?: string }): Promise<void> {
@@ -252,13 +242,14 @@ export class DaemonClient {
         if (options?.registryUrl) {
             extraArgs.push('-registry-url', options.registryUrl);
         }
+        const spawnEnv: NodeJS.ProcessEnv = { ...process.env };
         if (options?.registryToken) {
-            extraArgs.push('-registry-token', options.registryToken);
+            spawnEnv.COMPLIANCE_REGISTRY_TOKEN = options.registryToken;
         }
         for (const tool of tools) {
             try {
                 await new Promise<void>((resolve, reject) => {
-                    const child = spawn(staged.binary, ['runtime', 'sync', '-manifest', manifest, '-sig', signature, '-tool', tool, ...extraArgs], { cwd: staged.cwd, windowsHide: true });
+                    const child = spawn(staged.binary, ['runtime', 'sync', '-manifest', manifest, '-sig', signature, '-tool', tool, ...extraArgs], { cwd: staged.cwd, env: spawnEnv, windowsHide: true });
                     let stderr = '';
                     child.stderr?.on('data', chunk => { stderr += String(chunk); });
                     child.on('error', reject);

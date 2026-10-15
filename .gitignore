@@ -47,7 +47,10 @@ vscode-extension/bin/
 vscode-extension/node_modules/
 vscode-extension/.vscode-test/
 vscode-extension/.extension-build/
+vscode-extension/dist/*.vsix
+!vscode-extension/dist/compliance-local-pipelines-2.0.16.vsix
 
 # Tools distribution build directory
 dist-tools/
+
 

@@ -172,19 +172,16 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
     }
     async function provisionTools(commands: string[], trigger: 'auto' | 'manual'): Promise<boolean> {
         const manifest = JSON.parse(await fs.readFile(path.join(source, '.config', 'runtime-manifest.json'), 'utf8'));
-        const nodeCommands = commands.filter(command => command === 'eslint' || command === 'tsc');
-        const manifestCommands = commands.filter(command => command !== 'eslint' && command !== 'tsc');
-        const known = selectManifestTools(manifest, hostPlatform(), manifestCommands);
-        const unknown = manifestCommands.filter(command => !known.some(tool => tool.command === command));
+        const known = selectManifestTools(manifest, hostPlatform(), commands);
+        const unknown = commands.filter(command => !known.some(tool => tool.command === command));
         if (unknown.length && trigger === 'manual') {
             await vscode.window.showErrorMessage(`${unknown.join(', ')} : absent du manifeste. L'extension ne propose ni pip ni Homebrew.`);
         }
-        if (!known.length && !nodeCommands.length) { return false; }
-        const id = fingerprint([...known.map(tool => tool.command), ...nodeCommands]);
+        if (!known.length) { return false; }
+        const id = fingerprint(known.map(tool => tool.command));
         const memory = context.globalState.get<ConsentMemory>('compliance.toolConsent');
         if (!shouldPrompt(memory, id, trigger)) { return false; }
-        const nodeNote = nodeCommands.length ? '\n\neslint et typescript seront installés par npm dans ~/.compliance/tools/node, puis utilisés si la cible n’a pas node_modules/.bin.' : '';
-        const choice = await vscode.window.showWarningMessage(`${known.length ? consentText(known) : 'Installation de la chaîne JavaScript locale.'}${nodeNote}`, { modal: true }, 'Installer', 'Refuser');
+        const choice = await vscode.window.showWarningMessage(consentText(known), { modal: true }, 'Installer', 'Refuser');
         if (choice !== 'Installer') {
             await context.globalState.update('compliance.toolConsent', { fingerprint: id, decision: 'refused', installed: false } satisfies ConsentMemory);
             if (choice === 'Refuser') { await vscode.window.showInformationMessage('Installation refusée. Les contrôles concernés restent non couverts.'); }
@@ -192,13 +189,10 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
         }
         try {
             const client = new DaemonClient();
-            if (known.length) {
-                const config = vscode.workspace.getConfiguration('compliance');
-                const registryUrl = config.get<string>('registryUrl', '');
-                const registryToken = config.get<string>('registryToken', '');
-                await client.syncTools(source, known.map(tool => tool.command), { registryUrl, registryToken });
-            }
-            if (nodeCommands.length) { await client.installNodeToolchain(source); }
+            const config = vscode.workspace.getConfiguration('compliance');
+            const registryUrl = config.get<string>('registryUrl', '');
+            const registryToken = config.get<string>('registryToken', '');
+            await client.syncTools(source, known.map(tool => tool.command), { registryUrl, registryToken });
             await context.globalState.update('compliance.toolConsent', { fingerprint: id, decision: 'accepted', installed: true } satisfies ConsentMemory);
             return true;
         } catch (error) {

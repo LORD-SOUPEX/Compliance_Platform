@@ -4,6 +4,7 @@ package osutil
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"runtime"
 	"sync"
@@ -156,7 +157,11 @@ func runBoundedOS(ctx context.Context, spec CommandSpec) (*ProcessResult, error)
 	}
 
 	// Assign immediately to the job object so any descendant process is enclosed
-	_ = assignProcessToJob(hJob, cmd.Process.Pid)
+	if err := assignProcessToJob(hJob, cmd.Process.Pid); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return nil, fmt.Errorf("assignation du processus au Job Object Windows échouée (pid %d): %w", cmd.Process.Pid, err)
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(2)

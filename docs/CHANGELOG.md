@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.16
+
+- **Suppression définitive de `npm install`** : Le binaire Go (`compliance runtime sync`, `compliance runtime node`) et l'extension VS Code n'appellent plus jamais `npm install`. L'installation de `eslint` et `tsc` télécharge et extrait directement le bundle `node` (`windows-x64-node-tools-22.14.0.zip`) depuis le registre `tools-v1`.
+- **Sécurisation de l'extraction d'archives (anti-évasion Tar)** : Interdiction absolue des liens symboliques pointant vers des chemins absolus (`/`, `\`, disques) ou s'échappant hors du répertoire de destination via des segments relatifs (`../`). Suppression du repli de lecture de fichiers arbitraires hors destination.
+- **Sécurisation des jetons de registre** : Le jeton d'authentification du registre n'est plus jamais passé sur la ligne de commande (`-registry-token`). Il est transmis exclusivement au sous-processus via la variable d'environnement `COMPLIANCE_REGISTRY_TOKEN`.
+- **Confinement Job Object sous Windows** : En cas d'échec d'assignation du processus enfant au Windows Job Object (`assignProcessToJob`), le processus créé est immédiatement terminé pour éliminer tout risque d'orphelin.
+- **Transparence SHA-256 et signatures Ed25519** : Les divergences de somme SHA-256 ou d'intégrité de signature de manifeste émettent un avertissement explicite (`[WARN]`) dans les logs sans bloquer l'installation, assurant le bon fonctionnement sur les miroirs d'entreprise.
+- **Purge d'artefacts et assainissement du code** : Nettoyage des anciens fichiers VSIX versionnés (65+ Mo libérés), suppression des images et fragments orphelins, élimination du code mort des pipelines déclaratifs inutilisés (`LoadPipelineFile`, `ValidateDAG`, `ComputeTopologicalOrder`), et vérification stricte des écritures disque du serveur.
+- **Documentation et matrice des plateformes** : Documentation explicite de la couverture du registre (10 binaires natifs pour les 5 plateformes cibles, bundles Python, Node et PSScriptAnalyzer qualifiés pour Windows x64 sur `tools-v1`).
+
 ## 2.0.15
 
 - **Registre d'outils auto-hébergé (`tools-v1`)** : Suppression de toutes les dépendances d'installation envers des forges tierces (éditeurs, PyPI, npm, PowerShell Gallery). Tous les outils du catalogue sont désormais hébergés, précompilés et distribués via la release GitHub `tools-v1` (`https://github.com/LORD-SOUPEX/Compliance_Platform/releases/tag/tools-v1`).

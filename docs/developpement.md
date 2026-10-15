@@ -1,6 +1,6 @@
 # Développement
 
-Version courante : 2.0.15.
+Version courante : 2.0.16.
 
 Sessions Windows x64 exécutées pour cette version :
 
@@ -82,7 +82,7 @@ Réinstaller l'extension de test, sans script PowerShell :
 
 ```bash
 cd vscode-extension
-npm run reinstall -- dist/compliance-local-pipelines-2.0.15.vsix
+npm run reinstall -- dist/compliance-local-pipelines-2.0.16.vsix
 ```
 
 Cela arrête le démon, désinstalle l'extension, supprime les dossiers résiduels de l'extension et installe le VSIX. Les sessions restent dans le dossier utilisateur.
