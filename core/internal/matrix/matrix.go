@@ -241,88 +241,131 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 		return st
 	}
 
-	// 2. Check .tools/bin/<command>[.exe]
-	toolBin := filepath.Join(root, ".tools", "bin", command+ext)
-	if _, err := os.Stat(toolBin); err == nil {
-		return probeCommand(toolBin, false)
-	}
-
-	// 3. Check standalone python runtime (.tools/python/Scripts or .tools/python/bin)
-	pyScriptsDir := filepath.Join(root, ".tools", "python", "Scripts")
-	if platform.OS != "windows" {
-		pyScriptsDir = filepath.Join(root, ".tools", "python", "bin")
-	}
-	pyCandidates := []string{
-		filepath.Join(pyScriptsDir, command+".exe"),
-		filepath.Join(pyScriptsDir, command+".cmd"),
-		filepath.Join(pyScriptsDir, command),
-	}
-	for _, cand := range pyCandidates {
-		if _, err := os.Stat(cand); err == nil {
-			return probeCommand(cand, true)
+	probePythonTool := func(pyExe string) (CandidateToolState, bool) {
+		norm := filepath.ToSlash(pyExe)
+		cacheKey := norm + ":" + command
+		if val, ok := r.cache.Load(cacheKey); ok {
+			st := val.(CandidateToolState)
+			st.Name = name
+			st.Command = command
+			return st, true
 		}
-	}
 
-	// 4. Check .tools/runtime/<platform>/<command>/...
-	runtimeDir := filepath.Join(root, ".tools", "runtime", platform.ID, command)
-	if entries, err := os.ReadDir(runtimeDir); err == nil {
-		for _, e := range entries {
-			cand := filepath.Join(runtimeDir, e.Name(), command+ext)
-			if _, err := os.Stat(cand); err == nil {
-				return probeCommand(cand, true)
-			}
+		modName := pythonModuleName(command)
+		probeArgs := []string{"-m", modName, "--version"}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		cmd := exec.CommandContext(ctx, pyExe, probeArgs...)
+		osutil.SetHideWindow(cmd)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return CandidateToolState{}, false
 		}
-	}
 
-	// 5. Distribution cache produced by compliance runtime sync.
-	cacheRoot := osutil.DefaultToolCacheDir()
-	venvDir := filepath.Join(cacheRoot, "venv", "bin")
-	if platform.OS == "windows" {
-		venvDir = filepath.Join(cacheRoot, "venv", "Scripts")
-	}
-	for _, cand := range []string{
-		filepath.Join(venvDir, command+ext),
-		filepath.Join(venvDir, command+".cmd"),
-		filepath.Join(venvDir, command+".bat"),
-		filepath.Join(venvDir, command),
-	} {
-		if info, err := os.Stat(cand); err == nil && !info.IsDir() {
-			return probeCommand(cand, true)
+		verMatch := reVersion.FindString(string(out))
+		var ver *string
+		if verMatch != "" {
+			ver = &verMatch
 		}
-	}
-	cached := filepath.Join(cacheRoot, "bin", platform.ID, command+ext)
-	if info, err := os.Stat(cached); err == nil && !info.IsDir() {
-		return probeCommand(cached, true)
+
+		reason := fmt.Sprintf("Module %s qualifié et exécutable dans l'environnement Python autonome.", modName)
+		if ver != nil {
+			reason = fmt.Sprintf("Version %s du package %s indexée et exécutable dans l'environnement Python autonome.", *ver, name)
+		}
+
+		st := CandidateToolState{
+			Name:           name,
+			Command:        command,
+			Status:         "available",
+			Source:         &norm,
+			Version:        ver,
+			RuntimeManaged: true,
+			Platform:       platform.ID,
+			Reason:         reason,
+		}
+		r.cache.Store(cacheKey, st)
+		return st, true
 	}
 
-	// 6. Check PowerShell modules for Invoke-ScriptAnalyzer
-	if command == "Invoke-ScriptAnalyzer" {
-		psModule := filepath.Join(root, ".tools", "powershell-modules", "PSScriptAnalyzer")
-		if _, err := os.Stat(psModule); err == nil {
-			manifest := filepath.Join(psModule, "PSScriptAnalyzer.psd1")
-			if _, err := os.Stat(manifest); os.IsNotExist(err) {
-				// Check versioned subdirectories like 1.25.0
-				entries, _ := os.ReadDir(psModule)
-				for _, e := range entries {
-					if e.IsDir() {
-						subManifest := filepath.Join(psModule, e.Name(), "PSScriptAnalyzer.psd1")
-						if _, err := os.Stat(subManifest); err == nil {
-							manifest = subManifest
-							break
-						}
-					}
+	// 2. Strict order for Node tools (eslint, tsc):
+	// Priority 1: Target node_modules/.bin
+	// Priority 2: Bundle ~/.compliance/tools/node (or .tools/node)
+	// Priority 3: System PATH
+	if command == "eslint" || command == "tsc" {
+		cmdNames := []string{command, command + ".cmd", command + ".exe", command + ".ps1"}
+		if repoRoot != "" {
+			targetBin := filepath.Join(repoRoot, "node_modules", ".bin")
+			for _, cName := range cmdNames {
+				cand := filepath.Join(targetBin, cName)
+				if info, err := os.Stat(cand); err == nil && !info.IsDir() {
+					return probeCommand(cand, false)
 				}
 			}
-			norm := filepath.ToSlash(manifest)
-			return CandidateToolState{
-				Name:           name,
-				Command:        command,
-				Status:         "available",
-				Source:         &norm,
-				Version:        nil,
-				RuntimeManaged: true,
-				Platform:       platform.ID,
-				Reason:         "Module trouvé dans les modules PowerShell gérés par Compliance_Platform.",
+		}
+
+		// Bundle candidate directories
+		cacheRoot := osutil.DefaultToolCacheDir()
+		bundleDirs := []string{
+			filepath.Join(root, ".tools", "node", "node_modules", ".bin"),
+			filepath.Join(cacheRoot, "node", "node_modules", ".bin"),
+		}
+		if env := os.Getenv("COMPLIANCE_NODE_TOOLS"); env != "" {
+			bundleDirs = append([]string{filepath.Join(env, "node_modules", ".bin")}, bundleDirs...)
+		}
+		for _, bDir := range bundleDirs {
+			for _, cName := range cmdNames {
+				cand := filepath.Join(bDir, cName)
+				if info, err := os.Stat(cand); err == nil && !info.IsDir() {
+					return probeCommand(cand, true)
+				}
+			}
+		}
+
+		if found := osutil.LookupExecutable(command); found != "" {
+			return probeCommand(found, false)
+		}
+
+		return CandidateToolState{
+			Name:           name,
+			Command:        command,
+			Status:         "not_installed",
+			Source:         nil,
+			Version:        nil,
+			RuntimeManaged: false,
+			Platform:       platform.ID,
+			Reason:         "Outil JavaScript/TypeScript introuvable dans node_modules/.bin ni dans le bundle Node.",
+		}
+	}
+
+	// 3. Strict order for PowerShell module (Invoke-ScriptAnalyzer):
+	// Priority 1: .tools/powershell-modules/PSScriptAnalyzer (local dev)
+	// Priority 2: ~/.compliance/tools/powershell-modules/PSScriptAnalyzer (registry installed)
+	// Priority 3: System PSModulePath
+	if command == "Invoke-ScriptAnalyzer" {
+		cacheRoot := osutil.DefaultToolCacheDir()
+		candidates := []struct {
+			dir     string
+			managed bool
+			reason  string
+		}{
+			{filepath.Join(root, ".tools", "powershell-modules", "PSScriptAnalyzer"), true, "Module trouvé dans les modules PowerShell locaux (.tools)."},
+			{filepath.Join(cacheRoot, "powershell-modules", "PSScriptAnalyzer"), true, "Module trouvé dans le registre d'outils Compliance_Platform."},
+		}
+		for _, c := range candidates {
+			if manifest := findPSScriptAnalyzerManifest(c.dir); manifest != "" {
+				norm := filepath.ToSlash(manifest)
+				return CandidateToolState{
+					Name:           name,
+					Command:        command,
+					Status:         "available",
+					Source:         &norm,
+					Version:        nil,
+					RuntimeManaged: c.managed,
+					Platform:       platform.ID,
+					Reason:         c.reason,
+				}
 			}
 		}
 
@@ -351,33 +394,17 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 			if baseDir == "" {
 				continue
 			}
-			modDir := filepath.Join(baseDir, "PSScriptAnalyzer")
-			if fi, err := os.Stat(modDir); err == nil && fi.IsDir() {
-				manifest := filepath.Join(modDir, "PSScriptAnalyzer.psd1")
-				if _, err := os.Stat(manifest); os.IsNotExist(err) {
-					entries, _ := os.ReadDir(modDir)
-					for _, e := range entries {
-						if e.IsDir() {
-							subManifest := filepath.Join(modDir, e.Name(), "PSScriptAnalyzer.psd1")
-							if _, err := os.Stat(subManifest); err == nil {
-								manifest = subManifest
-								break
-							}
-						}
-					}
-				}
-				if _, err := os.Stat(manifest); err == nil {
-					norm := filepath.ToSlash(manifest)
-					return CandidateToolState{
-						Name:           name,
-						Command:        command,
-						Status:         "available",
-						Source:         &norm,
-						Version:        nil,
-						RuntimeManaged: false,
-						Platform:       platform.ID,
-						Reason:         "Module PSScriptAnalyzer système disponible.",
-					}
+			if manifest := findPSScriptAnalyzerManifest(filepath.Join(baseDir, "PSScriptAnalyzer")); manifest != "" {
+				norm := filepath.ToSlash(manifest)
+				return CandidateToolState{
+					Name:           name,
+					Command:        command,
+					Status:         "available",
+					Source:         &norm,
+					Version:        nil,
+					RuntimeManaged: false,
+					Platform:       platform.ID,
+					Reason:         "Module PSScriptAnalyzer système disponible.",
 				}
 			}
 		}
@@ -394,23 +421,42 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 		}
 	}
 
-	// 7. Node package scripts live next to the target, not in the platform cache.
-	if repoRoot != "" {
-		binDir := filepath.Join(repoRoot, "node_modules", ".bin")
-		for _, candidateName := range []string{command, command + ".cmd", command + ".exe", command + ".ps1"} {
-			candidate := filepath.Join(binDir, candidateName)
-			if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
-				return probeCommand(candidate, false)
+	// 4. All other tools:
+	// Order: .tools/bin (dev local) ➔ ~/.compliance/tools/{bin,python} ➔ PATH
+	toolBin := filepath.Join(root, ".tools", "bin", command+ext)
+	if _, err := os.Stat(toolBin); err == nil {
+		return probeCommand(toolBin, false)
+	}
+
+	cacheRoot := osutil.DefaultToolCacheDir()
+
+	// If Python tool: check relocatable Python bundle (.tools/python ➔ ~/.compliance/tools/python)
+	if isPythonTool(command) {
+		pyDirs := []string{
+			filepath.Join(root, ".tools", "python"),
+			filepath.Join(cacheRoot, "python"),
+		}
+		for _, pDir := range pyDirs {
+			if pyExe := findBundlePython(pDir); pyExe != "" {
+				if st, ok := probePythonTool(pyExe); ok {
+					return st
+				}
 			}
 		}
 	}
 
-	// 8. Darwin tool directories (Homebrew, pip user, pyenv), then PATH.
+	// Native binary in registry cache (~/.compliance/tools/bin/<platform>/<command>[.exe])
+	cached := filepath.Join(cacheRoot, "bin", platform.ID, command+ext)
+	if info, err := os.Stat(cached); err == nil && !info.IsDir() {
+		return probeCommand(cached, true)
+	}
+
+	// Darwin tool directories, then system PATH
 	if found := osutil.LookupExecutable(command); found != "" {
 		return probeCommand(found, false)
 	}
 
-	// 6. Not installed
+	// Not installed
 	return CandidateToolState{
 		Name:           name,
 		Command:        command,
@@ -929,4 +975,68 @@ func (c *ControlCatalog) GetCapabilityProfile(technology string) []CapabilityPro
 	}
 
 	return profiles
+}
+
+func isPythonTool(command string) bool {
+	switch command {
+	case "checkov", "bandit", "pylint", "pytest", "pip-audit", "yamllint", "ansible-lint":
+		return true
+	default:
+		return false
+	}
+}
+
+func pythonModuleName(command string) string {
+	switch command {
+	case "pip-audit":
+		return "pip_audit"
+	case "ansible-lint":
+		return "ansiblelint"
+	default:
+		return command
+	}
+}
+
+func findBundlePython(dir string) string {
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		return ""
+	}
+	if runtime.GOOS == "windows" {
+		exe := filepath.Join(dir, "python.exe")
+		if fi, err := os.Stat(exe); err == nil && !fi.IsDir() && fi.Size() > 0 {
+			return exe
+		}
+	} else {
+		for _, name := range []string{"bin/python3", "bin/python", "python3", "python"} {
+			exe := filepath.Join(dir, filepath.FromSlash(name))
+			if fi, err := os.Stat(exe); err == nil && !fi.IsDir() && fi.Size() > 0 {
+				return exe
+			}
+		}
+	}
+	sub := filepath.Join(dir, "python")
+	if fi, err := os.Stat(sub); err == nil && fi.IsDir() {
+		return findBundlePython(sub)
+	}
+	return ""
+}
+
+func findPSScriptAnalyzerManifest(baseDir string) string {
+	if fi, err := os.Stat(baseDir); err != nil || !fi.IsDir() {
+		return ""
+	}
+	direct := filepath.Join(baseDir, "PSScriptAnalyzer.psd1")
+	if fi, err := os.Stat(direct); err == nil && !fi.IsDir() {
+		return direct
+	}
+	entries, _ := os.ReadDir(baseDir)
+	for _, e := range entries {
+		if e.IsDir() {
+			sub := filepath.Join(baseDir, e.Name(), "PSScriptAnalyzer.psd1")
+			if fi, err := os.Stat(sub); err == nil && !fi.IsDir() {
+				return sub
+			}
+		}
+	}
+	return ""
 }

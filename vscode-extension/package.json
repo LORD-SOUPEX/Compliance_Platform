@@ -2,7 +2,7 @@
   "name": "compliance-local-pipelines",
   "displayName": "ICP - IaC Compliance Platform",
   "description": "Audit local de dépôts (IaC, conteneurs, Python, JavaScript, TypeScript, Markdown) par un démon Go, sans service cloud.",
-  "version": "2.0.14",
+  "version": "2.0.15",
   "publisher": "compliance-platform",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -238,6 +238,20 @@
           "scope": "application",
           "description": "Identifiants de contrôles ignorés.",
           "markdownDescription": "Identifiants du catalogue à ne pas exécuter. Réglage de la machine, jamais lu depuis le dépôt."
+        },
+        "compliance.registryUrl": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "URL de base personnalisée du registre d'outils (ex: miroir Artifactory/Nexus d'entreprise).",
+          "markdownDescription": "URL de base personnalisée du registre d'outils (ex: miroir Artifactory/Nexus). Si vide, utilise le registre officiel GitHub Releases `tools-v1`."
+        },
+        "compliance.registryToken": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Jeton d'authentification Bearer pour le registre d'outils privé.",
+          "markdownDescription": "Jeton d'authentification Bearer pour le registre d'outils privé. Peut également être défini via la variable d'environnement `COMPLIANCE_REGISTRY_TOKEN`."
         }
       }
     }

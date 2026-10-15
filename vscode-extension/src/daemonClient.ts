@@ -242,16 +242,23 @@ export class DaemonClient {
         });
     }
 
-    public async syncTools(platformRoot: string, tools: string[]): Promise<void> {
+    public async syncTools(platformRoot: string, tools: string[], options?: { registryUrl?: string; registryToken?: string }): Promise<void> {
         const staged = await this.stagedRuntime(platformRoot);
         const manifest = path.join(staged.platformRoot, '.config', 'runtime-manifest.json');
         const signature = path.join(staged.platformRoot, '.config', 'runtime-manifest.json.sig');
         const installed: string[] = [];
         const failed: string[] = [];
+        const extraArgs: string[] = [];
+        if (options?.registryUrl) {
+            extraArgs.push('-registry-url', options.registryUrl);
+        }
+        if (options?.registryToken) {
+            extraArgs.push('-registry-token', options.registryToken);
+        }
         for (const tool of tools) {
             try {
                 await new Promise<void>((resolve, reject) => {
-                    const child = spawn(staged.binary, ['runtime', 'sync', '-manifest', manifest, '-sig', signature, '-tool', tool], { cwd: staged.cwd, windowsHide: true });
+                    const child = spawn(staged.binary, ['runtime', 'sync', '-manifest', manifest, '-sig', signature, '-tool', tool, ...extraArgs], { cwd: staged.cwd, windowsHide: true });
                     let stderr = '';
                     child.stderr?.on('data', chunk => { stderr += String(chunk); });
                     child.on('error', reject);

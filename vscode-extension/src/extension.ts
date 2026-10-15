@@ -192,7 +192,12 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
         }
         try {
             const client = new DaemonClient();
-            if (known.length) { await client.syncTools(source, known.map(tool => tool.command)); }
+            if (known.length) {
+                const config = vscode.workspace.getConfiguration('compliance');
+                const registryUrl = config.get<string>('registryUrl', '');
+                const registryToken = config.get<string>('registryToken', '');
+                await client.syncTools(source, known.map(tool => tool.command), { registryUrl, registryToken });
+            }
             if (nodeCommands.length) { await client.installNodeToolchain(source); }
             await context.globalState.update('compliance.toolConsent', { fingerprint: id, decision: 'accepted', installed: true } satisfies ConsentMemory);
             return true;

@@ -47,12 +47,15 @@ const DefaultPhase0PublicKeyHex = "c59fd4e179c55a3dd2110785d9ae7a9b4adafc1e54ca3
 type ToolEntry struct {
 	Name            string   `json:"name"`
 	Version         string   `json:"version"`
-	ArchiveURL      string   `json:"archive_url"`
+	Install         string   `json:"install,omitempty"` // "archive", "bundle", "binary", "pip", "runtime"
+	Archive         string   `json:"archive,omitempty"`
+	ArchiveURL      string   `json:"archive_url,omitempty"`
 	ArchiveSHA256   string   `json:"archive_sha256"`
 	BinaryInArchive string   `json:"binary_in_archive"`
-	BinarySHA256    string   `json:"binary_sha256"`
+	BinarySHA256    string   `json:"binary_sha256,omitempty"`
+	Bundle          string   `json:"bundle,omitempty"`
+	PythonModule    string   `json:"python_module,omitempty"`
 	VersionArgs     []string `json:"version_args,omitempty"`
-	Install         string   `json:"install,omitempty"` // binary, pip, runtime
 	Package         string   `json:"package,omitempty"`
 }
 
@@ -66,7 +69,45 @@ type PlatformManifest struct {
 type RuntimeManifest struct {
 	SchemaVersion   int                         `json:"schema_version"`
 	ManifestVersion string                      `json:"manifest_version"`
+	RegistryBaseURL string                      `json:"registry_base_url,omitempty"`
 	Platforms       map[string]PlatformManifest `json:"platforms"`
+}
+
+// DefaultRegistryBaseURL is the public GitHub release tools distribution URL.
+const DefaultRegistryBaseURL = "https://github.com/LORD-SOUPEX/Compliance_Platform/releases/download/tools-v1"
+
+// ResolveRegistryURL returns the effective registry base URL from options, env var, manifest, or default.
+func ResolveRegistryURL(optURL, manifestURL string) string {
+	if optURL != "" {
+		return strings.TrimRight(optURL, "/")
+	}
+	if env := os.Getenv("COMPLIANCE_REGISTRY_URL"); env != "" {
+		return strings.TrimRight(env, "/")
+	}
+	if manifestURL != "" {
+		return strings.TrimRight(manifestURL, "/")
+	}
+	return DefaultRegistryBaseURL
+}
+
+func (tool ToolEntry) archiveName() string {
+	if tool.Archive != "" {
+		return tool.Archive
+	}
+	if tool.ArchiveURL != "" {
+		return filepath.Base(strings.Split(tool.ArchiveURL, "?")[0])
+	}
+	return ""
+}
+
+func (tool ToolEntry) resolveURL(registryBase string) string {
+	if tool.ArchiveURL != "" {
+		return tool.ArchiveURL
+	}
+	if tool.Archive != "" {
+		return strings.TrimRight(registryBase, "/") + "/" + tool.Archive
+	}
+	return ""
 }
 
 // SignManifest creates an Ed25519 signature over manifest bytes and returns it in hex.
@@ -147,6 +188,8 @@ type SyncOptions struct {
 	ArchiveCacheDir string // Optional directory for caching/retrieving archives offline
 	ToolName        string // Optional: if specified, synchronizes ONLY this tool
 	OfflineOnly     bool   // If true, strictly forbids network requests
+	RegistryURL     string // Optional registry base URL override
+	RegistryToken   string // Optional registry auth token (or COMPLIANCE_REGISTRY_TOKEN)
 }
 
 // SyncResult details synced tools.
@@ -171,14 +214,14 @@ func SyncRuntime(opts SyncOptions) (*SyncResult, error) {
 
 	client := buildHTTPClient(opts.CABundlePath)
 
-	manifestBytes, err := fetchBytes(opts.ManifestPath, client)
+	manifestBytes, err := fetchBytes(opts.ManifestPath, client, opts.RegistryToken)
 	if err != nil {
 		return nil, fmt.Errorf("lecture du manifeste impossible: %w", err)
 	}
 
 	// La signature est informative. Une signature absente ou différente n'empêche pas l'installation.
 	if strings.TrimSpace(opts.SigPath) != "" {
-		if sigBytes, sigErr := fetchBytes(opts.SigPath, client); sigErr == nil {
+		if sigBytes, sigErr := fetchBytes(opts.SigPath, client, opts.RegistryToken); sigErr == nil {
 			_ = VerifyManifest(manifestBytes, string(sigBytes), opts.PublicKey)
 		}
 	}
@@ -187,6 +230,8 @@ func SyncRuntime(opts SyncOptions) (*SyncResult, error) {
 	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
 		return nil, fmt.Errorf("décodage JSON du manifeste: %w", err)
 	}
+
+	registryBase := ResolveRegistryURL(opts.RegistryURL, manifest.RegistryBaseURL)
 
 	plat, ok := manifest.Platforms[opts.Platform]
 	if !ok {
@@ -215,7 +260,7 @@ func SyncRuntime(opts SyncOptions) (*SyncResult, error) {
 			continue
 		}
 		requested = true
-		dest, err := installEntry(opts.CacheDir, opts.Platform, name, plat.Tools[name], plat.Tools, client, opts)
+		dest, err := installEntry(opts.CacheDir, opts.Platform, name, plat.Tools[name], plat.Tools, client, opts, registryBase)
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("%s (%s)", name, err))
 			continue
@@ -267,6 +312,8 @@ type ResolverOptions struct {
 	PublicKey       ed25519.PublicKey
 	CABundlePath    string
 	OfflineOnly     bool
+	RegistryURL     string
+	RegistryToken   string
 }
 
 // ResolvedTool provides details on a successfully resolved executable.
@@ -352,16 +399,16 @@ func (r *Resolver) ResolveTool(ctx context.Context, toolName string) (*ResolvedT
 		}
 	}
 
-	if toolEntry.kind() == "pip" {
-		candidate := venvExecutable(r.opts.CacheDir, toolName)
-		if executablePresent(candidate) {
+	if toolEntry.kind() == "bundle" {
+		candidate := resolvedBundlePath(r.opts.CacheDir, r.opts.Platform, toolKey, toolEntry)
+		if executablePresent(candidate) || (strings.HasSuffix(candidate, ".psd1") && fileExists(candidate)) {
 			absPath, _ := filepath.Abs(candidate)
 			return &ResolvedTool{
 				Name:           toolName,
 				Version:        toolEntry.Version,
 				ExecutablePath: absPath,
 				SHA256:         fileSHA256(candidate),
-				Source:         "venv",
+				Source:         "bundle",
 			}, nil
 		}
 	}
@@ -390,6 +437,8 @@ func (r *Resolver) ResolveTool(ctx context.Context, toolName string) (*ResolvedT
 		CABundlePath:    r.opts.CABundlePath,
 		ToolName:        toolKey,
 		OfflineOnly:     r.opts.OfflineOnly,
+		RegistryURL:     r.opts.RegistryURL,
+		RegistryToken:   r.opts.RegistryToken,
 	})
 	if err != nil {
 		if r.opts.OfflineOnly {
@@ -449,9 +498,19 @@ func sha256Hex(data []byte) string {
 	return hex.EncodeToString(h[:])
 }
 
-func fetchBytes(uriOrPath string, client *http.Client) ([]byte, error) {
+func fetchBytes(uriOrPath string, client *http.Client, token string) ([]byte, error) {
 	if strings.HasPrefix(uriOrPath, "http://") || strings.HasPrefix(uriOrPath, "https://") {
-		resp, err := client.Get(uriOrPath)
+		req, err := http.NewRequest(http.MethodGet, uriOrPath, nil)
+		if err != nil {
+			return nil, err
+		}
+		if token == "" {
+			token = os.Getenv("COMPLIANCE_REGISTRY_TOKEN")
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := client.Do(req)
 		if err != nil {
 			return nil, err
 		}

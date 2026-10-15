@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.15
+
+- **Registre d'outils auto-hébergé (`tools-v1`)** : Suppression de toutes les dépendances d'installation envers des forges tierces (éditeurs, PyPI, npm, PowerShell Gallery). Tous les outils du catalogue sont désormais hébergés, précompilés et distribués via la release GitHub `tools-v1` (`https://github.com/LORD-SOUPEX/Compliance_Platform/releases/tag/tools-v1`).
+- **Bundle Python 100 % relocalisable** : Remplacement des environnements virtuels `venv` à chemins codés en dur par un bundle CPython autonome sans shebangs absolus. Les outils Python (`checkov`, `bandit`, `pylint`, `pytest`, `pip-audit`, `yamllint`, `ansible-lint`) s'exécutent via l'interpréteur autonome du bundle (`python -m <module>`).
+- **Module PowerShell `PSScriptAnalyzer`** : Packaging de `PSScriptAnalyzer-1.23.0.zip` dans le registre, installable en 1 clic sous Windows sans dépendre de la PowerShell Gallery.
+- **Ordre strict de résolution des outils** :
+  1. `eslint`/`tsc` : `node_modules/.bin` de la Target en priorité, sinon bundle `~/.compliance/tools/node`.
+  2. Autres outils : `.tools/bin/` (dev local) ➔ `~/.compliance/tools/{bin,python,node,powershell-modules}` (registre installé) ➔ `PATH` système.
+- **Compatibilité entreprise et miroirs privés** : Support des réglages `compliance.registryUrl` (ou `COMPLIANCE_REGISTRY_URL`) et `compliance.registryToken` (`COMPLIANCE_REGISTRY_TOKEN`) pour rediriger les téléchargements vers un miroir Artifactory, Nexus ou GitLab Package Registry privé.
+- **Publication multi-OS et format d'assets aplati** : Reconditionnement des 10 outils natifs pour les 5 plateformes sous un format à plat `<platform>-<tool>-<version>.<ext>` compatible GitHub Releases, avec formats d'archives `.zip` et `.tar.gz` supportés nativement en Go.
+- **Synchronisation automatique du manifeste** : `package_vsix.py` synchronise `.config/runtime-manifest.json` vers les assets embarqués Go avant la cross-compilation des démons.
+
 ## 2.0.14
 
 - Le lancement accepte un plan qui contient `platform_unsupported`. Le rejet nomme le contrôle, la racine et la raison. La préparation valide le même plan.

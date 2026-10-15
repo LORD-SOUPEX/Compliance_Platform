@@ -48,3 +48,6 @@ vscode-extension/node_modules/
 vscode-extension/.vscode-test/
 vscode-extension/.extension-build/
 
+# Tools distribution build directory
+dist-tools/
+

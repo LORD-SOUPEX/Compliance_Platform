@@ -1,6 +1,7 @@
 {
-  "schema_version": 2,
-  "manifest_version": "2.0.8",
+  "schema_version": 3,
+  "manifest_version": "2.0.15",
+  "registry_base_url": "https://github.com/LORD-SOUPEX/Compliance_Platform/releases/download/tools-v1",
   "platforms": {
     "windows-x64": {
       "status": "qualified",
@@ -8,225 +9,278 @@
         "ruff": {
           "name": "ruff",
           "version": "0.16.10",
-          "archive_url": "https://github.com/astral-sh/ruff/releases/download/0.16.10/ruff-x86_64-pc-windows-msvc.zip",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "windows-x64-ruff-0.16.10.zip",
+          "archive_sha256": "2e590d036213a0956ed4079f55dd526ab23c300b7c601d933b5ea852f2d136c4",
           "binary_in_archive": "ruff.exe",
-          "binary_sha256": "",
+          "binary_sha256": "7663ebf1a11dfdad737f95a0952d9e893eb88bf0ab6a24e3c4e48d4c8b8156eb",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "gitleaks": {
           "name": "gitleaks",
           "version": "8.30.1",
-          "archive_url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_windows_x64.zip",
-          "archive_sha256": "d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e",
+          "install": "archive",
+          "archive": "windows-x64-gitleaks-8.30.1.zip",
+          "archive_sha256": "6889d033f94894800560c142efa1417d0ea1a88323f65e42253811691926df21",
           "binary_in_archive": "gitleaks.exe",
           "binary_sha256": "17157e2ee8b76fc8b1d8bee607a250e34b8a8023c8bc81822d4b5ee4d78fcb7c",
           "version_args": [
             "version"
-          ],
-          "install": "binary"
+          ]
         },
         "tflint": {
           "name": "tflint",
           "version": "0.64.0",
-          "archive_url": "https://github.com/terraform-linters/tflint/releases/download/v0.64.0/tflint_windows_amd64.zip",
-          "archive_sha256": "fb42fb859d844b156a8ea9d3363078c4d8b85ca78782e60876b08c9b8e59f303",
+          "install": "archive",
+          "archive": "windows-x64-tflint-0.64.0.zip",
+          "archive_sha256": "29c5470aaba67564034ad3a7f9c5299bd76152e92ed810b4f5aed31c9656a6a6",
           "binary_in_archive": "tflint.exe",
           "binary_sha256": "cd21f5cd4e29cb16e0e4e65c8cae11053d6f4461f2cf6a8b9a62d272d6a43a45",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "trivy": {
           "name": "trivy",
           "version": "0.75.0",
-          "archive_url": "https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_windows-64bit.zip",
-          "archive_sha256": "4e43bd71a30f51aee39525f60f2b47043af77eb8df8fe082aae4372b69c6660f",
+          "install": "archive",
+          "archive": "windows-x64-trivy-0.75.0.zip",
+          "archive_sha256": "4868e7dee55b105fcc0c7d0a762ca8bc83ad53f83bf90a6ca83af93958a5ba12",
           "binary_in_archive": "trivy.exe",
           "binary_sha256": "3b4fcf6fec53c4c73c325cfd518c7264100695b19e6c59c6a777e4a67dc9f0e6",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "terraform": {
           "name": "terraform",
           "version": "1.8.5",
-          "archive_url": "https://releases.hashicorp.com/terraform/1.8.5/terraform_1.8.5_windows_amd64.zip",
-          "archive_sha256": "17f93df5a4021a415f3fd50d2b55c0d093b42c64ea9957ceda55be3aaa91b0e5",
+          "install": "archive",
+          "archive": "windows-x64-terraform-1.8.5.zip",
+          "archive_sha256": "86f7dfdffcded223825aef4ac9f74cdc596a5096d4d5b980073fff812d1242fb",
           "binary_in_archive": "terraform.exe",
           "binary_sha256": "e8d09543b436e84db70aa12ce42f1af1729b3b0489b424d29933a207034be2b1",
           "version_args": [
             "version"
-          ],
-          "install": "binary"
+          ]
         },
         "tofu": {
           "name": "tofu",
           "version": "1.8.2",
-          "archive_url": "https://github.com/opentofu/opentofu/releases/download/v1.8.2/tofu_1.8.2_windows_amd64.zip",
-          "archive_sha256": "50af268bfdc9df41e895b8820f98ad5fe3f34a44ded1653fa16109ea67faa55e",
+          "install": "archive",
+          "archive": "windows-x64-tofu-1.8.2.zip",
+          "archive_sha256": "0f7c661b716e8521bf171e8585da6b7962ca60f55814f6180ce315f82d1b3a41",
           "binary_in_archive": "tofu.exe",
           "binary_sha256": "cee2710f856076260855600f051cf7ae5387ffa3792c77c9b95757c3c08888fb",
           "version_args": [
             "version"
-          ],
-          "install": "binary"
+          ]
         },
         "hadolint": {
           "name": "hadolint",
           "version": "2.15.1",
-          "archive_url": "https://github.com/hadolint/hadolint/releases/download/v2.15.1/hadolint-windows-x86_64.exe",
-          "archive_sha256": "01d927294962b5387f9ead4f18679158452be4f17c765ad0bdffe5264b9c7b0a",
-          "binary_in_archive": "hadolint-windows-x86_64.exe",
+          "install": "archive",
+          "archive": "windows-x64-hadolint-2.15.1.zip",
+          "archive_sha256": "a38b4193d768a7f8f991a7bde8bbac7655c77eabbd6892bdb38bb4f8b8c66509",
+          "binary_in_archive": "hadolint.exe",
           "binary_sha256": "01d927294962b5387f9ead4f18679158452be4f17c765ad0bdffe5264b9c7b0a",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "terragrunt": {
           "name": "terragrunt",
           "version": "1.1.6",
-          "archive_url": "https://github.com/gruntwork-io/terragrunt/releases/download/v1.1.6/terragrunt_windows_amd64.exe",
-          "archive_sha256": "609c60fbc334867cad90146cd0297ea80c19d711a81ae4690570082195f66afe",
-          "binary_in_archive": "terragrunt_windows_amd64.exe",
+          "install": "archive",
+          "archive": "windows-x64-terragrunt-1.1.6.zip",
+          "archive_sha256": "00f3f81fe413aa807ed19ff4ac260467bf8555c37f397a1ee7e9193d9018ee36",
+          "binary_in_archive": "terragrunt.exe",
           "binary_sha256": "609c60fbc334867cad90146cd0297ea80c19d711a81ae4690570082195f66afe",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "shellcheck": {
           "name": "shellcheck",
           "version": "0.10.0",
-          "archive_url": "https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.zip",
-          "archive_sha256": "eb6cd53a54ea97a56540e9d296ce7e2fa68715aa507ff23574646c1e12b2e143",
+          "install": "archive",
+          "archive": "windows-x64-shellcheck-0.10.0.zip",
+          "archive_sha256": "aac34b7308267aaaaddb5e4176cf45af68cbf2f768234fb29f6af0b9b0b62596",
           "binary_in_archive": "shellcheck.exe",
           "binary_sha256": "4dd6fb1debca8ac71a24f932abcbed3e55d3078af71ac7c6dad98633020b7a97",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "rumdl": {
           "name": "rumdl",
           "version": "0.2.79",
-          "archive_url": "https://github.com/rvben/rumdl/releases/download/v0.2.79/rumdl-v0.2.79-x86_64-pc-windows-msvc.zip",
-          "archive_sha256": "07d12118c143976fadaaf7d053ac6be328798ce3b59b3f774572ac946b123672",
+          "install": "archive",
+          "archive": "windows-x64-rumdl-0.2.79.zip",
+          "archive_sha256": "f9f6ec7a358a9c90e301b8ff98b0f35708050affb3cc6b7f91c8a5dd0ca3317b",
           "binary_in_archive": "rumdl.exe",
           "binary_sha256": "6ded1e99688647dfb237fcc9a5db8eb1f32494012b83184d5c0c3c2bff207c15",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "python": {
           "name": "python",
           "version": "3.11.9",
-          "archive_url": "https://github.com/astral-sh/python-build-standalone/releases/download/20240415/cpython-3.11.9%2B20240415-x86_64-pc-windows-msvc-install_only.tar.gz",
-          "archive_sha256": "",
+          "install": "bundle",
+          "archive": "windows-x64-python-tools-3.11.9.tar.gz",
+          "archive_sha256": "4b0ef00825e0cdbb12c64173225439b50cec00c48b59ed5fb5c066df75017764",
           "binary_in_archive": "python/python.exe",
           "binary_sha256": "",
           "version_args": [
             "--version"
-          ],
-          "install": "runtime"
+          ]
         },
         "bandit": {
           "name": "bandit",
           "version": "1.9.4",
-          "archive_url": "https://pypi.org/pypi/bandit/1.9.4/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
+          "install": "bundle",
+          "bundle": "python",
+          "archive": "windows-x64-python-tools-3.11.9.tar.gz",
+          "archive_sha256": "4b0ef00825e0cdbb12c64173225439b50cec00c48b59ed5fb5c066df75017764",
+          "python_module": "bandit",
+          "binary_in_archive": "python/python.exe",
           "binary_sha256": "",
           "version_args": [
             "--version"
-          ],
-          "install": "pip",
-          "package": "bandit"
+          ]
         },
         "pylint": {
           "name": "pylint",
           "version": "4.1.2",
-          "archive_url": "https://pypi.org/pypi/pylint/4.1.2/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
+          "install": "bundle",
+          "bundle": "python",
+          "archive": "windows-x64-python-tools-3.11.9.tar.gz",
+          "archive_sha256": "4b0ef00825e0cdbb12c64173225439b50cec00c48b59ed5fb5c066df75017764",
+          "python_module": "pylint",
+          "binary_in_archive": "python/python.exe",
           "binary_sha256": "",
           "version_args": [
             "--version"
-          ],
-          "install": "pip",
-          "package": "pylint"
+          ]
         },
         "pytest": {
           "name": "pytest",
           "version": "9.1.1",
-          "archive_url": "https://pypi.org/pypi/pytest/9.1.1/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
+          "install": "bundle",
+          "bundle": "python",
+          "archive": "windows-x64-python-tools-3.11.9.tar.gz",
+          "archive_sha256": "4b0ef00825e0cdbb12c64173225439b50cec00c48b59ed5fb5c066df75017764",
+          "python_module": "pytest",
+          "binary_in_archive": "python/python.exe",
           "binary_sha256": "",
           "version_args": [
             "--version"
-          ],
-          "install": "pip",
-          "package": "pytest"
+          ]
         },
         "pip-audit": {
           "name": "pip-audit",
           "version": "2.10.1",
-          "archive_url": "https://pypi.org/pypi/pip-audit/2.10.1/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
+          "install": "bundle",
+          "bundle": "python",
+          "archive": "windows-x64-python-tools-3.11.9.tar.gz",
+          "archive_sha256": "4b0ef00825e0cdbb12c64173225439b50cec00c48b59ed5fb5c066df75017764",
+          "python_module": "pip_audit",
+          "binary_in_archive": "python/python.exe",
           "binary_sha256": "",
           "version_args": [
             "--version"
-          ],
-          "install": "pip",
-          "package": "pip-audit"
+          ]
         },
         "checkov": {
           "name": "checkov",
           "version": "3.3.23",
-          "archive_url": "https://pypi.org/pypi/checkov/3.3.23/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
+          "install": "bundle",
+          "bundle": "python",
+          "archive": "windows-x64-python-tools-3.11.9.tar.gz",
+          "archive_sha256": "4b0ef00825e0cdbb12c64173225439b50cec00c48b59ed5fb5c066df75017764",
+          "python_module": "checkov.main",
+          "binary_in_archive": "python/python.exe",
           "binary_sha256": "",
           "version_args": [
             "--version"
-          ],
-          "install": "pip",
-          "package": "checkov"
+          ]
         },
         "yamllint": {
           "name": "yamllint",
           "version": "1.35.1",
-          "archive_url": "https://pypi.org/pypi/yamllint/1.35.1/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
+          "install": "bundle",
+          "bundle": "python",
+          "archive": "windows-x64-python-tools-3.11.9.tar.gz",
+          "archive_sha256": "4b0ef00825e0cdbb12c64173225439b50cec00c48b59ed5fb5c066df75017764",
+          "python_module": "yamllint",
+          "binary_in_archive": "python/python.exe",
           "binary_sha256": "",
           "version_args": [
             "--version"
-          ],
-          "install": "pip",
-          "package": "yamllint"
+          ]
         },
-        "ansible-lint": {
-          "name": "ansible-lint",
-          "version": "25.8.2",
-          "archive_url": "https://pypi.org/pypi/ansible-lint/25.8.2/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
+        "node": {
+          "name": "node",
+          "version": "22.14.0",
+          "install": "bundle",
+          "archive": "windows-x64-node-tools-22.14.0.zip",
+          "archive_sha256": "4678e4215b4a0d0fc6eb1aa2bb292eb1b2fdf3e72162e3fc0af04cfdf2f56238",
+          "binary_in_archive": "node/node.exe",
+          "binary_sha256": "",
+          "version_args": [
+            "-v"
+          ]
+        },
+        "eslint": {
+          "name": "eslint",
+          "version": "9.21.0",
+          "install": "bundle",
+          "bundle": "node",
+          "archive": "windows-x64-node-tools-22.14.0.zip",
+          "archive_sha256": "4678e4215b4a0d0fc6eb1aa2bb292eb1b2fdf3e72162e3fc0af04cfdf2f56238",
+          "binary_in_archive": "node/node_modules/.bin/eslint.cmd",
           "binary_sha256": "",
           "version_args": [
             "--version"
-          ],
-          "install": "pip",
-          "package": "ansible-lint"
+          ]
+        },
+        "tsc": {
+          "name": "tsc",
+          "version": "5.7.3",
+          "install": "bundle",
+          "bundle": "node",
+          "archive": "windows-x64-node-tools-22.14.0.zip",
+          "archive_sha256": "4678e4215b4a0d0fc6eb1aa2bb292eb1b2fdf3e72162e3fc0af04cfdf2f56238",
+          "binary_in_archive": "node/node_modules/.bin/tsc.cmd",
+          "binary_sha256": "",
+          "version_args": [
+            "-v"
+          ]
+        },
+        "PSScriptAnalyzer": {
+          "name": "PSScriptAnalyzer",
+          "version": "1.23.0",
+          "install": "bundle",
+          "bundle": "powershell-modules",
+          "archive": "windows-x64-powershell-modules-PSScriptAnalyzer-1.23.0.zip",
+          "archive_sha256": "ddedc49b9aebcdf9a8f89b69e23cadd5471bb23556ef1ea5e53065b5c58afd5a",
+          "binary_in_archive": "powershell-modules/PSScriptAnalyzer/PSScriptAnalyzer.psd1",
+          "binary_sha256": "",
+          "version_args": []
+        },
+        "Invoke-ScriptAnalyzer": {
+          "name": "Invoke-ScriptAnalyzer",
+          "version": "1.23.0",
+          "install": "bundle",
+          "bundle": "powershell-modules",
+          "archive": "windows-x64-powershell-modules-PSScriptAnalyzer-1.23.0.zip",
+          "archive_sha256": "ddedc49b9aebcdf9a8f89b69e23cadd5471bb23556ef1ea5e53065b5c58afd5a",
+          "binary_in_archive": "powershell-modules/PSScriptAnalyzer/PSScriptAnalyzer.psd1",
+          "binary_sha256": "",
+          "version_args": []
         }
       }
     },
@@ -236,225 +290,134 @@
         "ruff": {
           "name": "ruff",
           "version": "0.16.10",
-          "archive_url": "https://github.com/astral-sh/ruff/releases/download/0.16.10/ruff-x86_64-unknown-linux-gnu.tar.gz",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "linux-x64-ruff-0.16.10.tar.gz",
+          "archive_sha256": "066d7d13f060a6bcf7546fd92124e113c00fd7f1abf774c9dc37f62980e954bf",
           "binary_in_archive": "ruff",
-          "binary_sha256": "",
+          "binary_sha256": "14704de5ea0d07038512de127bd52d6a169fb70bd70ddfa25bf39e21fed6b2b6",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "gitleaks": {
           "name": "gitleaks",
           "version": "8.30.1",
-          "archive_url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz",
-          "archive_sha256": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
+          "install": "archive",
+          "archive": "linux-x64-gitleaks-8.30.1.tar.gz",
+          "archive_sha256": "9e3e2ba63cce283437410ef71f39fcb48890e4387e245455eddae3707fc3a3e5",
           "binary_in_archive": "gitleaks",
           "binary_sha256": "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509",
           "version_args": [
             "version"
-          ],
-          "install": "binary"
+          ]
         },
         "tflint": {
           "name": "tflint",
           "version": "0.64.0",
-          "archive_url": "https://github.com/terraform-linters/tflint/releases/download/v0.64.0/tflint_linux_amd64.zip",
-          "archive_sha256": "cca9d13e2e1d7a2c627af60ff899a3c9b74212899416aeb96ec764d2ef954537",
+          "install": "archive",
+          "archive": "linux-x64-tflint-0.64.0.zip",
+          "archive_sha256": "26f77120473fe4b4dd682ff9a8ae699cd8a9e1fbe7e9e89af67450bb8b7557b3",
           "binary_in_archive": "tflint",
           "binary_sha256": "ebfaf169df4a7232dcf38063c5c302f7fd171fec5075fcbaec2a1ed8c5244592",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "trivy": {
           "name": "trivy",
           "version": "0.75.0",
-          "archive_url": "https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_Linux-64bit.tar.gz",
-          "archive_sha256": "c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f",
+          "install": "archive",
+          "archive": "linux-x64-trivy-0.75.0.tar.gz",
+          "archive_sha256": "b49083e8bc259182920323f0d76959d029701e820273c014a1f5c0eb8cf6ddcf",
           "binary_in_archive": "trivy",
           "binary_sha256": "93f9da8e4ba5e0c1c76d8234ed2494cf9afb0a96fd21953e424bb795f3299b8e",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "terraform": {
           "name": "terraform",
           "version": "1.8.5",
-          "archive_url": "https://releases.hashicorp.com/terraform/1.8.5/terraform_1.8.5_linux_amd64.zip",
-          "archive_sha256": "bb1ee3e8314da76658002e2e584f2d8854b6def50b7f124e27b957a42ddacfea",
+          "install": "archive",
+          "archive": "linux-x64-terraform-1.8.5.zip",
+          "archive_sha256": "a726c3d679f39a7e3ed07f344e55751ae88b0afc98358c795921a8f2e144838e",
           "binary_in_archive": "terraform",
           "binary_sha256": "026da7f222d6c7506e882173cb48611d50638dcbe98e87639e047797bee69817",
           "version_args": [
             "version"
-          ],
-          "install": "binary"
+          ]
         },
         "tofu": {
           "name": "tofu",
           "version": "1.8.2",
-          "archive_url": "https://github.com/opentofu/opentofu/releases/download/v1.8.2/tofu_1.8.2_linux_amd64.tar.gz",
-          "archive_sha256": "9f43888571cbe9cdfe03e81c6cbb93b4aacc014db19373a4e7608aaa7df111d1",
+          "install": "archive",
+          "archive": "linux-x64-tofu-1.8.2.tar.gz",
+          "archive_sha256": "551e4db2b34c219ea109d45693ecbf0fd9921601f7ead6ce4e67e1a01c6547b8",
           "binary_in_archive": "tofu",
           "binary_sha256": "fa9a0c6248eb6a8fde99eb40a2a157568f5e1b8de9e8a56e91f2ce18e0d6e221",
           "version_args": [
             "version"
-          ],
-          "install": "binary"
+          ]
         },
         "hadolint": {
           "name": "hadolint",
           "version": "2.15.1",
-          "archive_url": "https://github.com/hadolint/hadolint/releases/download/v2.15.1/hadolint-linux-x86_64",
-          "archive_sha256": "c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507",
-          "binary_in_archive": "hadolint-linux-x86_64",
+          "install": "archive",
+          "archive": "linux-x64-hadolint-2.15.1.tar.gz",
+          "archive_sha256": "b9aeb4762b21c990772eae61c8af9c979763a189d1af53b967109f00b73675d1",
+          "binary_in_archive": "hadolint",
           "binary_sha256": "c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "terragrunt": {
           "name": "terragrunt",
           "version": "1.1.6",
-          "archive_url": "https://github.com/gruntwork-io/terragrunt/releases/download/v1.1.6/terragrunt_linux_amd64",
-          "archive_sha256": "d75a80bb264758ba00dabcb17f4b507fcdab4ca90d9e41f96750df036bf69b04",
-          "binary_in_archive": "terragrunt_linux_amd64",
+          "install": "archive",
+          "archive": "linux-x64-terragrunt-1.1.6.tar.gz",
+          "archive_sha256": "e48d42dee083353c3d13705ae9ba124ba6c3463a5b6edb6f7ffeb7b44cba694b",
+          "binary_in_archive": "terragrunt",
           "binary_sha256": "d75a80bb264758ba00dabcb17f4b507fcdab4ca90d9e41f96750df036bf69b04",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "shellcheck": {
           "name": "shellcheck",
           "version": "0.10.0",
-          "archive_url": "https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.x86_64.tar.xz",
-          "archive_sha256": "6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87",
+          "install": "archive",
+          "archive": "linux-x64-shellcheck-0.10.0.tar.gz",
+          "archive_sha256": "14708305f9424074d3d9f1c34d8b4ae03187b5f6dee8177931c591caa4b0ffcc",
           "binary_in_archive": "shellcheck",
           "binary_sha256": "f35ae15a4677945428bdfe61ccc297490d89dd1e544cc06317102637638c6deb",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "rumdl": {
           "name": "rumdl",
           "version": "0.2.79",
-          "archive_url": "https://github.com/rvben/rumdl/releases/download/v0.2.79/rumdl-v0.2.79-x86_64-unknown-linux-musl.tar.gz",
-          "archive_sha256": "a85ae77c6880616118e10dda1e36292df59815bcfbf767201736ff6971213cf3",
+          "install": "archive",
+          "archive": "linux-x64-rumdl-0.2.79.tar.gz",
+          "archive_sha256": "934f4769a1eb0a8ac60c3cab0636e8d9c0b99ad44f4039450dcaf076cfd48ba1",
           "binary_in_archive": "rumdl",
           "binary_sha256": "08d82215c051a8f37e9dd69fc657543f7dbc153e72b47db3f3873e05bd989d31",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "python": {
           "name": "python",
           "version": "3.11.9",
-          "archive_url": "https://github.com/astral-sh/python-build-standalone/releases/download/20240415/cpython-3.11.9%2B20240415-x86_64-unknown-linux-gnu-install_only.tar.gz",
+          "install": "bundle",
+          "archive": "linux-x64-python-3.11.9.tar.gz",
           "archive_sha256": "78b1c16a9fd032997ba92a60f46a64f795cd18ff335659dfdf6096df277b24d5",
           "binary_in_archive": "python/bin/python3",
-          "binary_sha256": "c6547e1a05f0b1acaa7b9067dd3dcb073290fc6255dbc949e337701fe72d7c17",
-          "version_args": [
-            "--version"
-          ],
-          "install": "runtime"
-        },
-        "bandit": {
-          "name": "bandit",
-          "version": "1.9.4",
-          "archive_url": "https://pypi.org/pypi/bandit/1.9.4/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
           "binary_sha256": "",
           "version_args": [
             "--version"
-          ],
-          "install": "pip",
-          "package": "bandit"
-        },
-        "pylint": {
-          "name": "pylint",
-          "version": "4.1.2",
-          "archive_url": "https://pypi.org/pypi/pylint/4.1.2/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "pylint"
-        },
-        "pytest": {
-          "name": "pytest",
-          "version": "9.1.1",
-          "archive_url": "https://pypi.org/pypi/pytest/9.1.1/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "pytest"
-        },
-        "pip-audit": {
-          "name": "pip-audit",
-          "version": "2.10.1",
-          "archive_url": "https://pypi.org/pypi/pip-audit/2.10.1/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "pip-audit"
-        },
-        "checkov": {
-          "name": "checkov",
-          "version": "3.3.23",
-          "archive_url": "https://pypi.org/pypi/checkov/3.3.23/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "checkov"
-        },
-        "yamllint": {
-          "name": "yamllint",
-          "version": "1.35.1",
-          "archive_url": "https://pypi.org/pypi/yamllint/1.35.1/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "yamllint"
-        },
-        "ansible-lint": {
-          "name": "ansible-lint",
-          "version": "25.8.2",
-          "archive_url": "https://pypi.org/pypi/ansible-lint/25.8.2/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "ansible-lint"
+          ]
         }
       }
     },
@@ -464,225 +427,134 @@
         "ruff": {
           "name": "ruff",
           "version": "0.16.10",
-          "archive_url": "https://github.com/astral-sh/ruff/releases/download/0.16.10/ruff-aarch64-unknown-linux-gnu.tar.gz",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "linux-arm64-ruff-0.16.10.tar.gz",
+          "archive_sha256": "f1cdd9b92716accf45d35e838d26c96bcc4f0b7e72175c524defa8836c50b333",
           "binary_in_archive": "ruff",
-          "binary_sha256": "",
+          "binary_sha256": "1bd5df1e12e223c7bcd3c8545f48fccf5e2598db12c57b9f6184e16bca8e9ba3",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "gitleaks": {
           "name": "gitleaks",
           "version": "8.30.1",
-          "archive_url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_arm64.tar.gz",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "linux-arm64-gitleaks-8.30.1.tar.gz",
+          "archive_sha256": "e207932ec124f3776c1aeeb33ec9d313261fa7656ca8e53ef89e9cf45f92f488",
           "binary_in_archive": "gitleaks",
-          "binary_sha256": "",
+          "binary_sha256": "00e91bbe655bd7c47753e8cfe61cb76ea1a5d7e7702fe161ee40102b46b3823b",
           "version_args": [
             "version"
-          ],
-          "install": "binary"
+          ]
         },
         "tflint": {
           "name": "tflint",
           "version": "0.64.0",
-          "archive_url": "https://github.com/terraform-linters/tflint/releases/download/v0.64.0/tflint_linux_arm64.zip",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "linux-arm64-tflint-0.64.0.zip",
+          "archive_sha256": "26a952211e1cb2cbd74835cb747a77681e0beaf81466a76b4d08fdf00b5a19b3",
           "binary_in_archive": "tflint",
-          "binary_sha256": "",
+          "binary_sha256": "4bbb507ec71e47f33f4a7df2a01438717508c54b5775271661fef868aa1f3da0",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "trivy": {
           "name": "trivy",
           "version": "0.75.0",
-          "archive_url": "https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_Linux-ARM64.tar.gz",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "linux-arm64-trivy-0.75.0.tar.gz",
+          "archive_sha256": "501a0752d09db4af0c8f4c156c3b806f397ad8cec47a00a8296737710f7f287b",
           "binary_in_archive": "trivy",
-          "binary_sha256": "",
+          "binary_sha256": "869e310e208f0f2e3e90e4f842cc6adaa2b2c046fecbaade481e6b23fcc8f2a9",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "terraform": {
           "name": "terraform",
           "version": "1.8.5",
-          "archive_url": "https://releases.hashicorp.com/terraform/1.8.5/terraform_1.8.5_linux_arm64.zip",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "linux-arm64-terraform-1.8.5.zip",
+          "archive_sha256": "b420395d1c40a2c0385b644648d5848930c85710037b1f6bb7d39906c75bab5c",
           "binary_in_archive": "terraform",
-          "binary_sha256": "",
+          "binary_sha256": "38d226e88aacf945d3a4829da630c135c8e685c9bc9bdb771eb6ab92d1e7a053",
           "version_args": [
             "version"
-          ],
-          "install": "binary"
+          ]
         },
         "tofu": {
           "name": "tofu",
           "version": "1.8.2",
-          "archive_url": "https://github.com/opentofu/opentofu/releases/download/v1.8.2/tofu_1.8.2_linux_arm64.tar.gz",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "linux-arm64-tofu-1.8.2.tar.gz",
+          "archive_sha256": "eef4597e26cedff2689a30e3ceb02c08c32badb6823de6d707c300e3f3326475",
           "binary_in_archive": "tofu",
-          "binary_sha256": "",
+          "binary_sha256": "88035d0cb7cbe16e8f5f92e8b9a95d61023abe0b8f2be97e45ee18ea5757b971",
           "version_args": [
             "version"
-          ],
-          "install": "binary"
+          ]
         },
         "hadolint": {
           "name": "hadolint",
           "version": "2.15.1",
-          "archive_url": "https://github.com/hadolint/hadolint/releases/download/v2.15.1/hadolint-Linux-arm64",
-          "archive_sha256": "",
-          "binary_in_archive": "hadolint-Linux-arm64",
-          "binary_sha256": "",
+          "install": "archive",
+          "archive": "linux-arm64-hadolint-2.15.1.tar.gz",
+          "archive_sha256": "a1b687fada45b3660a45a28aed1c622b22b322d935dbfc5f78415e815ca6df05",
+          "binary_in_archive": "hadolint",
+          "binary_sha256": "f6198ef8090f404dbb771abfee086eb8c48ac177f30da7fd3510aca35b344b5d",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "terragrunt": {
           "name": "terragrunt",
           "version": "1.1.6",
-          "archive_url": "https://github.com/gruntwork-io/terragrunt/releases/download/v1.1.6/terragrunt_linux_arm64",
-          "archive_sha256": "",
-          "binary_in_archive": "terragrunt_linux_arm64",
-          "binary_sha256": "",
+          "install": "archive",
+          "archive": "linux-arm64-terragrunt-1.1.6.tar.gz",
+          "archive_sha256": "7d118125ddcbe76b569ab8946bbea54cfdac93d85d3f34043a2bc49d2edd9f48",
+          "binary_in_archive": "terragrunt",
+          "binary_sha256": "44b43df99bae7a309fdb831180bd9efb84fb145cf38a80c139e490395581649d",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "shellcheck": {
           "name": "shellcheck",
           "version": "0.10.0",
-          "archive_url": "https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.linux.aarch64.tar.xz",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "linux-arm64-shellcheck-0.10.0.tar.gz",
+          "archive_sha256": "595890a32053b397e98d2eefa53c47737076f4b7f075fe7ce8b1dd979e098d5d",
           "binary_in_archive": "shellcheck",
-          "binary_sha256": "",
+          "binary_sha256": "4111c09318d10b93653a42179381273f31061b34987978346fbd19a6e81a74c3",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "rumdl": {
           "name": "rumdl",
           "version": "0.2.79",
-          "archive_url": "https://github.com/rvben/rumdl/releases/download/v0.2.79/rumdl-v0.2.79-aarch64-unknown-linux-musl.tar.gz",
-          "archive_sha256": "f2ccb236a6b62b9980711a2f54c1e0d8d91ceaea5d7313d0b1a615237b3130bf",
+          "install": "archive",
+          "archive": "linux-arm64-rumdl-0.2.79.tar.gz",
+          "archive_sha256": "d88a1b04e1c9f82d2b73589e62a1ed3e27970506ef39eb53d2ab50b38800c680",
           "binary_in_archive": "rumdl",
           "binary_sha256": "6b32e7d5b7e07c37b87352cdc1fa95961c52e46aa572478d8254641b09be87c8",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "python": {
           "name": "python",
           "version": "3.11.9",
-          "archive_url": "https://github.com/astral-sh/python-build-standalone/releases/download/20240415/cpython-3.11.9%2B20240415-aarch64-unknown-linux-gnu-install_only.tar.gz",
-          "archive_sha256": "",
+          "install": "bundle",
+          "archive": "linux-arm64-python-3.11.9.tar.gz",
+          "archive_sha256": "b3a7199ac2615d75fb906e5ba556432efcf24baf8651fc70370d9f052d4069ee",
           "binary_in_archive": "python/bin/python3",
           "binary_sha256": "",
           "version_args": [
             "--version"
-          ],
-          "install": "runtime"
-        },
-        "bandit": {
-          "name": "bandit",
-          "version": "1.9.4",
-          "archive_url": "https://pypi.org/pypi/bandit/1.9.4/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "bandit"
-        },
-        "pylint": {
-          "name": "pylint",
-          "version": "4.1.2",
-          "archive_url": "https://pypi.org/pypi/pylint/4.1.2/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "pylint"
-        },
-        "pytest": {
-          "name": "pytest",
-          "version": "9.1.1",
-          "archive_url": "https://pypi.org/pypi/pytest/9.1.1/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "pytest"
-        },
-        "pip-audit": {
-          "name": "pip-audit",
-          "version": "2.10.1",
-          "archive_url": "https://pypi.org/pypi/pip-audit/2.10.1/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "pip-audit"
-        },
-        "checkov": {
-          "name": "checkov",
-          "version": "3.3.23",
-          "archive_url": "https://pypi.org/pypi/checkov/3.3.23/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "checkov"
-        },
-        "yamllint": {
-          "name": "yamllint",
-          "version": "1.35.1",
-          "archive_url": "https://pypi.org/pypi/yamllint/1.35.1/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "yamllint"
-        },
-        "ansible-lint": {
-          "name": "ansible-lint",
-          "version": "25.8.2",
-          "archive_url": "https://pypi.org/pypi/ansible-lint/25.8.2/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "ansible-lint"
+          ]
         }
       }
     },
@@ -692,225 +564,134 @@
         "ruff": {
           "name": "ruff",
           "version": "0.16.10",
-          "archive_url": "https://github.com/astral-sh/ruff/releases/download/0.16.10/ruff-x86_64-apple-darwin.tar.gz",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "macos-x64-ruff-0.16.10.tar.gz",
+          "archive_sha256": "965245a3669580bc9f9b91de48bc6cbc0ed1da69e83f0df19aa3a7009204c432",
           "binary_in_archive": "ruff",
-          "binary_sha256": "",
+          "binary_sha256": "d72e1020a30968fb895e390b1589a293e5ee95b8d7a3d3e8bdc4cca4ccc776e6",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "gitleaks": {
           "name": "gitleaks",
           "version": "8.30.1",
-          "archive_url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_darwin_x64.tar.gz",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "macos-x64-gitleaks-8.30.1.tar.gz",
+          "archive_sha256": "89c509f3a4bd92aeea2ec78d8fc209bb67353036e0d4e72b5844834c41629ed7",
           "binary_in_archive": "gitleaks",
-          "binary_sha256": "",
+          "binary_sha256": "cee01fea7173f1b779dff188e1c26ecbcb4027d394acc573b23aaf0be260e291",
           "version_args": [
             "version"
-          ],
-          "install": "binary"
+          ]
         },
         "tflint": {
           "name": "tflint",
           "version": "0.64.0",
-          "archive_url": "https://github.com/terraform-linters/tflint/releases/download/v0.64.0/tflint_darwin_amd64.zip",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "macos-x64-tflint-0.64.0.zip",
+          "archive_sha256": "a34aa3450450746948e7fa1a9e40419eddd2e58e4ea81fcf8322150cedb35b6d",
           "binary_in_archive": "tflint",
-          "binary_sha256": "",
+          "binary_sha256": "ca7c9ee946f5ce14dd0267d31aa03244189fc2cecc81f41cf371a568ff7500ec",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "trivy": {
           "name": "trivy",
           "version": "0.75.0",
-          "archive_url": "https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_macOS-64bit.tar.gz",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "macos-x64-trivy-0.75.0.tar.gz",
+          "archive_sha256": "6095ff27a5634a42e55f07f5af5a4f86776b7b56d9ca064a688a2d594c469094",
           "binary_in_archive": "trivy",
-          "binary_sha256": "",
+          "binary_sha256": "484287e06ab2e4038c42ba396da8637aaaca0967e3e65840563706a0284169b4",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "terraform": {
           "name": "terraform",
           "version": "1.8.5",
-          "archive_url": "https://releases.hashicorp.com/terraform/1.8.5/terraform_1.8.5_darwin_amd64.zip",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "macos-x64-terraform-1.8.5.zip",
+          "archive_sha256": "75d8d1418355d7fe2ee2876a8cf28648bf16f0062cee112a820e5e7f6b6f5fa0",
           "binary_in_archive": "terraform",
-          "binary_sha256": "",
+          "binary_sha256": "51e251d40ecd77991b5cab30c63fd4a194e6eace4e630c7ab75e628651a7d5ee",
           "version_args": [
             "version"
-          ],
-          "install": "binary"
+          ]
         },
         "tofu": {
           "name": "tofu",
           "version": "1.8.2",
-          "archive_url": "https://github.com/opentofu/opentofu/releases/download/v1.8.2/tofu_1.8.2_darwin_amd64.tar.gz",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "macos-x64-tofu-1.8.2.tar.gz",
+          "archive_sha256": "f3ab81d5994cb82e3e4591784e73da64a048b3643de5c553f688155609a52418",
           "binary_in_archive": "tofu",
-          "binary_sha256": "",
+          "binary_sha256": "2b7714af7cd6a871c3244509ff7978a9adac0b923eaa41806123e9a75834bc7e",
           "version_args": [
             "version"
-          ],
-          "install": "binary"
+          ]
         },
         "hadolint": {
           "name": "hadolint",
           "version": "2.15.1",
-          "archive_url": "https://github.com/hadolint/hadolint/releases/download/v2.15.1/hadolint-macos-x86_64",
-          "archive_sha256": "",
-          "binary_in_archive": "hadolint-macos-x86_64",
-          "binary_sha256": "",
+          "install": "archive",
+          "archive": "macos-x64-hadolint-2.15.1.tar.gz",
+          "archive_sha256": "f3815db3a0915894e5a50d92ddfdb0d114a09ed67933ff7eeef4063d40f5c0e3",
+          "binary_in_archive": "hadolint",
+          "binary_sha256": "ffe9bb18b23d5ed1eae50237aecdbb523d016e96da0bd4e7aa432040acfc3fde",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "terragrunt": {
           "name": "terragrunt",
           "version": "1.1.6",
-          "archive_url": "https://github.com/gruntwork-io/terragrunt/releases/download/v1.1.6/terragrunt_darwin_amd64",
-          "archive_sha256": "",
-          "binary_in_archive": "terragrunt_darwin_amd64",
-          "binary_sha256": "",
+          "install": "archive",
+          "archive": "macos-x64-terragrunt-1.1.6.tar.gz",
+          "archive_sha256": "b5c797c7bb81a68f786883c74ea4f57bf6234af82f259530af2f5c97139f07ce",
+          "binary_in_archive": "terragrunt",
+          "binary_sha256": "9a9cfb45fae42a9f363128c4a33c234d02a367523491e03d86be2fc1b283cdbd",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "shellcheck": {
           "name": "shellcheck",
           "version": "0.10.0",
-          "archive_url": "https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.darwin.x86_64.tar.xz",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "macos-x64-shellcheck-0.10.0.tar.gz",
+          "archive_sha256": "a8158826ab338dd83d10c0de931d8a8ea9a8c3592d1cf1869e7b1c859468f596",
           "binary_in_archive": "shellcheck",
-          "binary_sha256": "",
+          "binary_sha256": "3fc3ee1458b70da5627af5de97c2adbe7f15ea994c0bfb351a1ddf75526cd4a0",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "rumdl": {
           "name": "rumdl",
           "version": "0.2.79",
-          "archive_url": "https://github.com/rvben/rumdl/releases/download/v0.2.79/rumdl-v0.2.79-x86_64-apple-darwin.tar.gz",
-          "archive_sha256": "09cca63968f9a3f35faab71ac8d09bda1a96ba4e0e38cac54bfb7b544523075f",
+          "install": "archive",
+          "archive": "macos-x64-rumdl-0.2.79.tar.gz",
+          "archive_sha256": "c62ba97a1bee03f23f0ab96e80e9825b00f93b676dc54558d4368c6f97ab1926",
           "binary_in_archive": "rumdl",
           "binary_sha256": "9a7e7ec028ca7c690549652637d8a3e59b6415c4be804d68f9840708c81b1873",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "python": {
           "name": "python",
           "version": "3.11.9",
-          "archive_url": "https://github.com/astral-sh/python-build-standalone/releases/download/20240415/cpython-3.11.9%2B20240415-x86_64-apple-darwin-install_only.tar.gz",
-          "archive_sha256": "",
+          "install": "bundle",
+          "archive": "macos-x64-python-3.11.9.tar.gz",
+          "archive_sha256": "9afd734f63a23783cf0257bef25c9231ffc80e7747486dc54cf72f325213fd15",
           "binary_in_archive": "python/bin/python3",
           "binary_sha256": "",
           "version_args": [
             "--version"
-          ],
-          "install": "runtime"
-        },
-        "bandit": {
-          "name": "bandit",
-          "version": "1.9.4",
-          "archive_url": "https://pypi.org/pypi/bandit/1.9.4/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "bandit"
-        },
-        "pylint": {
-          "name": "pylint",
-          "version": "4.1.2",
-          "archive_url": "https://pypi.org/pypi/pylint/4.1.2/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "pylint"
-        },
-        "pytest": {
-          "name": "pytest",
-          "version": "9.1.1",
-          "archive_url": "https://pypi.org/pypi/pytest/9.1.1/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "pytest"
-        },
-        "pip-audit": {
-          "name": "pip-audit",
-          "version": "2.10.1",
-          "archive_url": "https://pypi.org/pypi/pip-audit/2.10.1/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "pip-audit"
-        },
-        "checkov": {
-          "name": "checkov",
-          "version": "3.3.23",
-          "archive_url": "https://pypi.org/pypi/checkov/3.3.23/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "checkov"
-        },
-        "yamllint": {
-          "name": "yamllint",
-          "version": "1.35.1",
-          "archive_url": "https://pypi.org/pypi/yamllint/1.35.1/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "yamllint"
-        },
-        "ansible-lint": {
-          "name": "ansible-lint",
-          "version": "25.8.2",
-          "archive_url": "https://pypi.org/pypi/ansible-lint/25.8.2/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "ansible-lint"
+          ]
         }
       }
     },
@@ -920,225 +701,134 @@
         "ruff": {
           "name": "ruff",
           "version": "0.16.10",
-          "archive_url": "https://github.com/astral-sh/ruff/releases/download/0.16.10/ruff-aarch64-apple-darwin.tar.gz",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "macos-arm64-ruff-0.16.10.tar.gz",
+          "archive_sha256": "7bb5bde157f4363e463a4d7b3a4e7a78d976ece258b6233b34511846958f7845",
           "binary_in_archive": "ruff",
-          "binary_sha256": "",
+          "binary_sha256": "70e977860c228661a4992c9558b8350903351845fa945715584f4c176a0f6c61",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "gitleaks": {
           "name": "gitleaks",
           "version": "8.30.1",
-          "archive_url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_darwin_arm64.tar.gz",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "macos-arm64-gitleaks-8.30.1.tar.gz",
+          "archive_sha256": "56a387fa7813b04bcea40db23cc7be23f9a7ad946dfb5151406fec73665610b9",
           "binary_in_archive": "gitleaks",
-          "binary_sha256": "",
+          "binary_sha256": "ba52fb1bfabbcde42f032afad3d6e0b19dff8ed105229a16e7caa338bbc0e84f",
           "version_args": [
             "version"
-          ],
-          "install": "binary"
+          ]
         },
         "tflint": {
           "name": "tflint",
           "version": "0.64.0",
-          "archive_url": "https://github.com/terraform-linters/tflint/releases/download/v0.64.0/tflint_darwin_arm64.zip",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "macos-arm64-tflint-0.64.0.zip",
+          "archive_sha256": "2523742be0a99a59ffbcac44dbac06752d1f82411993fb96d5e37d42927d876f",
           "binary_in_archive": "tflint",
-          "binary_sha256": "",
+          "binary_sha256": "9fe792a1ce75d97bd2fc587f217b80fd4cf24a8dc9e6ac6979e69bb4aac71d21",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "trivy": {
           "name": "trivy",
           "version": "0.75.0",
-          "archive_url": "https://github.com/aquasecurity/trivy/releases/download/v0.75.0/trivy_0.75.0_macOS-ARM64.tar.gz",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "macos-arm64-trivy-0.75.0.tar.gz",
+          "archive_sha256": "9d5d548c76afaa4552384fdadd37f087dc7bebf8f2c8f05f71953bbae9c16e51",
           "binary_in_archive": "trivy",
-          "binary_sha256": "",
+          "binary_sha256": "32b84c068e11e5381fc85d3fe2e8ac238659ab22524ce1b2b9dfcbd0b1f7331a",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "terraform": {
           "name": "terraform",
           "version": "1.8.5",
-          "archive_url": "https://releases.hashicorp.com/terraform/1.8.5/terraform_1.8.5_darwin_arm64.zip",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "macos-arm64-terraform-1.8.5.zip",
+          "archive_sha256": "312661f1eb0d72ca642e00dacd05e6bb283a429d403af1a4aa12ece1d0524388",
           "binary_in_archive": "terraform",
-          "binary_sha256": "",
+          "binary_sha256": "d556db4fd0bf0b251a6389a8b38696921344facf53ecf75ce2c9abbc78600361",
           "version_args": [
             "version"
-          ],
-          "install": "binary"
+          ]
         },
         "tofu": {
           "name": "tofu",
           "version": "1.8.2",
-          "archive_url": "https://github.com/opentofu/opentofu/releases/download/v1.8.2/tofu_1.8.2_darwin_arm64.tar.gz",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "macos-arm64-tofu-1.8.2.tar.gz",
+          "archive_sha256": "2a8539d38d1dce90992d036b3702a22db5c22c2a5706a1a2f6b7dc16d0d6132b",
           "binary_in_archive": "tofu",
-          "binary_sha256": "",
+          "binary_sha256": "b58bb84fbc2a132218a4dfb3ea6747a038b00f0b4c03003803aa2edd8deaaac5",
           "version_args": [
             "version"
-          ],
-          "install": "binary"
+          ]
         },
         "hadolint": {
           "name": "hadolint",
           "version": "2.15.1",
-          "archive_url": "https://github.com/hadolint/hadolint/releases/download/v2.15.1/hadolint-macos-arm64",
-          "archive_sha256": "",
-          "binary_in_archive": "hadolint-macos-arm64",
-          "binary_sha256": "",
+          "install": "archive",
+          "archive": "macos-arm64-hadolint-2.15.1.tar.gz",
+          "archive_sha256": "17d489d50afdd286babd6d095558e0b18412dd3e7da7c1bce707235777dcff9e",
+          "binary_in_archive": "hadolint",
+          "binary_sha256": "5c09f3213f8e40406abe048233d985eebef336d4a6a20021be47fadb6cf480a2",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "terragrunt": {
           "name": "terragrunt",
           "version": "1.1.6",
-          "archive_url": "https://github.com/gruntwork-io/terragrunt/releases/download/v1.1.6/terragrunt_darwin_arm64",
-          "archive_sha256": "",
-          "binary_in_archive": "terragrunt_darwin_arm64",
-          "binary_sha256": "",
+          "install": "archive",
+          "archive": "macos-arm64-terragrunt-1.1.6.tar.gz",
+          "archive_sha256": "96e14bcc8a6f19ce2b6c76a7b173df8e013f3b231c56e01d03eb169a6aeb5c13",
+          "binary_in_archive": "terragrunt",
+          "binary_sha256": "fd590f6eebf85ae56293c9b5de8e12505f51d13e6c44cdf6aecef56e094472a0",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "shellcheck": {
           "name": "shellcheck",
           "version": "0.10.0",
-          "archive_url": "https://github.com/koalaman/shellcheck/releases/download/v0.10.0/shellcheck-v0.10.0.darwin.aarch64.tar.xz",
-          "archive_sha256": "",
+          "install": "archive",
+          "archive": "macos-arm64-shellcheck-0.10.0.tar.gz",
+          "archive_sha256": "071aac3ef9b7bd1530164de795ba387f7217bd9f3f929ee31381924b39568491",
           "binary_in_archive": "shellcheck",
-          "binary_sha256": "",
+          "binary_sha256": "b9e420df8c78ec7d261d66277d5767cbd4cf6da4e4a9f8b02ea4811cd4cc1109",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "rumdl": {
           "name": "rumdl",
           "version": "0.2.79",
-          "archive_url": "https://github.com/rvben/rumdl/releases/download/v0.2.79/rumdl-v0.2.79-aarch64-apple-darwin.tar.gz",
-          "archive_sha256": "8c0ecf93a61bf612df5f6c6f22813d066a6f51a5680f3c12da49b93ed892aebb",
+          "install": "archive",
+          "archive": "macos-arm64-rumdl-0.2.79.tar.gz",
+          "archive_sha256": "1e545e3960eeef039c53315e5ff8ce9190dea24970c1f07b5f964c12705448c2",
           "binary_in_archive": "rumdl",
           "binary_sha256": "97cf3445eabb92dd959784e0aa8df5a641639aa8d23885aac761a91ae9a632fe",
           "version_args": [
             "--version"
-          ],
-          "install": "binary"
+          ]
         },
         "python": {
           "name": "python",
           "version": "3.11.9",
-          "archive_url": "https://github.com/astral-sh/python-build-standalone/releases/download/20240415/cpython-3.11.9%2B20240415-aarch64-apple-darwin-install_only.tar.gz",
-          "archive_sha256": "",
+          "install": "bundle",
+          "archive": "macos-arm64-python-3.11.9.tar.gz",
+          "archive_sha256": "7af7058f7c268b4d87ed7e08c2c7844ef8460863b3e679db3afdce8bb1eedfae",
           "binary_in_archive": "python/bin/python3",
           "binary_sha256": "",
           "version_args": [
             "--version"
-          ],
-          "install": "runtime"
-        },
-        "bandit": {
-          "name": "bandit",
-          "version": "1.9.4",
-          "archive_url": "https://pypi.org/pypi/bandit/1.9.4/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "bandit"
-        },
-        "pylint": {
-          "name": "pylint",
-          "version": "4.1.2",
-          "archive_url": "https://pypi.org/pypi/pylint/4.1.2/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "pylint"
-        },
-        "pytest": {
-          "name": "pytest",
-          "version": "9.1.1",
-          "archive_url": "https://pypi.org/pypi/pytest/9.1.1/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "pytest"
-        },
-        "pip-audit": {
-          "name": "pip-audit",
-          "version": "2.10.1",
-          "archive_url": "https://pypi.org/pypi/pip-audit/2.10.1/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "pip-audit"
-        },
-        "checkov": {
-          "name": "checkov",
-          "version": "3.3.23",
-          "archive_url": "https://pypi.org/pypi/checkov/3.3.23/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "checkov"
-        },
-        "yamllint": {
-          "name": "yamllint",
-          "version": "1.35.1",
-          "archive_url": "https://pypi.org/pypi/yamllint/1.35.1/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "yamllint"
-        },
-        "ansible-lint": {
-          "name": "ansible-lint",
-          "version": "25.8.2",
-          "archive_url": "https://pypi.org/pypi/ansible-lint/25.8.2/json",
-          "archive_sha256": "",
-          "binary_in_archive": "venv",
-          "binary_sha256": "",
-          "version_args": [
-            "--version"
-          ],
-          "install": "pip",
-          "package": "ansible-lint"
+          ]
         }
       }
     },

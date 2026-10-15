@@ -1375,7 +1375,9 @@ func (s *DaemonServer) handleShutdown(w http.ResponseWriter, r *http.Request) {
 	})
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		_ = s.Close(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = s.Close(ctx)
 	}()
 }
 

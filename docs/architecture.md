@@ -1,6 +1,6 @@
 # Architecture et contrats techniques
 
-Version courante : 2.0.14. Les chiffres de contrôles figés dans d'anciennes notes (notamment « 28 contrôles ») sont obsolètes. La liste actuelle est le tableau `catalog-controls` des README, vérifié contre `.config/control-catalog.json`.
+Version courante : 2.0.15. Les chiffres de contrôles figés dans d'anciennes notes (notamment « 28 contrôles ») sont obsolètes. La liste actuelle est le tableau `catalog-controls` des README, vérifié contre `.config/control-catalog.json`.
 
 Le guide d'usage est le [README](../README.md). Le packaging et la signature sont dans [développement](developpement.md). Les outils sont dans [outils](outils.md).
 
@@ -31,7 +31,7 @@ Le moteur reçoit un dossier local cible (la *Target*), sans compte de forge ni 
 | :--- | :--- | :--- |
 | **Discovery** | Inventaire des technologies, preuves, racines, ambiguïtés et erreurs de scan | `core/internal/discovery` |
 | **Capability Matrix** | Matrice des contrôles applicables, profils et états préliminaires | `core/internal/matrix` |
-| **Tool Resolver** | `.tools/bin/`, Python autonome, venv `~/.compliance/tools/venv`, cache `~/.compliance/tools/bin/<plateforme>/`, préfixes macOS, PATH | `core/internal/distribution`, `core/internal/matrix`, `core/internal/osutil` |
+| **Tool Resolver** | Résolution stricte à 3 niveaux : Target `node_modules` (JS/TS), `.tools/bin/` local, registre `~/.compliance/tools/`, `PATH` système | `core/internal/distribution`, `core/internal/matrix`, `core/internal/osutil` |
 | **Catalogue de contrôles** | Identifiants, outils et plateformes de [`.config/control-catalog.json`](../.config/control-catalog.json). Le nombre vivant est celui du fichier, pas un chiffre de documentation. | `core/internal/matrix` |
 | **Compliance Engine** | Ordonnancement déterministe (DAG), exécution, verdict, limitations | `core/internal/engine` |
 | **Serveur & Démon local** | API REST/SSE locale sur port éphémère, jeton Bearer 256 bits, contrôle Host/Origin | `core/internal/server` |
@@ -41,18 +41,21 @@ Le moteur reçoit un dossier local cible (la *Target*), sans compte de forge ni 
 
 ---
 
-## Résolution d'outils (Tool Resolver multi-niveaux)
+## Résolution d'outils (Tool Resolver strict)
 
-Le résolveur d'outils est découplé de l'environnement virtuel du dépôt cible (`.venv`) et applique une recherche ordonnée :
+Le résolveur d'outils applique un ordre de résolution rigoureux et déterministe, découplé de tout environnement virtuel tiers :
 
-1. **Binaires autonomes (`.tools/bin/<command>[.exe]`)** : Outils du catalogue pré-positionnés (`ruff`, `hadolint`, `tflint`, `terraform`, `tofu`, `terragrunt`, `shellcheck`, `trivy`, `rumdl`) et le binaire `compliance`.
-2. **Python autonome du dépôt (`.tools/python/Scripts/` ou `.tools/python/bin/`)** : `.exe`, puis `.cmd`, puis le nom nu.
-3. **Cache runtime du dépôt (`.tools/runtime/<platform>/<command>/...`)**.
-4. **Venv de distribution (`~/.compliance/tools/venv/Scripts` ou `bin`)** produit par `compliance runtime sync` après le CPython du manifeste : `.exe`, `.cmd`, `.bat`, puis le nom nu. `checkov` y est un `checkov.cmd`. Le moteur le lance avec le `python.exe` du même dossier (`python.exe -x checkov …`), pas via le raccourci Windows Store.
-5. **Cache de binaires (`~/.compliance/tools/bin/<plateforme>/<command>`)** pour les archives du manifeste.
-6. **Modules PowerShell** pour `Invoke-ScriptAnalyzer` : `.tools/powershell-modules/`, `PSModulePath`, et sur macOS/Linux `~/.local/share/powershell/Modules` ainsi que `/usr/local/share/powershell/Modules` (et `/opt/homebrew/share/powershell/Modules` sur Darwin). L'exécution hors Windows utilise `pwsh`.
-7. **Scripts npm du dépôt** (`node_modules/.bin`) pour ESLint et `tsc`.
-8. **Préfixes macOS puis PATH** : `/opt/homebrew/bin`, `/opt/homebrew/sbin`, `/usr/local/bin`, `/usr/local/sbin`, `~/.local/bin`, `~/Library/Python/*/bin`, `~/.pyenv/shims`, puis `exec.LookPath`. Un VS Code lancé depuis le Dock trouve Homebrew sans hériter de `~/.zshrc`.
+1. **Pour les outils JavaScript et TypeScript (`eslint`, `tsc`)** :
+   - **Priorité 1** : `node_modules/.bin` de la Target auditée.
+   - **Priorité 2** : Bundle autonome `~/.compliance/tools/node` issu du registre.
+2. **Pour tous les autres outils du catalogue** :
+   - **Priorité 1 — Développement local** : Répertoire `.tools/bin/` à la racine du dépôt.
+   - **Priorité 2 — Registre installé (`~/.compliance/tools/`)** :
+     - *Binaires natifs* : `~/.compliance/tools/bin/<platform>/<tool>[.exe]`.
+     - *Bundle Python relocalisable* : `~/.compliance/tools/python/python[.exe]`. L'exécution passe exclusivement par le mode module (`python -m <module>`) afin de ne jamais dépendre de shebangs ou de lanceurs figés par un venv.
+     - *Bundle Node* : `~/.compliance/tools/node/bin/`.
+     - *Modules PowerShell* : `~/.compliance/tools/powershell-modules/PSScriptAnalyzer`.
+   - **Priorité 3 — Système** : Préfixes système standards (`PATH`, Homebrew `/opt/homebrew/bin` ou `/usr/local/bin` sur macOS, shims pyenv).
 
 Sur Windows, `ansible`, `ansible-lint` et `molecule` sont marqués incompatibles avant cette recherche : la présence du paquet ne prouve pas que le contrôleur s'exécute. Le plan ne les propose pas comme installables depuis le manifeste. `ansible-lint` est réservé à Linux et macOS ; `yamllint` couvre Ansible sur Windows. Une commande qui reçoit une longue liste de fichiers est découpée sous 24 000 caractères et les sorties sont agrégées.
 

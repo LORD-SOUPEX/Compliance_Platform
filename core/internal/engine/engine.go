@@ -98,6 +98,9 @@ func BuildInvocation(
 	executable := *ctrl.Tool.Source
 	command := ctrl.Tool.Command
 
+	isPyRuntime := (ctrl.Tool != nil && ctrl.Tool.RuntimeManaged && isPythonTool(command)) ||
+		(isPythonTool(command) && strings.Contains(strings.ToLower(filepath.Base(executable)), "python"))
+
 	var catalogArgs []string
 	if ctrl.Parameters != nil {
 		if rawArgs, ok := ctrl.Parameters["arguments"]; ok {
@@ -160,11 +163,17 @@ func BuildInvocation(
 		if command == "bandit" && !hasArg(prefix, "-f") && !hasArg(prefix, "--format") {
 			prefix = append(prefix, "-f", "json")
 		}
+		if isPyRuntime {
+			prefix = append([]string{"-m", pythonModuleName(command)}, prefix...)
+		}
 		return invocationWithFiles(executable, prefix, pyFiles), nil
 
 	case "pytest":
 		arguments = append(arguments, catalogArgs...)
 		arguments = append(arguments, root)
+		if isPyRuntime {
+			arguments = append([]string{"-m", "pytest"}, arguments...)
+		}
 
 	case "pip-audit":
 		reqPath := filepath.Join(root, "requirements.txt")
@@ -176,6 +185,9 @@ func BuildInvocation(
 			arguments = append(arguments, "--format", "json")
 		}
 		arguments = append(arguments, "-r", reqPath)
+		if isPyRuntime {
+			arguments = append([]string{"-m", "pip_audit"}, arguments...)
+		}
 
 	case "terraform", "tofu", "terragrunt":
 		arguments = append(arguments, catalogArgs...)
@@ -212,6 +224,9 @@ func BuildInvocation(
 	case "ansible-lint":
 		arguments = append(arguments, catalogArgs...)
 		arguments = append(arguments, root)
+		if isPyRuntime {
+			arguments = append([]string{"-m", "ansiblelint"}, arguments...)
+		}
 
 	case "yamllint":
 		cfg, _ := ctrl.Parameters["configuration"].(string)
@@ -219,6 +234,9 @@ func BuildInvocation(
 			cfg = ".yamllint.yml"
 		}
 		arguments = []string{"-c", filepath.Join(platformRoot, cfg), "-f", "parsable", root}
+		if isPyRuntime {
+			arguments = append([]string{"-m", "yamllint"}, arguments...)
+		}
 
 	case "eslint":
 		eslintArgs := []string{"-f", "json", root}
@@ -285,6 +303,9 @@ func BuildInvocation(
 		arguments = []string{"-d", root, "--framework", framework, "--quiet", "--output", "json"}
 		for _, name := range discovery.SkipDirNames() {
 			arguments = append(arguments, "--skip-path", name)
+		}
+		if isPyRuntime {
+			arguments = append([]string{"-m", "checkov"}, arguments...)
 		}
 
 	case "trivy":
@@ -639,17 +660,76 @@ func tscInvocation(executable, project string) Invocation {
 	return Invocation{Executable: executable, Arguments: arguments}
 }
 
+func findNodeForScript(cmdPath string) string {
+	curr := filepath.Dir(cmdPath)
+	for i := 0; i < 4; i++ {
+		if runtime.GOOS == "windows" {
+			cand := filepath.Join(curr, "node.exe")
+			if info, err := os.Stat(cand); err == nil && !info.IsDir() {
+				return cand
+			}
+		} else {
+			for _, name := range []string{"bin/node", "node"} {
+				cand := filepath.Join(curr, filepath.FromSlash(name))
+				if info, err := os.Stat(cand); err == nil && !info.IsDir() {
+					return cand
+				}
+			}
+		}
+		parent := filepath.Dir(curr)
+		if parent == curr {
+			break
+		}
+		curr = parent
+	}
+
+	cacheNode := filepath.Join(osutil.DefaultToolCacheDir(), "node")
+	if runtime.GOOS == "windows" {
+		cand := filepath.Join(cacheNode, "node.exe")
+		if info, err := os.Stat(cand); err == nil && !info.IsDir() {
+			return cand
+		}
+	} else {
+		cand := filepath.Join(cacheNode, "bin", "node")
+		if info, err := os.Stat(cand); err == nil && !info.IsDir() {
+			return cand
+		}
+	}
+
+	return osutil.LookupExecutable("node")
+}
+
 func nodeBinScript(cmdPath, relativeJS string, args []string) (Invocation, bool) {
 	script := filepath.Clean(filepath.Join(filepath.Dir(cmdPath), relativeJS))
 	info, err := os.Stat(script)
 	if err != nil || info.IsDir() {
 		return Invocation{}, false
 	}
-	node := osutil.LookupExecutable("node")
+	node := findNodeForScript(cmdPath)
 	if node == "" {
 		return Invocation{}, false
 	}
 	return Invocation{Executable: node, Arguments: append([]string{script}, args...)}, true
+}
+
+func isPythonTool(command string) bool {
+	switch command {
+	case "checkov", "bandit", "pylint", "pytest", "pip-audit", "yamllint", "ansible-lint":
+		return true
+	default:
+		return false
+	}
+}
+
+func pythonModuleName(command string) string {
+	switch command {
+	case "pip-audit":
+		return "pip_audit"
+	case "ansible-lint":
+		return "ansiblelint"
+	default:
+		return command
+	}
 }
 
 func tsconfigProjects(repoRoot string) []string {

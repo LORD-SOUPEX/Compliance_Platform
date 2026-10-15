@@ -323,6 +323,8 @@ func runRuntimeSync(args []string) {
 	caBundle := fs.String("ca-bundle", "", "Chemin vers le bundle CA d'entreprise")
 	platform := fs.String("platform", distribution.DetectPlatform(), "Plateforme cible")
 	toolName := fs.String("tool", "", "N'installer que cet outil du manifeste")
+	registryURL := fs.String("registry-url", "", "URL de base personnalisée du registre d'outils")
+	registryToken := fs.String("registry-token", "", "Jeton d'authentification Bearer pour le registre (ou COMPLIANCE_REGISTRY_TOKEN)")
 	_ = fs.Parse(args)
 
 	pubBytes, err := hex.DecodeString(*pubKeyHex)
@@ -347,13 +349,15 @@ func runRuntimeSync(args []string) {
 
 	fmt.Printf("[INFO] Synchronisation runtime pour la plateforme %s...\n", *platform)
 	res, err := distribution.SyncRuntime(distribution.SyncOptions{
-		ManifestPath: *manifestPath,
-		SigPath:      *sigPath,
-		CacheDir:     *cacheDir,
-		Platform:     *platform,
-		PublicKey:    ed25519.PublicKey(pubBytes),
-		CABundlePath: *caBundle,
-		ToolName:     *toolName,
+		ManifestPath:  *manifestPath,
+		SigPath:       *sigPath,
+		CacheDir:      *cacheDir,
+		Platform:      *platform,
+		PublicKey:     ed25519.PublicKey(pubBytes),
+		CABundlePath:  *caBundle,
+		ToolName:      *toolName,
+		RegistryURL:   *registryURL,
+		RegistryToken: *registryToken,
 	})
 	if res != nil {
 		for name, path := range res.SyncedTools {

@@ -1,6 +1,6 @@
 # ICP - IaC Compliance Platform
 
-Audit local d'un dépôt. L'extension parle à un démon Go sur `127.0.0.1`. Aucun compte, aucune forge et aucun envoi du code. Version courante : 2.0.14.
+Audit local d'un dépôt. L'extension parle à un démon Go sur `127.0.0.1`. Aucun compte, aucune forge et aucun envoi du code. Version courante : 2.0.15.
 
 ## Architecture de la plateforme
 
@@ -104,9 +104,9 @@ Réseau et exécution de code sont refusés tant que vous ne les accordez pas po
 
 ## Outils
 
-L'installation du VSIX ne télécharge pas les outils d'audit. Après un audit, si un outil figure dans le manifeste, l'extension peut le télécharger en HTTPS une fois que vous acceptez la liste (version et URL). L'archive est extraite sous `~/.compliance/tools`, sans droits administrateur. Une signature ou une somme SHA-256 différente ne bloque pas ce téléchargement. Un refus n'est pas redemandé tout seul. Une coupure réseau ou un proxy (`HTTP_PROXY` / `HTTPS_PROXY`) n'installe rien.
+L'installation du VSIX ne télécharge pas les outils d'audit. Après un audit, si un outil figure dans le manifeste, l'extension peut le télécharger en HTTPS depuis le registre auto-hébergé `tools-v1` (`https://github.com/LORD-SOUPEX/Compliance_Platform/releases/tag/tools-v1`) une fois que vous acceptez la liste (version et URL). L'archive est extraite sous `~/.compliance/tools`, sans droits administrateur. Une signature ou une somme SHA-256 différente ne bloque pas ce téléchargement. Un refus n'est pas redemandé tout seul. Une coupure réseau ou un proxy (`HTTP_PROXY` / `HTTPS_PROXY`) n'installe rien.
 
-ESLint et `tsc` ne sont pas dans le manifeste : ils viennent du dépôt cible. `Invoke-ScriptAnalyzer` est un module PowerShell, pas une archive. `ansible-lint`, `yamllint`, `checkov` et les autres paquets Python s'installent dans `~/.compliance/tools/venv`. `rumdl` est le linter Markdown (MIT, binaires officiels) et s'installe depuis le manifeste sur les plateformes où l'éditeur publie un binaire. Pas de binaire Windows ARM64. Détail : `docs/outils.md`.
+Les outils natifs sont extraits sous `~/.compliance/tools/bin/<plateforme>`. Les outils Python (`checkov`, `bandit`, `pylint`, `pytest`, `pip-audit`, `yamllint`, `ansible-lint`) s'installent dans le bundle autonome `~/.compliance/tools/python` et s'exécutent via leur interpréteur relatif (`python -m <module>`). `Invoke-ScriptAnalyzer` s'installe depuis le registre dans `~/.compliance/tools/powershell-modules/PSScriptAnalyzer`. Les entreprises peuvent rediriger les téléchargements vers un miroir privé via le réglage `compliance.registryUrl` et un jeton optionnel `compliance.registryToken`. Détail : `docs/outils.md`.
 
 ## Rapports et sessions
 

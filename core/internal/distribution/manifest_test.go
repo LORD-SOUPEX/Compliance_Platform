@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -23,37 +22,34 @@ func TestManifestURLsAndStructure(t *testing.T) {
 		t.Fatal(err)
 	}
 	platforms := []string{"windows-x64", "linux-x64", "macos-x64", "macos-arm64"}
-	var baseline []string
-	for i, platform := range platforms {
+	for _, platform := range platforms {
 		entry, ok := manifest.Platforms[platform]
 		if !ok {
 			t.Fatalf("plateforme absente: %s", platform)
 		}
-		names := make([]string, 0, len(entry.Tools))
-		for name, tool := range entry.Tools {
-			names = append(names, name)
-			if strings.TrimSpace(tool.ArchiveURL) == "" || !strings.HasPrefix(tool.ArchiveURL, "https://") {
-				t.Fatalf("%s/%s URL invalide: %s", platform, name, tool.ArchiveURL)
+		// Every platform must contain at least the common native tools + python
+		for _, required := range []string{"ruff", "gitleaks", "tflint", "trivy", "terraform", "tofu", "hadolint", "terragrunt", "shellcheck", "rumdl", "python"} {
+			if _, ok := entry.Tools[required]; !ok {
+				t.Fatalf("plateforme %s manque de l'outil requis %s", platform, required)
 			}
 		}
-		sort.Strings(names)
-		if i == 0 {
-			baseline = names
-			continue
-		}
-		if strings.Join(names, ",") != strings.Join(baseline, ",") {
-			t.Fatalf("%s = %v, windows-x64 = %v", platform, names, baseline)
+		for name, tool := range entry.Tools {
+			rawURL := tool.resolveURL(manifest.RegistryBaseURL)
+			if strings.TrimSpace(rawURL) == "" || !strings.HasPrefix(rawURL, "https://") {
+				t.Fatalf("%s/%s URL invalide: %s", platform, name, rawURL)
+			}
 		}
 	}
 	seen := map[string]struct{}{}
 	var urls []string
 	for _, platform := range platforms {
 		for _, tool := range manifest.Platforms[platform].Tools {
-			if _, ok := seen[tool.ArchiveURL]; ok {
+			rawURL := tool.resolveURL(manifest.RegistryBaseURL)
+			if _, ok := seen[rawURL]; ok {
 				continue
 			}
-			seen[tool.ArchiveURL] = struct{}{}
-			urls = append(urls, tool.ArchiveURL)
+			seen[rawURL] = struct{}{}
+			urls = append(urls, rawURL)
 		}
 	}
 	client := &http.Client{Timeout: 30 * time.Second}

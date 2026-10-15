@@ -5,11 +5,11 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -19,9 +19,17 @@ import (
 )
 
 func (tool ToolEntry) kind() string {
-	switch strings.ToLower(strings.TrimSpace(tool.Install)) {
+	inst := strings.ToLower(strings.TrimSpace(tool.Install))
+	switch inst {
+	case "bundle":
+		return "bundle"
+	case "archive", "binary":
+		return "binary"
 	case "pip", "runtime":
-		return strings.ToLower(tool.Install)
+		return inst
+	}
+	if tool.Bundle != "" {
+		return "bundle"
 	}
 	if strings.Contains(strings.ToLower(tool.ArchiveURL), "py3-none-any") {
 		return "pip"
@@ -47,23 +55,40 @@ func lookupTool(tools map[string]ToolEntry, name string) (ToolEntry, string, boo
 	return ToolEntry{}, name, false
 }
 
-func installEntry(cacheDir, platform, key string, tool ToolEntry, tools map[string]ToolEntry, client *http.Client, opts SyncOptions) (string, error) {
+func installEntry(cacheDir, platform, key string, tool ToolEntry, tools map[string]ToolEntry, client *http.Client, opts SyncOptions, registryBase string) (string, error) {
 	switch tool.kind() {
 	case "pip":
-		return installPip(cacheDir, key, tool, tools, client, opts)
-	case "runtime":
-		return installRuntime(cacheDir, tool, client, opts)
+		return "", errors.New("manifeste de schéma 2 obsolète : les installations pip à la volée ont été retirées au profit des bundles relocalisables (schéma 3). Veuillez utiliser le manifeste version 2.0.15+")
+	case "bundle", "runtime":
+		return installBundle(cacheDir, platform, key, tool, client, opts, registryBase)
 	default:
-		return installBinary(cacheDir, platform, key, tool, client, opts)
+		return installBinary(cacheDir, platform, key, tool, client, opts, registryBase)
 	}
 }
 
-func installBinary(cacheDir, platform, key string, tool ToolEntry, client *http.Client, opts SyncOptions) (string, error) {
-	body, err := loadArchive(key, tool, client, opts)
+func installBundle(cacheDir, platform, key string, tool ToolEntry, client *http.Client, opts SyncOptions, registryBase string) (string, error) {
+	archiveURL := tool.resolveURL(registryBase)
+	body, err := loadArchive(key, archiveURL, client, opts)
 	if err != nil {
 		return "", err
 	}
-	binBytes, err := extractBinary(body, tool.BinaryInArchive, tool.ArchiveURL)
+	if err := extractTree(body, archiveURL, cacheDir); err != nil {
+		return "", fmt.Errorf("extraction du bundle pour %s: %w", key, err)
+	}
+	dest := resolvedBundlePath(cacheDir, platform, key, tool)
+	if dest != "" && runtime.GOOS != "windows" && !strings.HasSuffix(dest, ".psd1") {
+		_ = os.Chmod(dest, 0755)
+	}
+	return dest, nil
+}
+
+func installBinary(cacheDir, platform, key string, tool ToolEntry, client *http.Client, opts SyncOptions, registryBase string) (string, error) {
+	archiveURL := tool.resolveURL(registryBase)
+	body, err := loadArchive(key, archiveURL, client, opts)
+	if err != nil {
+		return "", err
+	}
+	binBytes, err := extractBinary(body, tool.BinaryInArchive, archiveURL)
 	if err != nil {
 		return "", fmt.Errorf("extraction du binaire pour %s: %w", key, err)
 	}
@@ -86,6 +111,51 @@ func installBinary(cacheDir, platform, key string, tool ToolEntry, client *http.
 	return dest, nil
 }
 
+func resolvedBundlePath(cacheDir, platform, key string, tool ToolEntry) string {
+	if tool.BinaryInArchive != "" {
+		candidate := filepath.Join(cacheDir, filepath.FromSlash(tool.BinaryInArchive))
+		if executablePresent(candidate) || (strings.HasSuffix(candidate, ".psd1") && fileExists(candidate)) {
+			return candidate
+		}
+	}
+	bundle := tool.Bundle
+	if bundle == "" {
+		bundle = key
+	}
+	switch bundle {
+	case "python":
+		return findPython(filepath.Join(cacheDir, "python"))
+	case "node":
+		if key == "eslint" || key == "tsc" {
+			ext := ""
+			if runtime.GOOS == "windows" {
+				ext = ".cmd"
+			}
+			return filepath.Join(cacheDir, "node", "node_modules", ".bin", key+ext)
+		}
+		if runtime.GOOS == "windows" {
+			return filepath.Join(cacheDir, "node", "node.exe")
+		}
+		return filepath.Join(cacheDir, "node", "bin", "node")
+	case "powershell-modules", "PSScriptAnalyzer", "Invoke-ScriptAnalyzer":
+		manifest := filepath.Join(cacheDir, "powershell-modules", "PSScriptAnalyzer", "PSScriptAnalyzer.psd1")
+		if fileExists(manifest) {
+			return manifest
+		}
+		entries, _ := os.ReadDir(filepath.Join(cacheDir, "powershell-modules", "PSScriptAnalyzer"))
+		for _, e := range entries {
+			if e.IsDir() {
+				sub := filepath.Join(cacheDir, "powershell-modules", "PSScriptAnalyzer", e.Name(), "PSScriptAnalyzer.psd1")
+				if fileExists(sub) {
+					return sub
+				}
+			}
+		}
+		return manifest
+	}
+	return ""
+}
+
 func executableFileName(key string, tool ToolEntry) string {
 	name := tool.Name
 	if name == "" {
@@ -100,155 +170,36 @@ func executableFileName(key string, tool ToolEntry) string {
 	return name
 }
 
-func installRuntime(cacheDir string, tool ToolEntry, client *http.Client, opts SyncOptions) (string, error) {
-	dest := filepath.Join(cacheDir, "python")
-	if py := findPython(dest); py != "" && pythonWorks(py) {
-		return py, nil
-	}
-	body, err := loadArchive("python", tool, client, opts)
-	if err != nil {
-		return "", err
-	}
-	if err := os.RemoveAll(dest); err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(dest, 0755); err != nil {
-		return "", err
-	}
-	if err := extractTree(body, tool.ArchiveURL, dest); err != nil {
-		return "", fmt.Errorf("extraction du runtime Python: %w", err)
-	}
-	py := findPython(dest)
-	if py == "" {
-		return "", fmt.Errorf("interpréteur Python introuvable dans %s", dest)
-	}
-	_ = os.Chmod(py, 0755)
-	return py, nil
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
-func installPip(cacheDir, key string, tool ToolEntry, tools map[string]ToolEntry, client *http.Client, opts SyncOptions) (string, error) {
-	python, err := ensurePython(cacheDir, tools, client, opts)
-	if err != nil {
-		return "", err
-	}
-	venvPython, err := ensureVenv(cacheDir, python)
-	if err != nil {
-		return "", err
-	}
-	pkg := tool.Package
-	if pkg == "" {
-		pkg = tool.Name
-	}
-	if pkg == "" {
-		pkg = key
-	}
-	cmd := exec.Command(venvPython, "-m", "pip", "install", "--disable-pip-version-check", "--upgrade", pkg+"=="+tool.Version)
-	cmd.Env = os.Environ()
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		text := strings.TrimSpace(string(out))
-		if text == "" {
-			text = err.Error()
-		}
-		return "", fmt.Errorf("pip install %s==%s : %s", pkg, tool.Version, text)
-	}
-	for _, name := range []string{key, tool.Name, pkg} {
-		if name == "" {
-			continue
-		}
-		script := venvExecutable(cacheDir, name)
-		if executablePresent(script) {
-			return script, nil
-		}
-	}
-	return "", fmt.Errorf("pip install %s==%s a réussi mais l'exécutable est introuvable dans le venv", pkg, tool.Version)
-}
-
-func ensurePython(cacheDir string, tools map[string]ToolEntry, client *http.Client, opts SyncOptions) (string, error) {
-	if py := findPython(filepath.Join(cacheDir, "python")); py != "" && pythonWorks(py) {
-		return py, nil
-	}
-	entry, ok := tools["python"]
-	var runtimeErr error
-	if ok {
-		if _, runtimeErr = installRuntime(cacheDir, entry, client, opts); runtimeErr == nil {
-			if py := findPython(filepath.Join(cacheDir, "python")); py != "" && pythonWorks(py) {
-				return py, nil
-			}
-			runtimeErr = fmt.Errorf("interpréteur absent après extraction")
+func findNode(root string) string {
+	if runtime.GOOS == "windows" {
+		winExe := filepath.Join(root, "node.exe")
+		if executablePresent(winExe) {
+			return winExe
 		}
 	} else {
-		runtimeErr = fmt.Errorf("python absent du manifeste")
-	}
-	if py := systemPython(); py != "" {
-		return py, nil
-	}
-	return "", fmt.Errorf("runtime Python indisponible: %v", runtimeErr)
-}
-
-func ensureVenv(cacheDir, python string) (string, error) {
-	venv := filepath.Join(cacheDir, "venv")
-	if py := venvPython(venv); executablePresent(py) && pythonWorks(py) {
-		return py, nil
-	}
-	_ = os.RemoveAll(venv)
-	cmd := exec.Command(python, "-m", "venv", venv)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		text := strings.TrimSpace(string(out))
-		if text == "" {
-			text = err.Error()
-		}
-		return "", fmt.Errorf("création du venv (%s) : %s", python, text)
-	}
-	py := venvPython(venv)
-	if !executablePresent(py) {
-		return "", fmt.Errorf("venv sans interpréteur: %s", py)
-	}
-	return py, nil
-}
-
-func venvPython(venv string) string {
-	if runtime.GOOS == "windows" {
-		return filepath.Join(venv, "Scripts", "python.exe")
-	}
-	for _, name := range []string{"python3", "python"} {
-		path := filepath.Join(venv, "bin", name)
-		if executablePresent(path) {
-			return path
+		posixExe := filepath.Join(root, "bin", "node")
+		if executablePresent(posixExe) {
+			return posixExe
 		}
 	}
-	return filepath.Join(venv, "bin", "python3")
-}
-
-func venvExecutable(cacheDir, tool string) string {
-	if runtime.GOOS == "windows" {
-		base := filepath.Join(cacheDir, "venv", "Scripts", tool)
-		for _, ext := range []string{".exe", ".cmd", ".bat", ""} {
-			path := base + ext
-			if executablePresent(path) {
-				return path
-			}
+	var found string
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
 		}
-		return base + ".exe"
-	}
-	return filepath.Join(cacheDir, "venv", "bin", tool)
-}
-
-func systemPython() string {
-	for _, name := range []string{"python3", "python"} {
-		path, err := exec.LookPath(name)
-		if err == nil && pythonWorks(path) {
-			return path
+		base := strings.ToLower(d.Name())
+		if base == "node.exe" || base == "node" {
+			found = path
+			return filepath.SkipAll
 		}
-	}
-	return ""
-}
-
-func pythonWorks(path string) bool {
-	cmd := exec.Command(path, "--version")
-	out, err := cmd.CombinedOutput()
-	return err == nil && strings.Contains(strings.ToLower(string(out)), "python")
+		return nil
+	})
+	return found
 }
 
 func pythonBinaryName(base string) bool {
@@ -285,9 +236,12 @@ func findPython(root string) string {
 	return found
 }
 
-func loadArchive(key string, tool ToolEntry, client *http.Client, opts SyncOptions) ([]byte, error) {
+func loadArchive(key, archiveURL string, client *http.Client, opts SyncOptions) ([]byte, error) {
+	if archiveURL == "" {
+		return nil, fmt.Errorf("URL d'archive manquante pour l'outil %s", key)
+	}
+	archiveFileName := filepath.Base(strings.Split(archiveURL, "?")[0])
 	if opts.ArchiveCacheDir != "" {
-		archiveFileName := filepath.Base(tool.ArchiveURL)
 		for _, candidate := range []string{
 			filepath.Join(opts.ArchiveCacheDir, archiveFileName),
 			filepath.Join(opts.ArchiveCacheDir, "wheels", archiveFileName),
@@ -300,16 +254,16 @@ func loadArchive(key string, tool ToolEntry, client *http.Client, opts SyncOptio
 	if opts.OfflineOnly {
 		return nil, fmt.Errorf("%w pour %s: mode hors-ligne actif et archive introuvable localement", ErrToolNotFound, key)
 	}
-	if err := requireHTTPSArchive(tool.ArchiveURL); err != nil {
+	if err := requireHTTPSArchive(archiveURL); err != nil {
 		return nil, fmt.Errorf("téléchargement de l'outil %s: %w", key, err)
 	}
-	body, err := fetchBytes(tool.ArchiveURL, client)
+	body, err := fetchBytes(archiveURL, client, opts.RegistryToken)
 	if err != nil {
 		return nil, fmt.Errorf("téléchargement de l'outil %s: %w", key, err)
 	}
 	if opts.ArchiveCacheDir != "" {
 		_ = os.MkdirAll(opts.ArchiveCacheDir, 0755)
-		_ = os.WriteFile(filepath.Join(opts.ArchiveCacheDir, filepath.Base(tool.ArchiveURL)), body, 0644)
+		_ = os.WriteFile(filepath.Join(opts.ArchiveCacheDir, archiveFileName), body, 0644)
 	}
 	return body, nil
 }

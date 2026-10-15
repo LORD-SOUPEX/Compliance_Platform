@@ -216,11 +216,12 @@ def find_go_binary(root: Path) -> str:
 
 def get_latest_core_mtime(core_dir: Path) -> float:
     latest = 0.0
-    for path in core_dir.rglob("*.go"):
-        try:
-            latest = max(latest, path.stat().st_mtime)
-        except OSError:
-            pass
+    for path in core_dir.rglob("*"):
+        if path.is_file():
+            try:
+                latest = max(latest, path.stat().st_mtime)
+            except OSError:
+                pass
     return latest
 
 
