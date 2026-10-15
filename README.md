@@ -95,7 +95,7 @@ Compliance_Platform/
 │   │   ├── model.ts                    # Modèles d'état et normalisation multi-OS
 │   │   └── reportPanel.ts              # Panneau Webview interactif de visualisation
 │   ├── package_vsix.py                 # Packaging OPC universel et cross-compilation
-│   ├── package.json                    # Manifeste d'extension VS Code (v2.0.14)
+│   ├── package.json                    # Manifeste d'extension VS Code (v2.0.15)
 │   └── tsconfig.json
 ├── .config/                            # Contrats de configuration partagés
 │   ├── control-catalog.json            # Catalogue des contrôles (voir le tableau ci-dessus)
