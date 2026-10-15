@@ -451,20 +451,20 @@ def get_github_token() -> str:
     raise RuntimeError("GitHub Token not found in GH_TOKEN, GITHUB_TOKEN or git credential")
 
 
-def publish_github_release(tag: str, assets: list[Path]):
-    print(f"\n[RELEASE] Publishing {len(assets)} assets to GitHub Release {tag}...")
+def publish_github_release(tag: str, assets: list[Path], repo_slug: str = REPO_SLUG):
+    print(f"\n[RELEASE] Publishing {len(assets)} assets to GitHub Release {tag} on {repo_slug}...")
     gh_bin = REPO_ROOT / ".tools" / "bin" / ("gh.exe" if sys.platform == "win32" else "gh")
     token = get_github_token()
     env = os.environ.copy()
     env["GH_TOKEN"] = token
 
-    check_cmd = [str(gh_bin), "release", "view", tag, "--repo", REPO_SLUG]
+    check_cmd = [str(gh_bin), "release", "view", tag, "--repo", repo_slug]
     res = subprocess.run(check_cmd, env=env, capture_output=True, text=True)
     if res.returncode != 0:
-        print(f"Creating release {tag}...")
+        print(f"Creating release {tag} on {repo_slug}...")
         create_cmd = [
             str(gh_bin), "release", "create", tag,
-            "--repo", REPO_SLUG,
+            "--repo", repo_slug,
             "--title", "Compliance Platform Tools Registry v1",
             "--notes", "Self-hosted relocatable tools registry for Compliance Platform v2.0.15.",
         ]
@@ -474,7 +474,7 @@ def publish_github_release(tag: str, assets: list[Path]):
     batch_size = 5
     for i in range(0, len(assets), batch_size):
         chunk = assets[i:i + batch_size]
-        upload_cmd = [str(gh_bin), "release", "upload", tag, "--repo", REPO_SLUG, "--clobber"] + [str(p) for p in chunk]
+        upload_cmd = [str(gh_bin), "release", "upload", tag, "--repo", repo_slug, "--clobber"] + [str(p) for p in chunk]
         for attempt in range(1, 6):
             res = subprocess.run(upload_cmd, env=env, capture_output=True, text=True)
             if res.returncode == 0:
@@ -487,14 +487,112 @@ def publish_github_release(tag: str, assets: list[Path]):
     print("[PASS] All assets successfully uploaded to release!")
 
 
+def host_matches_platform(plat: str) -> bool:
+    if sys.platform == "win32":
+        return plat == "windows-x64"
+    import platform as sys_plat
+    mach = sys_plat.machine().lower()
+    if sys.platform == "linux":
+        if mach in ("x86_64", "amd64"):
+            return plat == "linux-x64"
+        if mach in ("aarch64", "arm64"):
+            return plat == "linux-arm64"
+    if sys.platform == "darwin":
+        if mach in ("x86_64", "amd64"):
+            return plat == "macos-x64"
+        if mach in ("arm64", "aarch64"):
+            return plat == "macos-arm64"
+    return False
+
+
+def build_python_bundle_posix(plat: str) -> tuple[str, str, str]:
+    """Builds a relocatable Python bundle on Linux/macOS with checkov, bandit, pylint, pytest, pip-audit, yamllint, ansible-lint."""
+    out_name = f"{plat}-python-tools-3.11.9.tar.gz"
+    out_path = DIST_DIR / out_name
+    print(f"  [BUNDLE] Building relocatable Python bundle for {plat}...")
+
+    url = CPYTHON_STANDALONE[plat]
+    dl_name = f"cpython-standalone-{plat}-3.11.9.tar.gz"
+    src_tar = download_cached(url, dl_name)
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix=f"py-bundle-{plat}-"))
+    try:
+        with tarfile.open(src_tar, "r:gz") as tf:
+            tf.extractall(tmp_dir)
+
+        py_bin = tmp_dir / "python" / "bin" / "python3"
+        if not py_bin.exists():
+            raise RuntimeError(f"Python binary not found at {py_bin}")
+
+        pip_pkgs = [
+            "checkov==3.3.23",
+            "bandit==1.9.4",
+            "pylint==4.1.2",
+            "pytest==9.1.1",
+            "pip-audit==2.10.1",
+            "yamllint==1.35.1",
+            "ansible-lint==25.8.2",
+        ]
+        subprocess.run(
+            [str(py_bin), "-m", "pip", "install", "--no-cache-dir", "--no-warn-script-location"] + pip_pkgs,
+            check=True,
+        )
+
+        for p in (tmp_dir / "python" / "lib").glob("python*/site-packages/checkov"):
+            main_py = p / "__main__.py"
+            if not main_py.exists():
+                main_py.write_text(
+                    "import sys\nfrom checkov.main import Checkov\n\nif __name__ == '__main__':\n    sys.exit(Checkov().run())\n",
+                    encoding="utf-8",
+                )
+
+        bin_dir = tmp_dir / "python" / "bin"
+        if bin_dir.exists():
+            for item in bin_dir.iterdir():
+                if item.is_file() and not item.is_symlink():
+                    try:
+                        raw = item.read_bytes()
+                        if raw.startswith(b"#!"):
+                            lines = raw.split(b"\n", 1)
+                            if b"python" in lines[0].lower():
+                                new_shebang = b"#!/usr/bin/env python3"
+                                rest = lines[1] if len(lines) > 1 else b""
+                                item.write_bytes(new_shebang + b"\n" + rest)
+                    except Exception:
+                        pass
+
+        DIST_DIR.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(out_path, "w:gz") as tf:
+            for root, dirs, files in os.walk(tmp_dir / "python"):
+                dirs[:] = [d for d in dirs if d not in ("__pycache__", ".pytest_cache")]
+                for file in files:
+                    if file.endswith((".pyc", ".pyo")):
+                        continue
+                    src_file = Path(root) / file
+                    arc_member = f"python/{src_file.relative_to(tmp_dir / 'python')}".replace("\\", "/")
+                    ti = tf.gettarinfo(src_file, arcname=arc_member)
+                    ti.mode = 0o755 if ("bin" in src_file.parts or file.endswith((".sh",))) else 0o644
+                    with open(src_file, "rb") as f:
+                        tf.addfile(ti, f)
+
+        arc_sha = sha256_file(out_path)
+        return out_name, arc_sha, "python/bin/python3"
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Build and publish Compliance Platform tools registry")
+    parser.add_argument("--repo", default=REPO_SLUG, help=f"GitHub repository slug (default: {REPO_SLUG})")
+    parser.add_argument("--tag", default=RELEASE_TAG, help=f"GitHub release tag (default: {RELEASE_TAG})")
     parser.add_argument("--dry-run", action="store_true", help="Build and measure archives, generate manifest, but do not upload")
     parser.add_argument("--skip-upload", action="store_true", help="Skip uploading to GitHub Releases")
     args = parser.parse_args()
 
+    registry_base_url = f"https://github.com/{args.repo}/releases/download/{args.tag}"
+
     print("================================================================================")
-    print("Building Compliance Platform Tools Registry v1 (v2.0.15)")
+    print(f"Building Compliance Platform Tools Registry ({args.tag}) on {args.repo}")
     print("================================================================================")
 
     manifest_platforms = {}
@@ -603,19 +701,55 @@ def main():
                     "version_args": [],
                 }
         else:
-            # POSIX CPython standalone
-            py_arc, py_sha, py_bin = package_posix_cpython(plat)
-            built_assets.append(DIST_DIR / py_arc)
-            plat_tools["python"] = {
-                "name": "python",
-                "version": "3.11.9",
-                "install": "bundle",
-                "archive": py_arc,
-                "archive_sha256": py_sha,
-                "binary_in_archive": py_bin,
-                "binary_sha256": "",
-                "version_args": ["--version"],
-            }
+            if host_matches_platform(plat):
+                py_arc, py_sha, py_bin = build_python_bundle_posix(plat)
+                built_assets.append(DIST_DIR / py_arc)
+                plat_tools["python"] = {
+                    "name": "python",
+                    "version": "3.11.9",
+                    "install": "bundle",
+                    "archive": py_arc,
+                    "archive_sha256": py_sha,
+                    "binary_in_archive": py_bin,
+                    "binary_sha256": "",
+                    "version_args": ["--version"],
+                }
+                posix_tools = [
+                    ("bandit", "1.9.4", "bandit"),
+                    ("pylint", "4.1.2", "pylint"),
+                    ("pytest", "9.1.1", "pytest"),
+                    ("pip-audit", "2.10.1", "pip_audit"),
+                    ("checkov", "3.3.23", "checkov.main"),
+                    ("yamllint", "1.35.1", "yamllint"),
+                    ("ansible-lint", "25.8.2", "ansiblelint"),
+                ]
+                for pname, pver, pmod in posix_tools:
+                    plat_tools[pname] = {
+                        "name": pname,
+                        "version": pver,
+                        "install": "bundle",
+                        "bundle": "python",
+                        "archive": py_arc,
+                        "archive_sha256": py_sha,
+                        "python_module": pmod,
+                        "binary_in_archive": "python/bin/python3",
+                        "binary_sha256": "",
+                        "version_args": ["--version"],
+                    }
+            else:
+                # Standalone CPython runtime when cross-building from Windows or other host
+                py_arc, py_sha, py_bin = package_posix_cpython(plat)
+                built_assets.append(DIST_DIR / py_arc)
+                plat_tools["python"] = {
+                    "name": "python",
+                    "version": "3.11.9",
+                    "install": "bundle",
+                    "archive": py_arc,
+                    "archive_sha256": py_sha,
+                    "binary_in_archive": py_bin,
+                    "binary_sha256": "",
+                    "version_args": ["--version"],
+                }
 
         manifest_platforms[plat] = {
             "status": "qualified" if plat == "windows-x64" else "targeted",
@@ -630,7 +764,7 @@ def main():
     manifest = {
         "schema_version": 3,
         "manifest_version": "2.0.15",
-        "registry_base_url": REGISTRY_BASE_URL,
+        "registry_base_url": registry_base_url,
         "platforms": manifest_platforms,
     }
 
@@ -665,7 +799,7 @@ def main():
         print("\n[INFO] Dry-run or skip-upload active: skipped release publishing.")
         return
 
-    publish_github_release(RELEASE_TAG, unique_assets)
+    publish_github_release(args.tag, unique_assets, repo_slug=args.repo)
 
 
 if __name__ == "__main__":

@@ -37,7 +37,7 @@ Les outils Python (`checkov` 3.3.23, `bandit` 1.9.4, `pylint` 4.1.2, `pytest` 9.
 - Le moteur Go exécute systématiquement les outils Python via l'interpréteur autonome du bundle (`python -m <module>`), garantissant une relocalisation parfaite quel que soit l'emplacement du dossier utilisateur.
 
 ### 3. Bundle Node (JavaScript / TypeScript)
-Le bundle `node-tools-22` fournit un environnement autonome contenant Node.js 22, `eslint` 9 et `typescript` 5.9 dans `~/.compliance/tools/node`, servant de repli transparent si la cible auditée ne possède pas de `node_modules/.bin`.
+Le bundle `windows-x64-node-tools-22.14.0.zip` fournit un environnement autonome contenant Node.js 22.14.0, `eslint` 9.21.0 et `typescript` 5.7.3 dans `~/.compliance/tools/node`, servant de repli transparent si la cible auditée ne possède pas de `node_modules/.bin`.
 
 ### 4. Module PowerShell `PSScriptAnalyzer`
 L'archive `windows-x64-powershell-modules-PSScriptAnalyzer-1.23.0.zip` est hébergée sur le registre et extraite dans `~/.compliance/tools/powershell-modules/PSScriptAnalyzer`. Même sur un poste Windows vierge sans accès à la PowerShell Gallery, `Invoke-ScriptAnalyzer` s'installe et s'exécute en 1 clic.

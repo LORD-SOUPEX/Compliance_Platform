@@ -49,6 +49,33 @@ Le script `scripts/build_and_publish_tools.py` automatise :
 py scripts/build_and_publish_tools.py --repo LORD-SOUPEX/Compliance_Platform --tag tools-v1
 ```
 
+### Procédure de construction et publication des bundles Linux et macOS
+
+Sur une machine ou un runner Linux (x64 ou arm64) ou macOS (Intel ou Apple Silicon) disposant de Python 3.10+, Go et de GitHub CLI (`gh`) authentifié avec les droits sur le dépôt :
+
+1. **Cloner le dépôt et se placer à la racine** :
+   ```bash
+   git clone https://github.com/LORD-SOUPEX/Compliance_Platform.git
+   cd Compliance_Platform
+   ```
+
+2. **Exécuter le script de build du registre** :
+   Le script détecte la plateforme POSIX hôte (`linux-x64`, `linux-arm64`, `macos-x64` ou `macos-arm64`), extrait le runtime CPython autonome `python-build-standalone` 3.11.9, installe l'ensemble des paquets requis (`checkov==3.3.23`, `bandit==1.9.4`, `pylint==4.1.2`, `pytest==9.1.1`, `pip-audit==2.10.1`, `yamllint==1.35.1`, ainsi que `ansible-lint==25.8.2` sous POSIX), réécrit les shebangs en `#!/usr/bin/env python3`, injecte `checkov/__main__.py`, calcule les SHA-256 réels et publie l'archive sur la release GitHub :
+   ```bash
+   python3 scripts/build_and_publish_tools.py --repo LORD-SOUPEX/Compliance_Platform --tag tools-v1
+   ```
+
+3. **Mode validation préalable sans téléversement (dry-run)** :
+   ```bash
+   python3 scripts/build_and_publish_tools.py --dry-run
+   ```
+
+4. **Assets produits et mis à jour** :
+   - Archive produite : `<platform>-python-tools-3.11.9.tar.gz`
+   - Le manifeste `.config/runtime-manifest.json` est mis à jour avec les SHA-256 réels et re-signé par la clé Ed25519.
+   - Les archives sont uploadées sur la release GitHub `tools-v1` avec remplacement automatique (`--clobber`).
+
+
 ## Réinstallation locale du VSIX
 
 Réinstaller l'extension de test, sans script PowerShell :

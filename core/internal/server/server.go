@@ -900,6 +900,15 @@ func (sm *SessionManager) CleanupStaleSessions() {
 	_, _ = sessions.Purge(filepath.Join(sm.stateDir, "runs"), sessions.Options{})
 }
 
+// CancelAll cleanly cancels all active sessions.
+func (sm *SessionManager) CancelAll() {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	for _, sess := range sm.sessions {
+		_ = sess.CancelSession()
+	}
+}
+
 // DaemonServer represents the running HTTP/SSE daemon.
 type DaemonServer struct {
 	cfg        DaemonConfig
@@ -1040,6 +1049,10 @@ func (s *DaemonServer) Close(ctx context.Context) error {
 	}
 	s.closed = true
 	s.mu.Unlock()
+
+	if s.sessions != nil {
+		s.sessions.CancelAll()
+	}
 
 	var firstErr error
 	if err := s.httpServer.Shutdown(ctx); err != nil {
