@@ -1,6 +1,6 @@
 # Architecture et contrats techniques
 
-Version courante : 2.0.16. Les chiffres de contrôles figés dans d'anciennes notes (notamment « 28 contrôles ») sont obsolètes. La liste actuelle est le tableau `catalog-controls` des README, vérifié contre `.config/control-catalog.json`.
+Version courante : 2.0.18. Les chiffres de contrôles figés dans d'anciennes notes (notamment « 28 contrôles ») sont obsolètes. La liste actuelle est le tableau `catalog-controls` des README, vérifié contre `.config/control-catalog.json`.
 
 Le guide d'usage est le [README](../README.md). Le packaging et la signature sont dans [développement](developpement.md). Les outils sont dans [outils](outils.md).
 

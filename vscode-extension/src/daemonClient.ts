@@ -1071,7 +1071,8 @@ export async function audit(
 // 3. Lecture, normalisation et validation de rapports (historiques et vivants)
 // ---------------------------------------------------------------------------
 
-export const maximumReportBytes = 32 * 1024 * 1024;
+/** Reports are not size-capped: a full audit of a large tree stays openable. Session metadata keeps its own limit. */
+export const maximumReportBytes = Number.POSITIVE_INFINITY;
 export type Fields = Record<string, unknown>;
 export function fields(value: unknown): value is Fields { return value !== null && typeof value === 'object' && !Array.isArray(value); }
 export function text(value: unknown): string { return value === null || value === undefined ? 'Non renseigne' : typeof value === 'string' ? value : JSON.stringify(value); }
@@ -1087,13 +1088,14 @@ export interface LoadedReport {
 }
 
 export interface ReportReference { runId: string; target: string; source: string }
-export type ReportMessage = { schema_version: 1; action: 'ready' | 'pick' | 'raw' | 'folder' | 'provision' } | { schema_version: 1; action: 'output'; controlId: string } | { schema_version: 1; action: 'finding'; index: number };
+export type ReportMessage = { schema_version: 1; action: 'ready' | 'pick' | 'raw' | 'folder' | 'provision' } | { schema_version: 1; action: 'output' | 'files'; controlId: string } | { schema_version: 1; action: 'rows'; controlId: string; file: string } | { schema_version: 1; action: 'finding'; index: number };
 
 export function reportMessage(value: unknown): ReportMessage {
     if (!fields(value) || value.schema_version !== 1 || typeof value.action !== 'string') { throw new Error('Message Webview invalide.'); }
     const keys = Object.keys(value).sort().join(',');
     if (['ready', 'pick', 'raw', 'folder', 'provision'].includes(value.action) && keys === 'action,schema_version') { return value as ReportMessage; }
-    if (value.action === 'output' && keys === 'action,controlId,schema_version' && typeof value.controlId === 'string' && value.controlId.length > 0 && value.controlId.length <= 4096) { return value as ReportMessage; }
+    if ((value.action === 'output' || value.action === 'files') && keys === 'action,controlId,schema_version' && typeof value.controlId === 'string' && value.controlId.length > 0 && value.controlId.length <= 4096) { return value as ReportMessage; }
+    if (value.action === 'rows' && keys === 'action,controlId,file,schema_version' && typeof value.controlId === 'string' && value.controlId.length > 0 && value.controlId.length <= 4096 && typeof value.file === 'string' && value.file.length > 0 && value.file.length <= 4096 && !value.file.includes('\0')) { return value as ReportMessage; }
     if (value.action === 'finding' && keys === 'action,index,schema_version' && Number.isSafeInteger(value.index) && Number(value.index) >= 0) { return value as ReportMessage; }
     throw new Error('Action ou arguments Webview non autorises.');
 }
@@ -1114,7 +1116,8 @@ export async function readStable(file: string, limit = maximumReportBytes): Prom
     const handle = await fs.open(file, 'r');
     try {
         const before = await handle.stat();
-        if (!before.isFile() || before.size === 0 || before.size > limit) { throw new Error('Fichier absent, vide ou trop volumineux.'); }
+        if (!before.isFile() || before.size === 0) { throw new Error('Fichier absent ou vide.'); }
+        if (Number.isFinite(limit) && before.size > limit) { throw new Error('Fichier absent, vide ou trop volumineux.'); }
         const buffer = Buffer.alloc(before.size);
         let offset = 0;
         while (offset < buffer.length) {
@@ -1163,8 +1166,16 @@ export function displayReport(value: unknown, presentations: unknown): { report:
             (!fields(state.reason) || typeof state.reason.code !== 'string' || !state.reason.code || typeof state.reason.message !== 'string' || !state.reason.message)) { throw new Error('Motif structure absent.'); }
         visual.set(state.control_id, state);
     }
+    const findingsByControl = new Map<string, Fields[]>();
+    for (const finding of findings) {
+        const id = typeof finding.control_id === 'string' ? finding.control_id : '';
+        const bucket = findingsByControl.get(id);
+        if (bucket) { bucket.push(finding); }
+        else if (id) { findingsByControl.set(id, [finding]); }
+    }
     const ids = new Set<string>();
-    const controls = [...plan, ...results.filter(result => !plan.some(control => control.id === result.control_id))].map(control => {
+    const planIds = new Set(plan.map(control => typeof control.id === 'string' ? control.id : String(control.control_id)));
+    const controls = [...plan, ...results.filter(result => !planIds.has(String(result.control_id)))].map(control => {
         const id = typeof control.id === 'string' ? control.id : String(control.control_id);
         if (id === 'undefined' || !id || ids.has(id) || typeof control.technology !== 'string' || typeof control.root !== 'string') { throw new Error('Identite ou racine de controle invalide.'); }
         ids.add(id);
@@ -1172,8 +1183,8 @@ export function displayReport(value: unknown, presentations: unknown): { report:
         const state = visual.get(id);
         if (!state || (!result && value.execution_status === 'completed' && value.discovery && (value.discovery as Fields).scan_complete !== false)) { throw new Error('Resultat ou presentation backend absent du rapport final.'); }
         return { id, name: text(control.name || id), technology: control.technology, root: control.root, status: state.status as VisualStatus,
-            reason: fields(state.reason) ? state.reason as unknown as Reason : undefined, plan: plan.includes(control) ? control : undefined, result,
-            findings: findings.filter(finding => finding.control_id === id) };
+            reason: fields(state.reason) ? state.reason as unknown as Reason : undefined, plan: planIds.has(id) ? control : undefined, result,
+            findings: findingsByControl.get(id) || [] };
     });
     if (visual.size !== controls.length) { throw new Error('Presentations backend hors plan.'); }
     return { report: value, controls };
@@ -1205,45 +1216,52 @@ async function sessionNearReport(file: string): Promise<{ directory: string; ses
     }
 }
 
+/** Validation only needs plan, results and discovery. Findings and captured stdout stay on disk. */
+export function validationPayload(report: Fields): Fields {
+    const results = Array.isArray(report.execution_results)
+        ? report.execution_results.map(item => {
+            if (!fields(item)) { return item; }
+            const copy: Fields = { ...item };
+            delete copy.stdout;
+            delete copy.stderr;
+            return copy;
+        })
+        : report.execution_results;
+    return { ...report, findings: [], execution_results: results };
+}
+
 export async function loadReport(source: string, file: string, reference?: ReportReference, historical = !reference, client?: DaemonClient): Promise<LoadedReport> {
     const associated = reference ? await readSession(source, reference) : await sessionNearReport(file);
     if (associated && path.relative(path.join(associated.directory, 'compliance-report.json'), path.resolve(file)) !== '') { throw new Error('Rapport hors session attendue.'); }
+    const before = await fs.lstat(file);
     const bytes = await readStable(file);
     const raw = json(bytes);
     if (!fields(raw) || raw.schema_version !== 1) { throw new Error('Rapport v1 invalide ou version inconnue.'); }
-    const stagingRoot = path.join(path.dirname(await stateRoot(source)), 'report-reader');
-    await fs.mkdir(stagingRoot, { recursive: true }); await noLinks(stagingRoot);
-    const staging = path.join(stagingRoot, randomUUID());
-    await fs.mkdir(staging);
-    try {
-        const snapshot = path.join(staging, 'report.json'); await fs.writeFile(snapshot, bytes, { flag: 'wx' });
-        const digest = createHash('sha256').update(bytes).digest('hex');
-
-        const daemon = client || new DaemonClient();
-        await daemon.ensureDaemon(source);
-        const envelope = await daemon.validateReport(raw, digest);
-        if (!fields(envelope) || envelope.schema_version !== 1 || envelope.report_sha256 !== digest) { throw new Error('Validation non rattachee aux octets du rapport.'); }
-        const displayed = displayReport(raw, envelope.presentations);
-        if (typeof envelope.total_duration_ms === 'number' && Number.isFinite(envelope.total_duration_ms) && envelope.total_duration_ms >= 0) {
-            const metrics = fields(displayed.report.metrics) ? displayed.report.metrics : {};
-            if (typeof metrics.total_duration_ms !== 'number') {
-                metrics.total_duration_ms = envelope.total_duration_ms;
-                displayed.report.metrics = metrics;
-            }
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    const daemon = client || new DaemonClient();
+    await daemon.ensureDaemon(source);
+    const envelope = await daemon.validateReport(validationPayload(raw), digest);
+    if (!fields(envelope) || envelope.schema_version !== 1 || envelope.report_sha256 !== digest) { throw new Error('Validation non rattachee aux octets du rapport.'); }
+    const displayed = displayReport(raw, envelope.presentations);
+    if (typeof envelope.total_duration_ms === 'number' && Number.isFinite(envelope.total_duration_ms) && envelope.total_duration_ms >= 0) {
+        const metrics = fields(displayed.report.metrics) ? displayed.report.metrics : {};
+        if (typeof metrics.total_duration_ms !== 'number') {
+            metrics.total_duration_ms = envelope.total_duration_ms;
+            displayed.report.metrics = metrics;
         }
-        if (reference && ((displayed.report.metadata as Fields).run_id !== reference.runId || !isSameDirectory(String(displayed.report.repository), reference.target))) { throw new Error('Identite run_id ou Target incoherente avec la session.'); }
-        if (associated && fields(associated.session.permissions)) {
-            const metadata = displayed.report.metadata as Fields;
-            if (metadata.network_authorized !== associated.session.permissions.network || metadata.code_execution_authorized !== associated.session.permissions.code_execution) { throw new Error('Permissions du rapport incoherentes avec la session.'); }
-        }
-        if (associated && ['cancelled', 'incomplete'].includes(String(associated.session.state)) &&
-            (displayed.report.verdict === 'PASS' || (displayed.report.coverage as Fields).complete === true)) { throw new Error('Rapport interrompu presente comme un PASS complet.'); }
-        const after = createHash('sha256').update(await readStable(file)).digest('hex');
-        if (after !== digest) { throw new Error('Rapport modifie pendant sa validation ; actualiser.'); }
-        const directory = associated?.directory || (path.basename(path.resolve(file)) === 'compliance-report.json' ? path.dirname(path.resolve(file)) : undefined);
-        return { ...displayed, file: path.resolve(file), sha256: digest, historical, session: associated?.session, directory,
-            target: String(displayed.report.repository), runId: String((displayed.report.metadata as Fields).run_id) };
-    } finally { await fs.rm(staging, { recursive: true, force: true }); }
+    }
+    if (reference && ((displayed.report.metadata as Fields).run_id !== reference.runId || !isSameDirectory(String(displayed.report.repository), reference.target))) { throw new Error('Identite run_id ou Target incoherente avec la session.'); }
+    if (associated && fields(associated.session.permissions)) {
+        const metadata = displayed.report.metadata as Fields;
+        if (metadata.network_authorized !== associated.session.permissions.network || metadata.code_execution_authorized !== associated.session.permissions.code_execution) { throw new Error('Permissions du rapport incoherentes avec la session.'); }
+    }
+    if (associated && ['cancelled', 'incomplete'].includes(String(associated.session.state)) &&
+        (displayed.report.verdict === 'PASS' || (displayed.report.coverage as Fields).complete === true)) { throw new Error('Rapport interrompu presente comme un PASS complet.'); }
+    const after = await fs.lstat(file);
+    if (after.isSymbolicLink() || after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ino !== before.ino) { throw new Error('Rapport modifie pendant sa validation ; actualiser.'); }
+    const directory = associated?.directory || (path.basename(path.resolve(file)) === 'compliance-report.json' ? path.dirname(path.resolve(file)) : undefined);
+    return { ...displayed, file: path.resolve(file), sha256: digest, historical, session: associated?.session, directory,
+        target: String(displayed.report.repository), runId: String((displayed.report.metadata as Fields).run_id) };
 }
 
 export function technologiesAbsentFromRun(executed: string[], absent: string[]): string[] {

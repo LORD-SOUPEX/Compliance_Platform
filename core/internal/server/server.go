@@ -1018,7 +1018,7 @@ func StartDaemon(cfg DaemonConfig) (*DaemonServer, error) {
 
 	srv.httpServer = &http.Server{
 		Handler:      security.Middleware(mux),
-		ReadTimeout:  30 * time.Second,
+		ReadTimeout:  120 * time.Second,
 		WriteTimeout: 0,
 	}
 

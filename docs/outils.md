@@ -1,6 +1,6 @@
 # Outils du catalogue et manifeste
 
-Version courante : 2.0.16. Le manifeste est `.config/runtime-manifest.json` (schéma 3).
+Version courante : 2.0.18. Le manifeste est `.config/runtime-manifest.json` (schéma 3).
 
 L'intégralité des outils requis par le catalogue est centralisée et pré-packagée dans un **registre d'outils auto-hébergé** publié sur la GitHub Release `tools-v1` (`https://github.com/LORD-SOUPEX/Compliance_Platform/releases/tag/tools-v1`). Plus aucun appel réseau vers des forges tierces (éditeurs, HashiCorp, PyPI, npm, PowerShell Gallery) n'a lieu lors de la synchronisation ou de l'exécution.
 

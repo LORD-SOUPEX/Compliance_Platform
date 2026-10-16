@@ -1,6 +1,6 @@
 # ICP - IaC Compliance Platform
 
-Audit local d'un dépôt. L'extension parle à un démon Go sur `127.0.0.1`. Aucun compte, aucune forge et aucun envoi du code. Version courante : 2.0.16.
+Audit local d'un dépôt. L'extension parle à un démon Go sur `127.0.0.1`. Aucun compte, aucune forge et aucun envoi du code. Version courante : 2.0.18.
 
 ## Architecture de la plateforme
 
@@ -86,7 +86,8 @@ La découverte ignore `.git`, `.vscode`, `.vscode-test`, `.rumdl_cache`, `node_m
 | --- | --- |
 | ICP: Sélectionner la cible à auditer | Choisit le dossier à auditer et lance la préparation. |
 | ICP: Recalculer la découverte et le plan | Relit la cible sans exécuter les contrôles. |
-| ICP: Lancer l'audit de la cible | Demande les autorisations manquantes, exécute le plan, ouvre le rapport. |
+| ICP: Lancer l'audit de la cible | Exécute le plan avec l'autorisation machine déjà mémorisée, puis ouvre le rapport. |
+| ICP: Autoriser Compliance sur cette machine | Redemande l'autorisation unique (outils, réseau, exécution de code) si elle a été refusée. |
 | ICP: Annuler l'audit en cours | Arrête le run et les processus du contrôle en cours. |
 | ICP: Ouvrir le rapport de la dernière session | Rouvre le rapport de la session courante ou de la dernière session connue. |
 | ICP: Ouvrir un rapport JSON existant | Charge un `compliance-report.json` local. |
@@ -96,15 +97,15 @@ La découverte ignore `.git`, `.vscode`, `.vscode-test`, `.rumdl_cache`, `node_m
 | ICP: Ouvrir le dossier de session | Ouvre le dossier de la session dans l'explorateur du système. |
 | ICP: Ouvrir le journal Output | Affiche le canal **Compliance** (durées, purge, contrôles). |
 
-Dans le rapport : **Ouvrir un rapport…** choisit un `compliance-report.json` dans le dossier des sessions, **JSON brut** ouvre le fichier, **Dossier de session** ouvre le dossier. **Installer depuis le manifeste** télécharge les outils listés dans le manifeste. Chaque contrôle exécuté (réussi, échec ou erreur) a **Ouvrir les sorties**. **Ouvrir à la ligne** ouvre le fichier de l'anomalie, reconstitué depuis la racine du contrôle, à la ligne indiquée. Le bandeau utilise le logo `media/icon.png` et des icônes SVG, sans emoji.
+Dans le rapport : **Ouvrir un rapport…** choisit un `compliance-report.json` dans le dossier des sessions, **JSON brut** ouvre le fichier, **Dossier de session** ouvre le dossier. **Installer les outils manquants** télécharge, sans nouveau dialogue si l'autorisation machine est déjà accordée, les outils listés dans le manifeste. Chaque contrôle exécuté (réussi, échec ou erreur) a **Ouvrir les sorties**. **Ouvrir à la ligne** ouvre le fichier de l'anomalie, reconstitué depuis la racine du contrôle, à la ligne indiquée. Le bandeau utilise le logo `media/icon.png` et des icônes SVG, sans emoji.
 
 ## Autorisations
 
-Réseau et exécution de code sont refusés tant que vous ne les accordez pas pour la session. Les contrôles qui en ont besoin restent non exécutés et apparaissent comme une lacune, pas comme un succès. Ce n'est pas un bac à sable.
+Une seule demande, mémorisée sur la machine (`compliance.machineConsent`) : téléchargement des outils du registre, exécution de ces outils et accès réseau pour auditer les dépôts choisis. Une fois acceptée, elle n'est plus redemandée, y compris sur un autre dépôt. Un refus n'est pas redemandé ; la commande **ICP: Autoriser Compliance sur cette machine** permet de changer d'avis. Les contrôles qui exigent le réseau ou l'exécution de code restent alors non exécutés et apparaissent comme une lacune, pas comme un succès. Ce n'est pas un bac à sable.
 
 ## Outils
 
-L'installation du VSIX ne télécharge pas les outils d'audit. Après un audit, si un outil figure dans le manifeste, l'extension peut le télécharger en HTTPS depuis le registre auto-hébergé `tools-v1` (`https://github.com/LORD-SOUPEX/Compliance_Platform/releases/tag/tools-v1`) une fois que vous acceptez la liste (version et URL). L'archive est extraite sous `~/.compliance/tools`, sans droits administrateur. Une signature ou une somme SHA-256 différente est signalée par un avertissement journalisé mais ne bloque pas l'installation. Un refus n'est pas redemandé tout seul. Une coupure réseau ou un proxy (`HTTP_PROXY` / `HTTPS_PROXY`) n'installe rien.
+L'installation du VSIX ne télécharge pas les outils d'audit. Après l'autorisation machine, un outil manquant du manifeste est téléchargé en HTTPS depuis le registre auto-hébergé `tools-v1` (`https://github.com/LORD-SOUPEX/Compliance_Platform/releases/tag/tools-v1`) sans nouvelle fenêtre. L'archive est extraite sous `~/.compliance/tools`, sans droits administrateur. Une signature ou une somme SHA-256 différente est signalée par un avertissement journalisé mais ne bloque pas l'installation. Une coupure réseau ou un proxy (`HTTP_PROXY` / `HTTPS_PROXY`) n'installe rien.
 
 Sur le registre `tools-v1`, les 10 outils natifs sont fournis pour les 5 plateformes cibles (`windows-x64`, `linux-x64`, `linux-arm64`, `macos-x64`, `macos-arm64`). Les bundles Python (`checkov`, `bandit`, `pylint`, `pytest`, `pip-audit`, `yamllint`), Node (`eslint`, `tsc`) et `PSScriptAnalyzer` sont publiés et qualifiés pour `windows-x64` (sur Linux et macOS, les bundles peuvent être construits sur un hôte POSIX avec `scripts/build_and_publish_tools.py` ou résolus via le PATH du système).
 

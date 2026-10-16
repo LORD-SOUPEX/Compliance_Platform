@@ -5,6 +5,7 @@ import { reportButtonCommand } from './reportActions.js';
 import { buildReportModel, LayoutControl, nonApplicableMarkup, reportDurationMs, unavailableSummary } from './reportLayout';
 import { controlOutputText } from './model';
 import { controlRelativeFile, Fields, fields, findingLocation, LoadedReport, loadReport, readSession, readStable, ReportControl, ReportReference, reportMessage, runsDirectory, targetFile, text } from './daemonClient';
+import { hasMachineConsent, machineConsentKey, MachineConsent } from './toolProvision';
 
 export function escaped(value: unknown, limit = 50000): string {
     const original = text(value);
@@ -46,12 +47,13 @@ export function reportHtml(document: LoadedReport, css: string, cspSource: strin
         endedAt: document.session?.ended_at
     });
     const findings = visibleFindings(report);
+    const inlineFindings = findings.length <= 400;
     const findingCount = new Map<string, number>();
     for (const finding of findings) {
         const id = String(finding.control_id || '').replace(/\\/g, '/');
         findingCount.set(id, (findingCount.get(id) || 0) + 1);
     }
-    const executedRows = executedMarkup(model.executed, findingCount, findings, !!document.directory);
+    const executedRows = executedMarkup(model.executed, findingCount, findings, !!document.directory, inlineFindings);
     const unavailable = unavailableSummary(document.controls.map(layoutControl));
     const tools = model.tools.length ? `<details><summary>Outils à provisionner <span>${escaped(new Set(model.tools).size)}</span></summary><ul>${[...new Set(model.tools)].map(tool => `<li>${escaped(tool)}</li>`).join('')}</ul><button type="button" data-action="provision">Installer les outils manquants</button></details>` : '';
     const unavailableBlock = unavailable.length ? `<details><summary>Indisponibles <span>${escaped(unavailable.length)}</span></summary><ul>${unavailable.map(line => `<li>${escaped(line)}</li>`).join('')}</ul></details>` : '';
@@ -158,30 +160,51 @@ export async function revealFinding(target: string, finding: Fields): Promise<vs
     return editor;
 }
 
-function fileTreeMarkup(controlId: string, findings: Fields[]): string {
+function findingIndexes(controlId: string, findings: Fields[]): Map<string, number[]> {
     const files = new Map<string, number[]>();
     findings.forEach((finding, index) => {
         if (skippedFinding(finding) || !sameControl(String(finding.control_id || ''), controlId)) { return; }
         const located = findingLocation(finding);
         const file = located ? controlRelativeFile(String(finding.root || ''), located.file) : '(sans fichier)';
-        files.set(file, [...(files.get(file) || []), index]);
+        const bucket = files.get(file);
+        if (bucket) { bucket.push(index); }
+        else { files.set(file, [index]); }
     });
+    return files;
+}
+
+function findingTable(findings: Fields[], indexes: number[]): string {
+    const rows = indexes.map(index => {
+        const finding = findings[index];
+        const location = findingLocation(finding);
+        const rule = String(finding.name || finding.rule_id || '');
+        const message = String(finding.message || array(finding.diagnostics).map(reasonText).join('; '));
+        const open = location ? `<button type="button" data-action="finding" data-finding-index="${index}">Ouvrir à la ligne</button>` : '';
+        return `<tr><td>${escaped(location?.line ?? '')}</td><td>${escaped(rule)}</td><td>${escaped(message, 500)}</td><td>${open}</td></tr>`;
+    }).join('');
+    return `<div class="finding-table"><table><thead><tr><th>Ligne</th><th>Règle</th><th>Message</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+export function findingFileTree(controlId: string, findings: Fields[], inlineRows: boolean): string {
+    const files = findingIndexes(controlId, findings);
     if (!files.size) { return ''; }
     const nodes = [...files.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([file, indexes]) => {
-        const rows = indexes.map(index => {
-            const finding = findings[index];
-            const location = findingLocation(finding);
-            const rule = String(finding.name || finding.rule_id || '');
-            const message = String(finding.message || array(finding.diagnostics).map(reasonText).join('; '));
-            const open = location ? `<button type="button" data-action="finding" data-finding-index="${index}">Ouvrir à la ligne</button>` : '';
-            return `<tr><td>${escaped(location?.line ?? '')}</td><td>${escaped(rule)}</td><td>${escaped(message, 500)}</td><td>${open}</td></tr>`;
-        }).join('');
-        return `<details class="file-node"><summary><code>${escaped(file)}</code><span>${escaped(indexes.length)} anomalie${indexes.length === 1 ? '' : 's'}</span></summary><div class="finding-table"><table><thead><tr><th>Ligne</th><th>Règle</th><th>Message</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+        const summary = `<summary><code>${escaped(file)}</code><span>${escaped(indexes.length)} anomalie${indexes.length === 1 ? '' : 's'}</span></summary>`;
+        if (!inlineRows) {
+            return `<details class="file-node" data-pending="1" data-control-id="${escaped(controlId, 4096)}" data-file="${escaped(file, 4096)}">${summary}<div class="finding-host"></div></details>`;
+        }
+        return `<details class="file-node">${summary}${findingTable(findings, indexes)}</details>`;
     }).join('');
     return `<div class="file-tree">${nodes}</div>`;
 }
 
-function executedMarkup(controls: Array<LayoutControl & { label: string; showOutput: boolean }>, findingCount: Map<string, number>, findings: Fields[], canOpen: boolean): string {
+export function findingRows(controlId: string, file: string, findings: Fields[]): string {
+    const indexes = findingIndexes(controlId, findings).get(file);
+    if (!indexes?.length) { return '<p class="muted">Aucune anomalie pour ce fichier.</p>'; }
+    return findingTable(findings, indexes);
+}
+
+function executedMarkup(controls: Array<LayoutControl & { label: string; showOutput: boolean }>, findingCount: Map<string, number>, findings: Fields[], canOpen: boolean, inlineFindings: boolean): string {
     const groups = new Map<string, typeof controls>();
     for (const control of controls) {
         const identity = controlIdentity(control);
@@ -197,7 +220,10 @@ function executedMarkup(controls: Array<LayoutControl & { label: string; showOut
             const output = control.showOutput && canOpen ? `<button type="button" data-action="output" data-control-id="${escaped(control.id, 4096)}">Ouvrir les sorties</button>` : '';
             const count = findingCount.get(control.id.replace(/\\/g, '/')) || 0;
             const head = `<span class="badge ${control.resultStatus === 'success' ? 'pass' : 'fail'}">${escaped(control.label)}</span><span class="root">${escaped(identity.root || '.')}</span><span>${control.durationMs === undefined ? '' : `${escaped(control.durationMs)} ms`}</span><span>${escaped(count)} anomalie${count === 1 ? '' : 's'}</span>${output}`;
-            const tree = fileTreeMarkup(control.id, findings);
+            if (!inlineFindings && count > 0) {
+                return `<details class="control ${control.resultStatus === 'success' ? 'pass' : 'fail'}" id="${sectionId(control.id)}" data-pending="1" data-control-id="${escaped(control.id, 4096)}"><summary>${head}</summary><div class="finding-host"></div></details>`;
+            }
+            const tree = findingFileTree(control.id, findings, true);
             if (!tree) {
                 return `<div class="control ${control.resultStatus === 'success' ? 'pass' : 'fail'}" id="${sectionId(control.id)}">${head}</div>`;
             }
@@ -221,13 +247,22 @@ function gapBlock(gaps: string[]): string {
 function reportScript(): string {
     return `(function () {
   var api = acquireVsCodeApi();
-  document.addEventListener('click', function (event) {
+    document.addEventListener('click', function (event) {
     var target = event.target instanceof Element ? event.target : null;
     if (!target) { return; }
     var summary = target.closest('summary');
     if (summary && summary.parentElement && summary.parentElement.tagName === 'DETAILS' && !target.closest('button')) {
       event.preventDefault();
-      summary.parentElement.open = !summary.parentElement.open;
+      var details = summary.parentElement;
+      details.open = !details.open;
+      if (details.open && details.getAttribute('data-pending') === '1') {
+        var controlId = details.getAttribute('data-control-id');
+        if (details.classList.contains('file-node')) {
+          api.postMessage({ schema_version: 1, action: 'rows', controlId: controlId, file: details.getAttribute('data-file') });
+        } else {
+          api.postMessage({ schema_version: 1, action: 'files', controlId: controlId });
+        }
+      }
       return;
     }
     var element = target.closest('button[data-action]');
@@ -240,7 +275,24 @@ function reportScript(): string {
   });
   window.addEventListener('message', function (event) {
     var message = event.data;
-    if (!message || message.type !== 'focus' || typeof message.id !== 'string') { return; }
+    if (!message) { return; }
+    if (message.type === 'fill' && typeof message.html === 'string' && typeof message.controlId === 'string') {
+      var pending = document.querySelectorAll('[data-pending="1"]');
+      for (var index = 0; index < pending.length; index++) {
+        var item = pending[index];
+        var sameControl = item.getAttribute('data-control-id') === message.controlId;
+        var sameFile = !message.file || item.getAttribute('data-file') === message.file;
+        var kind = message.file ? item.classList.contains('file-node') : item.classList.contains('control');
+        if (sameControl && sameFile && kind) {
+          var host = item.querySelector('.finding-host');
+          if (host) { host.innerHTML = message.html; }
+          item.removeAttribute('data-pending');
+          break;
+        }
+      }
+      return;
+    }
+    if (message.type !== 'focus' || typeof message.id !== 'string') { return; }
     var node = document.getElementById(message.id);
     if (!node) { return; }
     var parent = node;
@@ -390,15 +442,29 @@ export class ReportPanel implements vscode.Disposable {
             if (!control?.result) { throw new Error('Controle inconnu ou sans sortie.'); }
             await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ content: controlOutputText(document.runId, control.id, control.result), language: 'plaintext' })); return;
         }
+        if (message.action === 'files') {
+            const html = findingFileTree(message.controlId, visibleFindings(document.report), false);
+            await this.panel?.webview.postMessage({ type: 'fill', controlId: message.controlId, file: '', html });
+            return;
+        }
+        if (message.action === 'rows') {
+            const html = findingRows(message.controlId, message.file, visibleFindings(document.report));
+            await this.panel?.webview.postMessage({ type: 'fill', controlId: message.controlId, file: message.file, html });
+            return;
+        }
         if (message.action !== 'finding') { throw new Error('Action Webview inconnue.'); }
         const findings = visibleFindings(document.report);
         const finding = findings[message.index];
         if (!finding) { throw new Error('Finding inconnu.'); }
         if (!findingLocation(finding) || !vscode.workspace.isTrusted) { throw new Error('Localisation fiable ou confiance absente.'); }
         if (!this.navigationApproved) {
-            const approval = await vscode.window.showWarningMessage(`Rapport historique : autoriser la navigation dans cette Target ?\n${document.target}\nAucun controle ne sera execute.`, { modal: true }, 'Autoriser la navigation');
-            if (approval !== 'Autoriser la navigation') { return; }
-            this.navigationApproved = true;
+            if (hasMachineConsent(this.context.globalState.get<MachineConsent>(machineConsentKey))) {
+                this.navigationApproved = true;
+            } else {
+                const approval = await vscode.window.showWarningMessage(`Rapport historique : autoriser la navigation dans cette Target ?\n${document.target}\nAucun controle ne sera execute.`, { modal: true }, 'Autoriser la navigation');
+                if (approval !== 'Autoriser la navigation') { return; }
+                this.navigationApproved = true;
+            }
         }
         await revealFinding(document.target, finding);
     }

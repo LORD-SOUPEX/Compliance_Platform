@@ -2,7 +2,7 @@
   "name": "compliance-local-pipelines",
   "displayName": "ICP - IaC Compliance Platform",
   "description": "Audit local de dépôts (IaC, conteneurs, Python, JavaScript, TypeScript, Markdown) par un démon Go, sans service cloud.",
-  "version": "2.0.16",
+  "version": "2.0.18",
   "publisher": "compliance-platform",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -120,6 +120,11 @@
         "category": "ICP",
         "title": "Ouvrir le journal Output",
         "icon": "$(output)"
+      },
+      {
+        "command": "compliance.authorizeMachine",
+        "category": "ICP",
+        "title": "Autoriser Compliance sur cette machine"
       },
       {
         "command": "compliance.reset",

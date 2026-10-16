@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs';
 import * as vscode from 'vscode';
 import { audit, DaemonClient, Permissions, prepare, runsDirectory, sessionArtifact, SessionController, setAuditFilters, setExpectedEngineVersion, shutdownComplianceDaemon, validateSource, validateTarget } from './daemonClient';
 import { applicationValue, parseSessionKeep, sessionDirectory } from './localSettings';
-import { classifyProvisionError, consentText, fingerprint, missingToolCommands, selectManifestTools, shouldPrompt, ConsentMemory } from './toolProvision';
+import { classifyProvisionError, hasMachineConsent, machineConsentKey, machineConsentText, MachineConsent, missingToolCommands, selectManifestTools, shouldAskMachineConsent } from './toolProvision';
 import { controlOutputText, paceNotice, PlanNode, projectPlan, VisualStatus } from './model';
 import { ReportPanel } from './reportPanel';
 
@@ -95,7 +95,7 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
     const sourceWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(source, '{.config/control-catalog.json,.tools/runtime/index.json,requirements-dev.lock}'));
     const invalidate = () => {
         controller.cancel(); controller.sourceValid = false; controller.preparation = undefined;
-        tree.status = 'Blocked'; tree.message = 'Pipeline source modifiee ; actualiser la preparation et les consentements.'; update();
+        tree.status = 'Blocked'; tree.message = 'Pipeline source modifiee ; actualiser la preparation.'; update();
     };
     async function refresh(): Promise<void> {
         if (controller.busy || !controller.target) { return; }
@@ -117,8 +117,9 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
             const renderStarted = Date.now();
             tree.status = controller.preparation.report.discovery.scan_complete ? 'Succeeded' : 'Blocked';
             const waiting = controller.preparation.report.execution_plan.controls.filter(control => control.reason_code === 'permission_denied');
-            tree.message = waiting.length
-                ? `Plan prepare. ${waiting.length} controle(s) attendent une autorisation reseau ou d'execution de code.`
+            const authorized = hasMachineConsent(context.globalState.get<MachineConsent>(machineConsentKey));
+            tree.message = waiting.length && !authorized
+                ? `Plan prepare. ${waiting.length} controle(s) exigent l'autorisation machine, demandee une seule fois au lancement.`
                 : `Plan prepare. Session : ${controller.preparation.directory}`;
             output.appendLine(`rendu : ${Date.now() - renderStarted} ms`);
             output.appendLine(tree.message);
@@ -129,27 +130,22 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
             output.appendLine(tree.message);
             await vscode.window.showErrorMessage(tree.message);
         } finally { controller.end(); update(); }
-        const waiting = controller.preparation?.report.execution_plan.controls.filter(control => control.reason_code === 'permission_denied') ?? [];
-        if (waiting.length && !controller.abort?.signal.aborted) {
-            const choice = await vscode.window.showWarningMessage(
-                `${waiting.length} contrôle(s) nécessitent une autorisation (réseau ou exécution de code) avant de s'exécuter. Le plan les signale tant que l'autorisation n'est pas donnée.`,
-                'Autoriser et lancer',
-                'Plus tard'
-            );
-            if (choice === 'Autoriser et lancer') { await launch(); }
-        }
     }
-    async function askPermissions(fresh: Awaited<ReturnType<typeof prepare>>): Promise<Permissions> {
-        controller.preparation = fresh;
-        const permissions: Permissions = { network: false, code_execution: false };
-        for (const permission of ['network', 'code_execution'] as const) {
-            const controls = fresh.report.execution_plan.controls.filter(control => control.reason_code === 'permission_denied' && control.permissions?.includes(permission));
-            if (!controls.length || controller.abort?.signal.aborted) { continue; }
-            const details = controls.map(control => `${control.name}\nTechnologie : ${control.technology} ; racine : ${control.root}\nEffets : ${control.side_effect_level}\n${control.reason}`).join('\n\n');
-            const result = await vscode.window.showWarningMessage(`Permission ${permission === 'network' ? 'reseau' : 'execution de code'} pour cette session.\n\n${details}\n\nCette autorisation ne constitue pas un sandbox.`, { modal: true }, 'Refuser', 'Autoriser pour cette session');
-            permissions[permission] = result === 'Autoriser pour cette session';
+    async function ensureMachineConsent(force = false): Promise<boolean> {
+        const memory = context.globalState.get<MachineConsent>(machineConsentKey);
+        if (!force && hasMachineConsent(memory)) { return true; }
+        if (!force && !shouldAskMachineConsent(memory)) { return false; }
+        const choice = await vscode.window.showWarningMessage(machineConsentText(), { modal: true }, 'Autoriser', 'Refuser');
+        const decision = choice === 'Autoriser' ? 'accepted' : 'refused';
+        await context.globalState.update(machineConsentKey, { schema_version: 1, decision } satisfies MachineConsent);
+        if (decision === 'refused') {
+            output.appendLine('Autorisation machine refusée. Les contrôles qui exigent le réseau ou l\'exécution de code restent non couverts. Relancez « Autoriser Compliance sur cette machine » pour changer d\'avis.');
         }
-        return permissions;
+        return decision === 'accepted';
+    }
+    function grantedPermissions(): Permissions {
+        const allowed = hasMachineConsent(context.globalState.get<MachineConsent>(machineConsentKey));
+        return { network: allowed, code_execution: allowed };
     }
     async function purgeSessions(reserve: number, extra: string[] = []): Promise<void> {
         const config = vscode.workspace.getConfiguration('compliance');
@@ -178,13 +174,9 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
             await vscode.window.showErrorMessage(`${unknown.join(', ')} : absent du manifeste. L'extension ne propose ni pip ni Homebrew.`);
         }
         if (!known.length) { return false; }
-        const id = fingerprint(known.map(tool => tool.command));
-        const memory = context.globalState.get<ConsentMemory>('compliance.toolConsent');
-        if (!shouldPrompt(memory, id, trigger)) { return false; }
-        const choice = await vscode.window.showWarningMessage(consentText(known), { modal: true }, 'Installer', 'Refuser');
-        if (choice !== 'Installer') {
-            await context.globalState.update('compliance.toolConsent', { fingerprint: id, decision: 'refused', installed: false } satisfies ConsentMemory);
-            if (choice === 'Refuser') { await vscode.window.showInformationMessage('Installation refusée. Les contrôles concernés restent non couverts.'); }
+        const allowed = hasMachineConsent(context.globalState.get<MachineConsent>(machineConsentKey)) || await ensureMachineConsent(trigger === 'manual');
+        if (!allowed) {
+            output.appendLine(`Installation non lancée (${known.map(tool => tool.command).join(', ')}) : autorisation machine absente.`);
             return false;
         }
         try {
@@ -192,11 +184,10 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
             const config = vscode.workspace.getConfiguration('compliance');
             const registryUrl = config.get<string>('registryUrl', '');
             const registryToken = config.get<string>('registryToken', '');
+            output.appendLine(`Installation silencieuse : ${known.map(tool => tool.command).join(', ')}`);
             await client.syncTools(source, known.map(tool => tool.command), { registryUrl, registryToken });
-            await context.globalState.update('compliance.toolConsent', { fingerprint: id, decision: 'accepted', installed: true } satisfies ConsentMemory);
             return true;
         } catch (error) {
-            await context.globalState.update('compliance.toolConsent', { fingerprint: id, decision: 'accepted', installed: false } satisfies ConsentMemory);
             await vscode.window.showErrorMessage(classifyProvisionError(error instanceof Error ? error.message : String(error)).message);
             return false;
         }
@@ -213,13 +204,14 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
         if (!controller.canRun(vscode.workspace.isTrusted)) { await vscode.window.showWarningMessage('Target, source valide, preparation et autorisation requises avant l audit.'); return; }
         let rerun = false;
         try {
+            await ensureMachineConsent();
             const state = controller.begin(vscode.workspace.isTrusted); update();
-            tree.message = 'Nouvelle preparation avant audit ; consentements limites a cette session.';
+            tree.message = 'Nouvelle preparation avant audit.';
             output.appendLine(`Session ${state.runId}\nTarget : ${state.target}\nPipeline source : ${source}`);
             await purgeSessions(1, [state.runId]);
             const patterns = vscode.workspace.getConfiguration('compliance').get<string[]>('reportRedactionPatterns', []);
             for (const pattern of patterns) { new RegExp(pattern); }
-            const directory = await audit(source, state, askPermissions, update, controller.abort!.signal, patterns.length ? patterns.map(pattern => `(?:${pattern})`).join('|') : undefined, undefined, line => output.appendLine(line));
+            const directory = await audit(source, state, async () => grantedPermissions(), update, controller.abort!.signal, patterns.length ? patterns.map(pattern => `(?:${pattern})`).join('|') : undefined, undefined, line => output.appendLine(line));
             tree.message = `${state.status} ; session : ${directory}`; output.appendLine(tree.message);
             if (depth === 0) { rerun = await provisionFromReport(directory); }
             if (!rerun && state.reportPath) {
@@ -241,6 +233,10 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
         sourceWatcher, sourceWatcher.onDidChange(invalidate), sourceWatcher.onDidCreate(invalidate), sourceWatcher.onDidDelete(invalidate),
         vscode.workspace.onDidGrantWorkspaceTrust(update),
         vscode.commands.registerCommand('compliance.showLogs', () => output.show()),
+        vscode.commands.registerCommand('compliance.authorizeMachine', async () => {
+            const allowed = await ensureMachineConsent(true);
+            await vscode.window.showInformationMessage(allowed ? 'Compliance est autorisé sur cette machine. Les prochains audits ne redemanderont rien.' : 'Autorisation refusée. Les audits restent locaux, sans réseau ni exécution de code.');
+        }),
         vscode.commands.registerCommand('compliance.reset', async () => {
             await shutdownComplianceDaemon();
             output.appendLine('Démon arrêté. Les sessions et rapports sont conservés.');
@@ -292,8 +288,7 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
             if (selection[0].scheme !== 'file') { await vscode.window.showErrorMessage('Choisir un dossier local.'); return; }
             try {
                 const target = await validateTarget(source, selection[0].fsPath);
-                const approval = await vscode.window.showWarningMessage(`Target : ${target}\nConfirmer ce dossier de confiance pour la preparation et l audit. Les permissions reseau/code seront demandees separement.`, { modal: true }, 'Preparer');
-                if (approval !== 'Preparer') { return; }
+                await ensureMachineConsent();
                 controller.select(target);
                 await refresh();
             } catch (error) { await vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error)); }

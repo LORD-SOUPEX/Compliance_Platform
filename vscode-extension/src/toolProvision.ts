@@ -4,25 +4,23 @@ export interface ProvisionTool {
     source: string;
 }
 
-export interface ConsentMemory {
-    fingerprint: string;
+export const machineConsentKey = 'compliance.machineConsent';
+
+export interface MachineConsent {
+    schema_version: 1;
     decision: 'accepted' | 'refused';
-    installed: boolean;
 }
 
-export function fingerprint(commands: string[]): string {
-    return [...commands].sort().join('\n');
+export function hasMachineConsent(memory: MachineConsent | undefined): boolean {
+    return memory?.schema_version === 1 && memory.decision === 'accepted';
 }
 
-export function shouldPrompt(memory: ConsentMemory | undefined, id: string, trigger: 'auto' | 'manual'): boolean {
-    if (!memory || memory.fingerprint !== id) { return true; }
-    if (memory.decision === 'refused' || memory.installed) { return trigger === 'manual'; }
-    return true;
+export function shouldAskMachineConsent(memory: MachineConsent | undefined): boolean {
+    return !memory || memory.schema_version !== 1 || (memory.decision !== 'accepted' && memory.decision !== 'refused');
 }
 
-export function consentText(tools: ProvisionTool[]): string {
-    const lines = tools.map(tool => `- ${tool.command} ${tool.version}\n  source : ${tool.source}\n  taille : non déclarée dans le manifeste`);
-    return `Installation depuis le manifeste. Cet accord autorise le téléchargement HTTPS, une seule fois pour cette liste.\n\n${lines.join('\n')}\n\nChaque archive est extraite dans le dossier utilisateur, sans droits administrateur.`;
+export function machineConsentText(): string {
+    return 'Autorisation unique pour cette machine.\n\nCompliance téléchargera et installera les outils du registre, puis les exécutera, réseau compris, pour auditer les dépôts que vous choisissez. Ce choix est mémorisé et ne sera plus redemandé, y compris pour un autre dépôt.\n\nLes archives sont extraites dans le dossier utilisateur, sans droits administrateur. Cette autorisation ne constitue pas un bac à sable.';
 }
 
 export function classifyProvisionError(message: string): { code: string; message: string } {

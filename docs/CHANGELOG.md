@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.0.18
+
+- **Rapports de gros dépôts** : la lecture d'un `compliance-report.json` n'a plus de plafond (le rapport `content`, 74 Mo, était rejeté à 32 Mo). La validation HTTP n'envoie plus les findings ni les sorties capturées. Le panneau s'ouvre sur les compteurs et les contrôles ; les fichiers et les lignes se chargent à l'ouverture du contrôle, sans construire des dizaines de milliers de lignes d'un coup.
+- **Autorisation machine unique** : un seul dialogue mémorisé couvre l'installation des outils du registre, le réseau et l'exécution de code. Il n'est plus redemandé à chaque outil, à chaque session ni à chaque dépôt. La commande **ICP: Autoriser Compliance sur cette machine** permet de revenir sur un refus.
+
 ## 2.0.16
 
 - **Suppression définitive de `npm install`** : Le binaire Go (`compliance runtime sync`, `compliance runtime node`) et l'extension VS Code n'appellent plus jamais `npm install`. L'installation de `eslint` et `tsc` télécharge et extrait directement le bundle `node` (`windows-x64-node-tools-22.14.0.zip`) depuis le registre `tools-v1`.
