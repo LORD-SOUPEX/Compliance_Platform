@@ -1062,8 +1062,8 @@
       "side_effect_level": "read_only",
       "permissions": [],
       "platform_support": ["windows-x64", "linux-x64", "linux-arm64", "macos-x64", "macos-arm64"],
-      "objective": "Lint JavaScript, JSX et Vue avec la configuration ESLint du dépôt.",
-      "limitations": ["Utilise node_modules/.bin/eslint du projet cible lorsqu'il est présent, sinon eslint installé dans ~/.compliance/tools/node."]
+      "objective": "Lint JavaScript, JSX et Vue avec la configuration ESLint du dépôt, ou une configuration minimale si elle est absente.",
+      "limitations": ["Utilise node_modules/.bin/eslint du projet cible lorsqu'il est présent, sinon eslint installé dans ~/.compliance/tools/node. Sans configuration, le moteur passe --no-config-lookup et des règles de base."]
     },
     {
       "id": "javascript.security.gitleaks",
@@ -1112,8 +1112,8 @@
       "side_effect_level": "read_only",
       "permissions": [],
       "platform_support": ["windows-x64", "linux-x64", "linux-arm64", "macos-x64", "macos-arm64"],
-      "objective": "Lint TypeScript avec la configuration ESLint du dépôt.",
-      "limitations": ["Utilise node_modules/.bin/eslint du projet cible, sinon la chaîne ~/.compliance/tools/node. Un seul contrôle couvre toutes les racines."]
+      "objective": "Lint TypeScript avec la configuration ESLint du dépôt, ou une configuration minimale si elle est absente.",
+      "limitations": ["Utilise node_modules/.bin/eslint du projet cible, sinon la chaîne ~/.compliance/tools/node. Sans configuration, le moteur passe --no-config-lookup et des règles de base. Un seul contrôle couvre toutes les racines."]
     },
     {
       "id": "typescript.check.tsc",

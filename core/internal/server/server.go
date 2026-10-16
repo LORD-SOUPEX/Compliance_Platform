@@ -796,8 +796,10 @@ func mapPresentationStatus(res *report.ExecutionResult) string {
 			return "Blocked"
 		case "technology_absent", "not_applicable", "platform_unsupported", "alternative_not_selected":
 			return "Not applicable"
-		case "dependency_failed", "ambiguous":
+		case "dependency_failed":
 			return "Blocked"
+		case "ambiguous":
+			return "Not applicable"
 		case "permission_denied", "cancelled_before_start", "cancelled_during_execution":
 			return "Skipped"
 		}
@@ -1541,9 +1543,9 @@ func ComputePresentations(rep map[string]interface{}) ([]PresentationItem, error
 				code, _ := firstDiag["code"].(string)
 				msg, _ := firstDiag["message"].(string)
 				switch code {
-				case "capability_unavailable", "tool_unavailable", "repository_unconfigured", "platform_unavailable", "dependency_failed", "ambiguous":
+				case "capability_unavailable", "tool_unavailable", "repository_unconfigured", "platform_unavailable", "dependency_failed":
 					presStatus = "Blocked"
-				case "user_disabled":
+				case "user_disabled", "ambiguous":
 					presStatus = "Not applicable"
 				case "technology_absent", "not_applicable", "platform_unsupported", "alternative_not_selected":
 					presStatus = "Not applicable"

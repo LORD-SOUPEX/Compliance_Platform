@@ -55,8 +55,9 @@ export function reportHtml(document: LoadedReport, css: string, cspSource: strin
     }
     const executedRows = executedMarkup(model.executed, findingCount, findings, !!document.directory, inlineFindings);
     const unavailable = unavailableSummary(document.controls.map(layoutControl));
+    const unavailableCount = model.cards.find(item => item.label === 'Indisponibles')?.value || 0;
     const tools = model.tools.length ? `<details><summary>Outils à provisionner <span>${escaped(new Set(model.tools).size)}</span></summary><ul>${[...new Set(model.tools)].map(tool => `<li>${escaped(tool)}</li>`).join('')}</ul><button type="button" data-action="provision">Installer les outils manquants</button></details>` : '';
-    const unavailableBlock = unavailable.length ? `<details><summary>Indisponibles <span>${escaped(unavailable.length)}</span></summary><ul>${unavailable.map(line => `<li>${escaped(line)}</li>`).join('')}</ul></details>` : '';
+    const unavailableBlock = unavailableCount ? `<section class="reasons"><h2>Indisponibles <span>${escaped(unavailableCount)}</span></h2><ul>${unavailable.map(line => `<li>${escaped(line)}</li>`).join('')}</ul></section>` : '';
     const absent = nonApplicableMarkup(document.controls.map(layoutControl));
     const durationText = formatDuration(duration);
     const sessionLabel = document.historical ? 'Rapport historique' : 'Session courante';
@@ -241,7 +242,7 @@ function reasonBlock(detail: string, reasons: string[]): string {
 
 function gapBlock(gaps: string[]): string {
     if (!gaps.length) { return ''; }
-    return `<details><summary>Lacunes de couverture <span>${escaped(gaps.length)}</span></summary><ul>${gaps.map(line => `<li>${escaped(line)}</li>`).join('')}</ul></details>`;
+    return `<section class="reasons"><h2>Lacunes de couverture <span>${escaped(gaps.length)}</span></h2><ul>${gaps.map(line => `<li>${escaped(line)}</li>`).join('')}</ul></section>`;
 }
 
 function reportScript(): string {

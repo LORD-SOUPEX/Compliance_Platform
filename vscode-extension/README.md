@@ -31,7 +31,7 @@ Développeurs et évaluateurs qui veulent contrôler un projet Terraform, conten
 - 100 % local : découverte, exécution et rapport restent sur la machine.
 - Démon Go lancé à la demande, arrêté avec l'extension.
 - Couverture des technologies détectées, pas de la taille du catalogue.
-- Le code audité n'est pas transmis. Un outil ne se télécharge qu'après accord.
+- Le code audité n'est pas transmis. Une autorisation, mémorisée sur la machine, suffit pour télécharger les outils manquants et les exécuter.
 
 ## Stack et outils
 
@@ -48,10 +48,10 @@ Développeurs et évaluateurs qui veulent contrôler un projet Terraform, conten
 ## Démarrage rapide
 
 1. Installez le VSIX et ouvrez la vue **Compliance Pipelines**.
-2. **ICP: Sélectionner la cible à auditer**.
+2. **ICP: Sélectionner la cible à auditer**. La première fois, une autorisation machine est demandée. Elle est mémorisée : les outils manquants du registre s'installent ensuite sans nouvelle fenêtre. **ICP: Autoriser Compliance sur cette machine** modifie ce choix.
 3. **ICP: Lancer l'audit de la cible**.
 4. Lisez le rapport. **Ouvrir un rapport…** recharge un `compliance-report.json` déjà produit.
 
 ## Confidentialité et sécurité
 
-Le démon n'écoute que sur `127.0.0.1`. Réseau et exécution de code restent refusés tant que vous ne les accordez pas pour la session. Les rapports restent dans le dossier de sessions de la machine.
+Le démon n'écoute que sur `127.0.0.1`. Une seule autorisation est mémorisée sur la machine : téléchargement des outils du registre, exécution de ces outils et accès réseau. Une fois acceptée, elle n'est plus redemandée, y compris sur un autre dépôt, et l'installation des outils manquants est silencieuse. Un refus n'est pas redemandé. **ICP: Autoriser Compliance sur cette machine** permet de changer ce choix. Les rapports restent dans le dossier de sessions de la machine.

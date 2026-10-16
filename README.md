@@ -25,9 +25,9 @@ Le moteur d'exécution autonome écrit en Go (`core/`) et son démon local HTTP/
 
 ## Technologies et Contrôles Couverts
 
-ESLint et `tsc` viennent du `node_modules` de la cible, ou de `~/.compliance/tools/node` après synchronisation. Sans configuration ESLint, le contrôle n'est pas marqué réussi. Les outils de répertoire (Terraform, etc.) restent un contrôle par racine. Le rapport regroupe ces racines sous une carte par outil. Chaque racine se déroule vers les fichiers touchés, puis vers la ligne, la règle et le message. Checkov, TFLint, ShellCheck, Trivy et `terraform fmt` alimentent ces listes. Une technologie déjà exécutée sur une racine n'apparaît pas dans les contrôles non applicables. Markdown utilise `rumdl check`. Sans configuration Markdown du dépôt, la règle de longueur de ligne MD013 est désactivée. `pytest` qui ne collecte aucun test (code 5) n'est pas un échec. Gitleaks ignore les dossiers d'artefacts et les binaires. `testdata`, `fixtures` et `__snapshots__` ne sont ni des racines ni des anomalies.
+ESLint et `tsc` viennent du `node_modules` de la cible, ou de `~/.compliance/tools/node` après synchronisation. Sans configuration ESLint, le moteur applique une configuration minimale et audite les fichiers. `tsc` exige un `tsconfig.json`. Les outils de répertoire (Terraform, etc.) restent un contrôle par racine. Le rapport regroupe ces racines sous une carte par outil. Chaque racine se déroule vers les fichiers touchés, puis vers la ligne, la règle et le message. Checkov, TFLint, ShellCheck, Trivy et `terraform fmt` alimentent ces listes. Une technologie déjà exécutée sur une racine n'apparaît pas dans les contrôles non applicables. Markdown utilise `rumdl check`. Sans configuration Markdown du dépôt, la règle de longueur de ligne MD013 est désactivée. `pytest` qui ne collecte aucun test (code 5) n'est pas un échec. Gitleaks ignore les dossiers d'artefacts et les binaires. `testdata`, `fixtures` et `__snapshots__` ne sont ni des racines ni des anomalies.
 
-Les outils du registre `tools-v1` peuvent être téléchargés en HTTPS après accord (version, source, dossier utilisateur). Une signature ou une somme SHA-256 différente génère un avertissement journalisé mais ne bloque pas l'installation. Ce n'est pas le cas à l'installation du VSIX. Les entreprises peuvent configurer un miroir privé via `compliance.registryUrl` (ou variable d'environnement `COMPLIANCE_REGISTRY_URL`) et `compliance.registryToken` (`COMPLIANCE_REGISTRY_TOKEN`). Voir `docs/outils.md`.
+Les outils du registre `tools-v1` peuvent être téléchargés en HTTPS après accord (version, source, dossier utilisateur). Une signature ou une somme SHA-256 différente génère un avertissement journalisé mais ne bloque pas l'installation. Ce n'est pas le cas à l'installation du VSIX. Les entreprises peuvent configurer un miroir privé via `compliance.registryUrl` (ou variable d'environnement `COMPLIANCE_REGISTRY_URL`) et `compliance.registryToken` (`COMPLIANCE_REGISTRY_TOKEN`). Voir `docs/architecture.md`.
 
 Les sessions conservées vont de 1 à 1000 (`compliance.maxSessions`, défaut 5). Extension installée : `~/.compliance/sessions/runs` (`%USERPROFILE%` sous Windows, `$HOME` ailleurs). Développement depuis le dépôt : `<dépôt>/.tools/state/runs`. `COMPLIANCE_SESSIONS_DIR` remplace ce chemin. Le démon utilise `~/.compliance` ou `COMPLIANCE_STATE_DIR`.
 
@@ -95,7 +95,7 @@ Compliance_Platform/
 │   │   ├── model.ts                    # Modèles d'état et normalisation multi-OS
 │   │   └── reportPanel.ts              # Panneau Webview interactif de visualisation
 │   ├── package_vsix.py                 # Packaging OPC universel et cross-compilation
-│   ├── package.json                    # Manifeste d'extension VS Code (v2.0.18)
+│   ├── package.json                    # Manifeste d'extension VS Code (v2.0.19)
 │   └── tsconfig.json
 ├── .config/                            # Contrats de configuration partagés
 │   ├── control-catalog.json            # Catalogue des contrôles (voir le tableau ci-dessus)
@@ -186,11 +186,11 @@ compliance run -repo "/chemin/du/projet" -report reports/audit.json
 
 ### 4. Audit dans VS Code
 
-L'extension locale s'installe via le VSIX (`vscode-extension/dist/compliance-local-pipelines-2.0.18.vsix`). Seul Windows x64 est qualifié :
+L'extension locale s'installe via le VSIX (`vscode-extension/dist/compliance-local-pipelines-2.0.19.vsix`). Seul Windows x64 est qualifié :
 
 - Sélection de la cible d'audit (Target externe).
 - Préparation et inspection du plan ordonnancé.
-- Demande explicite des permissions (réseau, exécution de code).
+- Une autorisation machine mémorisée (réseau, exécution de code, installation silencieuse des outils). La commande **ICP: Autoriser Compliance sur cette machine** modifie ce choix.
 - Déroulement en streaming temps réel avec progression visuelle des contrôles.
 - Visualisation du rapport final validé par le démon dans un panneau Webview dédié.
 
@@ -212,6 +212,5 @@ L'extension locale s'installe via le VSIX (`vscode-extension/dist/compliance-loc
 ## Documentation Technique
 
 - [Extension (page Marketplace)](docs/extension.md)
-- [Architecture](docs/architecture.md)
-- [Outils, catalogue et réglages](docs/outils.md)
+- [Architecture, registre et compteurs](docs/architecture.md)
 - [Développement et release](docs/developpement.md)

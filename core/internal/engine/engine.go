@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,22 @@ import (
 	"compliance/internal/osutil"
 	"compliance/internal/report"
 )
+
+//go:embed eslint_fallback.cjs
+var eslintFallbackSource []byte
+
+// ControlSkip marks a control that has nothing to run. It is not a failure.
+type ControlSkip struct {
+	Code    string
+	Message string
+}
+
+func (e *ControlSkip) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
+}
 
 var (
 	reVersionFinder = regexp.MustCompile(`\b\d+\.\d+(?:\.\d+)?(?:[a-zA-Z0-9.+-]*)`)
@@ -82,6 +99,7 @@ type Invocation struct {
 	GitleaksReport  string       `json:"-"`
 	ContinueOnError bool         `json:"-"`
 	RawCommandLine  string       `json:"-"`
+	Env             []string     `json:"-"`
 }
 
 // BuildInvocation constructs the executable and arguments for a planned control.
@@ -161,7 +179,7 @@ func BuildInvocation(
 			}
 		}
 		if command == "bandit" && !hasArg(prefix, "-f") && !hasArg(prefix, "--format") {
-			prefix = append(prefix, "-f", "json")
+			prefix = append(prefix, "-f", "custom", "--msg-template", "{abspath}:{line}:{col}: {test_id} {severity}: {msg}")
 		}
 		if isPyRuntime {
 			prefix = append([]string{"-m", pythonModuleName(command)}, prefix...)
@@ -176,15 +194,28 @@ func BuildInvocation(
 		}
 
 	case "pip-audit":
-		reqPath := filepath.Join(root, "requirements.txt")
-		if _, err := os.Stat(reqPath); err != nil {
-			return nil, errors.New("audit consommateur: requirements.txt requis; le runtime de la plateforme n est pas audite a sa place")
+		reqs, project := pythonDependencies(root)
+		if len(reqs) == 0 && project == "" {
+			return nil, &ControlSkip{
+				Code:    "not_applicable",
+				Message: "Aucun requirements*.txt ni pyproject.toml dans cette racine. L'environnement Python global n'est pas audité.",
+			}
 		}
-		arguments = append(arguments, catalogArgs...)
-		if !hasArg(arguments, "--format") {
-			arguments = append(arguments, "--format", "json")
+		if len(reqs) > 0 {
+			arguments = append(arguments, dropFlags(catalogArgs, "--strict")...)
+			if !hasArg(arguments, "--format") && !hasArg(arguments, "-f") {
+				arguments = append(arguments, "--format", "json")
+			}
+			for _, req := range reqs {
+				arguments = append(arguments, "-r", req)
+			}
+		} else {
+			arguments = append(arguments, dropFlags(catalogArgs, "--strict", "--no-deps", "--disable-pip")...)
+			if !hasArg(arguments, "--format") && !hasArg(arguments, "-f") {
+				arguments = append(arguments, "--format", "json")
+			}
+			arguments = append(arguments, project)
 		}
-		arguments = append(arguments, "-r", reqPath)
 		if isPyRuntime {
 			arguments = append([]string{"-m", "pip_audit"}, arguments...)
 		}
@@ -229,25 +260,45 @@ func BuildInvocation(
 		}
 
 	case "yamllint":
-		cfg, _ := ctrl.Parameters["configuration"].(string)
-		if cfg == "" {
-			cfg = ".yamllint.yml"
+		arguments = []string{"-f", "parsable"}
+		configured := ""
+		if ctrl.Parameters != nil {
+			configured, _ = ctrl.Parameters["configuration"].(string)
 		}
-		arguments = []string{"-c", filepath.Join(platformRoot, cfg), "-f", "parsable", root}
+		if config := yamllintConfig(root, platformRoot, configured); config != "" {
+			arguments = append(arguments, "-c", config)
+		}
+		arguments = append(arguments, root)
 		if isPyRuntime {
 			arguments = append([]string{"-m", "yamllint"}, arguments...)
 		}
 
 	case "eslint":
-		eslintArgs := []string{"-f", "json", root}
+		eslintArgs := []string{"-f", "json"}
+		var extraEnv []string
+		if !eslintConfigured(repoRoot) {
+			fallback, env, ferr := writeESLintFallback(executable, repoRoot)
+			if ferr != nil {
+				return nil, ferr
+			}
+			cleanup = append(cleanup, fallback)
+			extraEnv = env
+			eslintArgs = append([]string{"--no-config-lookup", "--no-error-on-unmatched-pattern", "-c", fallback}, eslintArgs...)
+		}
+		eslintArgs = append(eslintArgs, root)
 		if inv, ok := nodeBinScript(executable, filepath.Join("..", "eslint", "bin", "eslint.js"), eslintArgs); ok {
+			inv.Cleanup = cleanup
+			inv.Env = extraEnv
 			return &inv, nil
 		}
 		if strings.EqualFold(filepath.Ext(executable), ".cmd") || strings.EqualFold(filepath.Ext(executable), ".bat") {
 			inv := windowsCmdScript(executable, eslintArgs)
-			return &Invocation{Executable: inv.Executable, Arguments: inv.Arguments, RawCommandLine: inv.RawCommandLine}, nil
+			inv.Cleanup = cleanup
+			inv.Env = extraEnv
+			return &inv, nil
 		}
 		arguments = eslintArgs
+		return &Invocation{Executable: executable, Arguments: arguments, Cleanup: cleanup, Env: extraEnv}, nil
 
 	case "gitleaks":
 		reportPath, configPath, sideErr := writeGitleaksSidecars()
@@ -471,6 +522,118 @@ func relativeToRepo(repo, file string) string {
 		}
 	}
 	return filepath.ToSlash(cleaned)
+}
+
+func dropFlags(args []string, names ...string) []string {
+	drop := map[string]bool{}
+	for _, name := range names {
+		drop[name] = true
+	}
+	out := make([]string, 0, len(args))
+	for _, arg := range args {
+		if !drop[arg] {
+			out = append(out, arg)
+		}
+	}
+	return out
+}
+
+func pythonDependencies(root string) (reqs []string, project string) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, ""
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		lower := strings.ToLower(name)
+		if strings.HasPrefix(lower, "requirements") && strings.HasSuffix(lower, ".txt") {
+			reqs = append(reqs, filepath.Join(root, name))
+		}
+	}
+	sort.Strings(reqs)
+	candidate := filepath.Join(root, "pyproject.toml")
+	if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+		project = candidate
+	}
+	return reqs, project
+}
+
+func yamllintConfig(root, platformRoot, configured string) string {
+	names := []string{}
+	if strings.TrimSpace(configured) != "" {
+		names = append(names, configured)
+	}
+	names = append(names, ".yamllint.yml", ".yamllint.yaml", ".yamllint")
+	seen := map[string]bool{}
+	var candidates []string
+	for _, name := range names {
+		add := func(path string) {
+			if path == "" || seen[path] {
+				return
+			}
+			seen[path] = true
+			candidates = append(candidates, path)
+		}
+		if filepath.IsAbs(name) {
+			add(name)
+			continue
+		}
+		add(filepath.Join(root, name))
+		add(filepath.Join(platformRoot, name))
+	}
+	for _, candidate := range candidates {
+		info, err := os.Stat(candidate)
+		if err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func nodeModulesDir(executable string) string {
+	dir := filepath.Dir(executable)
+	for i := 0; i < 6; i++ {
+		if strings.EqualFold(filepath.Base(dir), "node_modules") {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
+}
+
+func writeESLintFallback(executable, repoRoot string) (string, []string, error) {
+	file, err := os.CreateTemp("", "compliance-eslint-*.cjs")
+	if err != nil {
+		return "", nil, err
+	}
+	if _, err := file.Write(eslintFallbackSource); err != nil {
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+		return "", nil, err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(file.Name())
+		return "", nil, err
+	}
+	var paths []string
+	if info, err := os.Stat(filepath.Join(repoRoot, "node_modules")); err == nil && info.IsDir() {
+		paths = append(paths, filepath.Join(repoRoot, "node_modules"))
+	}
+	if modules := nodeModulesDir(executable); modules != "" {
+		paths = append(paths, modules)
+	}
+	var env []string
+	if len(paths) > 0 {
+		env = []string{"NODE_PATH=" + strings.Join(paths, string(os.PathListSeparator))}
+	}
+	return file.Name(), env, nil
 }
 
 func hasArg(args []string, name string) bool {
@@ -1035,7 +1198,15 @@ func ExecuteCompliancePlan(
 						}
 					}()
 				}
-				if invErr != nil {
+				var skipped *ControlSkip
+				if errors.As(invErr, &skipped) {
+					res.Status = "skipped"
+					res.Diagnostics = append(res.Diagnostics, report.Diagnostic{
+						Code:     skipped.Code,
+						Message:  skipped.Message,
+						Critical: false,
+					})
+				} else if invErr != nil {
 					res.Status = "error"
 					res.Critical = ctrl.Required
 					res.Diagnostics = append(res.Diagnostics, report.Diagnostic{
@@ -1079,12 +1250,16 @@ func ExecuteCompliancePlan(
 							if call.RawCommandLine == "" {
 								exe, args = osutil.ScriptCommand(call.Executable, call.Arguments)
 							}
+							env := withoutColor(osutil.AugmentedEnviron())
+							if len(call.Env) > 0 {
+								env = append(env, call.Env...)
+							}
 							procRes, err := osutil.RunBounded(ctx, osutil.CommandSpec{
 								Executable:       exe,
 								Args:             args,
 								CommandLine:      call.RawCommandLine,
 								WorkingDirectory: execRoot,
-								Env:              withoutColor(osutil.AugmentedEnviron()),
+								Env:              env,
 								Limits: osutil.ProcessLimits{
 									Timeout:        effectiveTimeout,
 									MaxOutputBytes: ctrl.MaxOutputBytes,
@@ -1152,7 +1327,8 @@ func ExecuteCompliancePlan(
 								res.Leaks = append(res.Leaks, parseRumdlOutput(stdout, plan.Repository)...)
 							} else if ctrl.Tool != nil {
 								parsed := stdout
-								if ctrl.Tool.Command == "pip-audit" {
+								switch ctrl.Tool.Command {
+								case "pip-audit", "yamllint", "bandit":
 									parsed = stdout + "\n" + stderr
 								}
 								res.Leaks = append(res.Leaks, parseToolFindings(ctrl.Tool.Command, parsed, plan.Repository)...)

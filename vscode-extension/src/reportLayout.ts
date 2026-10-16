@@ -29,7 +29,7 @@ export interface ReportModel {
     cards: { label: string; value: number; tone: string }[];
 }
 
-const hiddenCodes = new Set(['technology_absent', 'not_applicable', 'platform_unsupported', 'alternative_not_selected', 'user_disabled']);
+const hiddenCodes = new Set(['technology_absent', 'not_applicable', 'platform_unsupported', 'alternative_not_selected', 'ambiguous', 'user_disabled']);
 
 function escapeHtml(value: string): string {
     return value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character] || character));
@@ -38,7 +38,7 @@ function escapeHtml(value: string): string {
 const gapCodes = new Set(['tool_unavailable', 'capability_unavailable', 'repository_unconfigured', 'platform_unavailable']);
 
 export function countsAsUnavailable(code: string): boolean {
-    return gapCodes.has(code);
+    return code !== '' && !hiddenCodes.has(code);
 }
 
 export function coverageSentence(covered: number, detected: number, executed: number): string {
@@ -95,10 +95,10 @@ export function buildReportModel(input: {
 }): ReportModel {
     const reasons = Array.isArray(input.verdictReasons) ? input.verdictReasons.filter((item): item is string => typeof item === 'string' && item.trim() !== '') : [];
     const hidden = input.controls.filter(control => isHidden(control));
-    const executed = input.controls.filter(control => control.resultStatus === 'success' || control.resultStatus === 'fail' || control.resultStatus === 'error');
-    const unavailable = input.controls.filter(control => gapCodes.has(control.reasonCode));
-    const applicable = typeof input.coverage.applicable_controls === 'number' ? input.coverage.applicable_controls : input.controls.length - hidden.length;
-    const executedCount = typeof input.coverage.executed_controls === 'number' ? input.coverage.executed_controls : executed.length;
+    const executed = input.controls.filter(control => isExecuted(control));
+    const unavailable = input.controls.filter(control => isUnavailable(control));
+    const applicable = executed.length + unavailable.length;
+    const executedCount = executed.length;
     const complete = input.coverage.complete === true;
     const gaps = coverageGapLines(input.technologies || [], input.controls);
     const detected = typeof input.coverage.detected_technologies === 'number' ? input.coverage.detected_technologies : (input.technologies || []).filter(item => item.status === 'detected').length;
@@ -128,9 +128,17 @@ export function buildReportModel(input: {
     };
 }
 
+export function isExecuted(control: { resultStatus?: string }): boolean {
+    return control.resultStatus === 'success' || control.resultStatus === 'fail' || control.resultStatus === 'error';
+}
+
+export function isUnavailable(control: LayoutControl): boolean {
+    return !isExecuted(control) && countsAsUnavailable(control.reasonCode);
+}
+
 export function isHidden(control: LayoutControl): boolean {
-    if (control.resultStatus === 'success' || control.resultStatus === 'fail' || control.resultStatus === 'error') { return false; }
-    return hiddenCodes.has(control.reasonCode);
+    if (isExecuted(control)) { return false; }
+    return !countsAsUnavailable(control.reasonCode);
 }
 
 export function verdictView(verdict: unknown, executed: number, complete: boolean): { label: string; kind: string; detail: string } {
@@ -155,7 +163,7 @@ export function uniqueTools(controls: LayoutControl[]): string[] {
 export function unavailableSummary(controls: LayoutControl[]): string[] {
     const groups = new Map<string, number>();
     for (const control of controls) {
-        if (control.resultStatus === 'success' || control.resultStatus === 'fail' || control.resultStatus === 'error' || isHidden(control)) { continue; }
+        if (!isUnavailable(control)) { continue; }
         const parts = control.id.split('/');
         const tool = parts[2] || control.name;
         const reason = control.reasonMessage || control.reasonCode || 'indisponible';
@@ -203,5 +211,5 @@ export function coverageGapLines(technologies: LayoutTechnology[], controls: Lay
             lines.push('vue : fichiers .vue détectés, pas de contrôle de types dédié');
         }
     }
-    return lines;
+    return [...new Set(lines)];
 }

@@ -67,15 +67,21 @@ func TestNothingExecutableIsNotAFailure(t *testing.T) {
 	if rep.Summary.Error != 0 || rep.Summary.Fail != 0 {
 		t.Fatalf("summary = %+v, want no executed failure", rep.Summary)
 	}
-	if rep.Coverage.Complete {
-		t.Fatal("coverage must not be complete when the repository ESLint cannot run")
-	}
 	status, message := controlOutcome(t, rep, "javascript/linting/eslint/.")
-	if status == "success" || !strings.Contains(message, "npm install") {
+	switch status {
+	case "skipped":
+		if !strings.Contains(message, "npm install") {
+			t.Fatalf("eslint status=%s message=%s", status, message)
+		}
+		if rep.Coverage.Complete {
+			t.Fatal("coverage must not be complete when the repository ESLint cannot run")
+		}
+		if rep.Summary.Success == 0 && rep.Verdict != nil {
+			t.Fatalf("verdict = %v, want null when nothing ran", *rep.Verdict)
+		}
+	case "success":
+	default:
 		t.Fatalf("eslint status=%s message=%s", status, message)
-	}
-	if rep.Summary.Success == 0 && rep.Verdict != nil {
-		t.Fatalf("verdict = %v, want null when nothing ran", *rep.Verdict)
 	}
 	if !strings.Contains(rep.Coverage.Label, "Couverture") {
 		t.Fatalf("label = %q", rep.Coverage.Label)
@@ -228,8 +234,8 @@ func TestRepositoryESLintDoesNotPassWithoutSetup(t *testing.T) {
 		t.Fatal(err)
 	}
 	status, message := controlOutcome(t, unconfigured, "javascript/linting/eslint/.")
-	if status == "success" || !strings.Contains(message, "Configuration ESLint absente") {
-		t.Fatalf("missing config status=%s message=%s", status, message)
+	if status != "success" || strings.Contains(message, "Configuration ESLint absente") {
+		t.Fatalf("missing config should run with the fallback, status=%s message=%s", status, message)
 	}
 }
 

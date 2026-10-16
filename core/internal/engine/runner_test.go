@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,6 +150,30 @@ func TestBatchedAndStructuredFindings(t *testing.T) {
 	if len(playbooks) != 1 || playbooks[0].RuleID != "document-start" || playbooks[0].Line != 2 || playbooks[0].File != "playbooks/site.yml" {
 		t.Fatalf("yamllint = %+v", playbooks)
 	}
+	windowsYAML := `M:\Git\content\group_vars\all.yml:4:1: [error] syntax error (syntax)` + "\n" + `M:\Git\content\roles\app\tasks\main.yml:8:3: [warning] missing document start (document-start)`
+	windowsPlaybooks := parseToolFindings("yamllint", windowsYAML, `M:\Git\content`)
+	if len(windowsPlaybooks) != 2 || windowsPlaybooks[0].File != "group_vars/all.yml" || windowsPlaybooks[0].Line != 4 || windowsPlaybooks[1].Line != 8 {
+		t.Fatalf("yamllint windows = %+v", windowsPlaybooks)
+	}
+	custom := `M:\Git\content\service.py:113:4: B104 MEDIUM: Possible binding to all interfaces.` + "\n" + `note: bandit preamble` + "\n" + `M:\Git\content\utils\app.py:2:1: B101 LOW: Use of assert detected.`
+	customBandit := parseToolFindings("bandit", custom, `M:\Git\content`)
+	if len(customBandit) != 2 || customBandit[0].RuleID != "B104" || customBandit[0].Line != 113 || customBandit[0].Column != 4 || customBandit[1].File != "utils/app.py" {
+		t.Fatalf("bandit custom = %+v", customBandit)
+	}
+	cut := `{"errors":[],"metrics":{"_totals":{"loc":1}},"results":[{"filename":"pkg/a.py","line_number":3,"test_id":"B101","issue_text":"assert","issue_severity":"LOW"},{"filename":"pkg/b.py","line_number":`
+	partial := parseToolFindings("bandit", cut, `C:\repo`)
+	if len(partial) != 1 || partial[0].File != "pkg/a.py" || partial[0].RuleID != "B101" || partial[0].Line != 3 {
+		t.Fatalf("truncated bandit = %+v", partial)
+	}
+	preamble := "Bandit 1.9.4\n" + bandit
+	if got := parseToolFindings("bandit", preamble, `C:\repo`); len(got) != 1 || got[0].RuleID != "B602" {
+		t.Fatalf("bandit preamble = %+v", got)
+	}
+	twoPins := "ERROR:pip_audit._cli:requirement cmakelint is not pinned: cmakelint (from RequirementLine(line_number=2, line='cmakelint', filename=WindowsPath('M:/Git/content/requirements.txt')))\nERROR:pip_audit._cli:requirement fastapi is not pinned: fastapi (from RequirementLine(line_number=9, line='fastapi', filename=WindowsPath('M:/Git/content/requirements.txt')))\n"
+	pins := parseToolFindings("pip-audit", twoPins, `M:\Git\content`)
+	if len(pins) != 2 || pins[0].Line != 2 || pins[1].Line != 9 {
+		t.Fatalf("pip-audit pins = %+v", pins)
+	}
 }
 
 func TestCommandLineBatchesStayUnderWindowsLimit(t *testing.T) {
@@ -289,6 +314,111 @@ func TestPytestNoTestsIsNotAFailure(t *testing.T) {
 	}
 	if pytestCollectedNothing("pytest", 1, 0) || pytestCollectedNothing("ruff", 5, 0) || pytestCollectedNothing("pytest", 5, 1) {
 		t.Fatal("only pytest exit 5 without findings is accepted")
+	}
+}
+
+func TestYamllintOmitsMissingConfig(t *testing.T) {
+	dir := t.TempDir()
+	platform := t.TempDir()
+	source := filepath.Join(dir, "python.exe")
+	without, err := BuildInvocation(&PlannedControl{
+		Tool:       &matrix.CandidateToolState{Command: "yamllint", Source: &source, RuntimeManaged: true},
+		Parameters: map[string]interface{}{"configuration": ".yamllint.yml"},
+		Root:       dir,
+	}, dir, platform, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsArg(without.Arguments, "-c") {
+		t.Fatalf("missing config should be omitted: %v", without.Arguments)
+	}
+	if !containsArg(without.Arguments, "-f") || !containsArg(without.Arguments, "parsable") {
+		t.Fatalf("parsable format missing: %v", without.Arguments)
+	}
+	cfg := filepath.Join(dir, ".yamllint.yml")
+	if err := os.WriteFile(cfg, []byte("extends: relaxed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withConfig, err := BuildInvocation(&PlannedControl{
+		Tool:       &matrix.CandidateToolState{Command: "yamllint", Source: &source, RuntimeManaged: true},
+		Parameters: map[string]interface{}{"configuration": ".yamllint.yml"},
+		Root:       dir,
+	}, dir, platform, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsArg(withConfig.Arguments, cfg) {
+		t.Fatalf("target config missing: %v", withConfig.Arguments)
+	}
+}
+
+func TestPipAuditSkipsRootWithoutDependencies(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "python.exe")
+	if err := os.WriteFile(filepath.Join(dir, "app.py"), []byte("print(1)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := BuildInvocation(&PlannedControl{
+		Tool:       &matrix.CandidateToolState{Command: "pip-audit", Source: &source, RuntimeManaged: true},
+		Parameters: map[string]interface{}{"arguments": []interface{}{"--no-deps", "--disable-pip", "--strict"}},
+		Root:       dir,
+	}, dir, dir, dir)
+	var skipped *ControlSkip
+	if !errors.As(err, &skipped) || skipped.Code != "not_applicable" {
+		t.Fatalf("skip = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "requirements.txt"), []byte("requests==2.32.3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "requirements-dev.txt"), []byte("pytest==8.3.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := BuildInvocation(&PlannedControl{
+		Tool:       &matrix.CandidateToolState{Command: "pip-audit", Source: &source, RuntimeManaged: true},
+		Parameters: map[string]interface{}{"arguments": []interface{}{"--no-deps", "--disable-pip", "--strict"}},
+		Root:       dir,
+	}, dir, dir, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(inv.Arguments, " ")
+	if strings.Contains(joined, "--strict") || !strings.Contains(joined, "--no-deps") || !strings.Contains(joined, "requirements-dev.txt") || !strings.Contains(joined, "requirements.txt") {
+		t.Fatalf("requirements args = %v", inv.Arguments)
+	}
+}
+
+func TestESLintFallbackWhenRepositoryHasNoConfig(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "eslint.cmd")
+	inv, err := BuildInvocation(&PlannedControl{
+		Tool: &matrix.CandidateToolState{Command: "eslint", Source: &source},
+		Root: dir,
+	}, dir, dir, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		for _, path := range inv.Cleanup {
+			_ = os.Remove(path)
+		}
+	}()
+	joined := strings.Join(append(inv.Arguments, inv.RawCommandLine), " ")
+	if !strings.Contains(joined, "--no-config-lookup") || !strings.Contains(joined, "-c") || len(inv.Cleanup) != 1 {
+		t.Fatalf("fallback = %#v", inv)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "eslint.config.js"), []byte("export default [];\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	configured, err := BuildInvocation(&PlannedControl{
+		Tool: &matrix.CandidateToolState{Command: "eslint", Source: &source},
+		Root: dir,
+	}, dir, dir, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configuredLine := strings.Join(append(configured.Arguments, configured.RawCommandLine), " ")
+	if strings.Contains(configuredLine, "--no-config-lookup") || len(configured.Cleanup) != 0 {
+		t.Fatalf("repository config should be used: %#v", configured)
 	}
 }
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.19
+
+- **Compteurs du rapport** : Applicables ne compte plus un contrôle écarté (`ambiguous`, alternative non retenue, non applicable, technologie absente, plateforme non prise en charge, réglage local). Le bandeau et la section Indisponibles utilisent le même nombre. Les sections Lacunes de couverture et Indisponibles listent les raisons dédoublonnées et disparaissent quand elles valent 0.
+- **Parseurs** : `yamllint -f parsable` ne reçoit `-c` que si le fichier de configuration existe, et chaque ligne Windows devient une anomalie. `pip-audit` ignore une racine sans `requirements*.txt` ni `pyproject.toml` au lieu d'auditer l'environnement global, et rapporte chaque dépendance non épinglée. `bandit` émet une ligne par anomalie pour que le JSON `metrics` tronqué ne se résume plus à une seule anomalie générique.
+- **ESLint** : sans `eslint.config.js` ni `.eslintrc`, le moteur passe `--no-config-lookup` et une configuration minimale de règles de base, y compris pour TypeScript, au lieu de laisser JavaScript et TypeScript en couverture partielle.
+- **Documentation** : l'autorisation machine unique et l'installation silencieuse sont décrites dans la documentation de l'extension. `docs/outils.md` est repris dans `docs/architecture.md` pour ne plus répéter le registre, le résolveur et la signature.
+
 ## 2.0.18
 
 - **Rapports de gros dépôts** : la lecture d'un `compliance-report.json` n'a plus de plafond (le rapport `content`, 74 Mo, était rejeté à 32 Mo). La validation HTTP n'envoie plus les findings ni les sorties capturées. Le panneau s'ouvre sur les compteurs et les contrôles ; les fichiers et les lignes se chargent à l'ouverture du contrôle, sans construire des dizaines de milliers de lignes d'un coup.

@@ -58,3 +58,28 @@ func TestNothingExecutedStaysUnevaluated(t *testing.T) {
 		t.Fatalf("coverage = %+v", report.Coverage)
 	}
 }
+
+func TestAmbiguousAndAlternativeStayOutsideApplicableScope(t *testing.T) {
+	exit := 0
+	report := BuildComplianceReport(ReportOptions{
+		Repository:   "repo",
+		RunID:        "run",
+		Platform:     "windows-x64",
+		ScanComplete: true,
+		Plan: ExecutionPlan{Controls: []interface{}{
+			map[string]interface{}{"id": "python/lint/ruff/."},
+			map[string]interface{}{"id": "kubernetes/security/trivy/."},
+			map[string]interface{}{"id": "helm/security/trivy/."},
+			map[string]interface{}{"id": "javascript/linting/eslint/."},
+		}},
+		Results: []ExecutionResult{
+			{ControlId: "python/lint/ruff/.", Technology: "python", Status: "success", ExitCode: &exit},
+			{ControlId: "kubernetes/security/trivy/.", Technology: "kubernetes", Status: "skipped", Diagnostics: []Diagnostic{{Code: "ambiguous", Message: "template Helm"}}},
+			{ControlId: "helm/security/trivy/.", Technology: "helm", Status: "skipped", Diagnostics: []Diagnostic{{Code: "alternative_not_selected", Message: "checkov retenu"}}},
+			{ControlId: "javascript/linting/eslint/.", Technology: "javascript", Status: "skipped", Diagnostics: []Diagnostic{{Code: "repository_unconfigured", Message: "config absente"}}},
+		},
+	})
+	if report.Coverage.ApplicableControls != 2 || report.Coverage.ExecutedControls != 1 {
+		t.Fatalf("applicable=%d executed=%d", report.Coverage.ApplicableControls, report.Coverage.ExecutedControls)
+	}
+}

@@ -396,7 +396,22 @@ func jsonInt(value interface{}) int {
 }
 
 func decodeJSONDocuments(stdout string, consume func(json.RawMessage)) bool {
-	dec := json.NewDecoder(strings.NewReader(stdout))
+	payload := strings.TrimSpace(stdout)
+	if payload != "" && payload[0] != '{' && payload[0] != '[' {
+		objectAt := strings.Index(payload, "{")
+		arrayAt := strings.Index(payload, "[")
+		start := -1
+		switch {
+		case objectAt >= 0 && (arrayAt < 0 || objectAt < arrayAt):
+			start = objectAt
+		case arrayAt >= 0:
+			start = arrayAt
+		}
+		if start >= 0 {
+			payload = payload[start:]
+		}
+	}
+	dec := json.NewDecoder(strings.NewReader(payload))
 	decoded := false
 	for {
 		var raw json.RawMessage
@@ -565,28 +580,88 @@ func parseBandit(stdout, repo string) []report.LocatedLeak {
 	var leaks []report.LocatedLeak
 	decodeJSONDocuments(stdout, func(raw json.RawMessage) {
 		var document struct {
-			Results []struct {
-				Filename  string `json:"filename"`
-				Line      int    `json:"line_number"`
-				TestID    string `json:"test_id"`
-				IssueText string `json:"issue_text"`
-				Severity  string `json:"issue_severity"`
-			} `json:"results"`
+			Results []banditResult `json:"results"`
 		}
 		if json.Unmarshal(raw, &document) != nil {
 			return
 		}
 		for _, row := range document.Results {
-			line := row.Line
-			if line < 1 {
-				line = 1
+			if leak, ok := row.leak(repo); ok {
+				leaks = append(leaks, leak)
 			}
-			leaks = append(leaks, report.LocatedLeak{
-				File: relativeToRepo(repo, row.Filename), Line: line, Column: 1,
-				RuleID: row.TestID, Description: row.IssueText, Severity: strings.ToLower(row.Severity),
-			})
 		}
 	})
+	if len(leaks) > 0 {
+		return leaks
+	}
+	if salvaged := salvageBanditResults(stdout, repo); len(salvaged) > 0 {
+		return salvaged
+	}
+	pattern := regexp.MustCompile(`(?m)^(.+):(\d+):(\d+): (B\d+) ([A-Za-z]+): (.*)$`)
+	for _, match := range pattern.FindAllStringSubmatch(stdout, -1) {
+		line, _ := strconv.Atoi(match[2])
+		column, _ := strconv.Atoi(match[3])
+		if line < 1 {
+			line = 1
+		}
+		if column < 1 {
+			column = 1
+		}
+		leaks = append(leaks, report.LocatedLeak{
+			File: relativeToRepo(repo, match[1]), Line: line, Column: column,
+			RuleID: match[4], Description: strings.TrimSpace(match[6]), Severity: strings.ToLower(match[5]),
+		})
+	}
+	return leaks
+}
+
+type banditResult struct {
+	Filename  string `json:"filename"`
+	Line      int    `json:"line_number"`
+	TestID    string `json:"test_id"`
+	IssueText string `json:"issue_text"`
+	Severity  string `json:"issue_severity"`
+}
+
+func (row banditResult) leak(repo string) (report.LocatedLeak, bool) {
+	if row.TestID == "" || row.Filename == "" {
+		return report.LocatedLeak{}, false
+	}
+	line := row.Line
+	if line < 1 {
+		line = 1
+	}
+	return report.LocatedLeak{
+		File: relativeToRepo(repo, row.Filename), Line: line, Column: 1,
+		RuleID: row.TestID, Description: row.IssueText, Severity: strings.ToLower(row.Severity),
+	}, true
+}
+
+func salvageBanditResults(stdout, repo string) []report.LocatedLeak {
+	marker := strings.Index(stdout, `"results"`)
+	if marker < 0 {
+		return nil
+	}
+	rest := stdout[marker:]
+	bracket := strings.Index(rest, "[")
+	if bracket < 0 {
+		return nil
+	}
+	dec := json.NewDecoder(strings.NewReader(rest[bracket:]))
+	token, err := dec.Token()
+	if err != nil || token != json.Delim('[') {
+		return nil
+	}
+	var leaks []report.LocatedLeak
+	for dec.More() {
+		var row banditResult
+		if err := dec.Decode(&row); err != nil {
+			break
+		}
+		if leak, ok := row.leak(repo); ok {
+			leaks = append(leaks, leak)
+		}
+	}
 	return leaks
 }
 
@@ -683,7 +758,7 @@ func parsePipAudit(stdout, repo string) []report.LocatedLeak {
 
 func parseYamllint(stdout, repo string) []report.LocatedLeak {
 	var leaks []report.LocatedLeak
-	pattern := regexp.MustCompile(`(?m)^(.+?):(\d+):(\d+):\s+\[(\w+)\]\s+(.+?)\s+\(([^)]+)\)\s*$`)
+	pattern := regexp.MustCompile(`(?m)^(.+):(\d+):(\d+):\s+\[(\w+)\]\s+(.+?)\s+\(([^)]+)\)\s*$`)
 	for _, match := range pattern.FindAllStringSubmatch(stdout, -1) {
 		line, _ := strconv.Atoi(match[2])
 		column, _ := strconv.Atoi(match[3])

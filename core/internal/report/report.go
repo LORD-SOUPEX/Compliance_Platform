@@ -542,7 +542,7 @@ func controlInApplicableScope(r ExecutionResult) bool {
 		return false
 	}
 	switch r.Diagnostics[0].Code {
-	case "technology_absent", "not_applicable", "platform_unsupported", "alternative_not_selected":
+	case "technology_absent", "not_applicable", "platform_unsupported", "alternative_not_selected", "ambiguous", "user_disabled":
 		return false
 	default:
 		return true
@@ -628,11 +628,6 @@ func technologyCoverage(discovery interface{}, results []ExecutionResult) (int, 
 }
 
 func detectedTechnologies(discovery interface{}) []string {
-	names := uncoveredTechnologies(discovery, map[string]bool{})
-	return names
-}
-
-func uncoveredTechnologies(discovery interface{}, addressed map[string]bool) []string {
 	if discovery == nil {
 		return nil
 	}
@@ -649,14 +644,14 @@ func uncoveredTechnologies(discovery interface{}, addressed map[string]bool) []s
 	if err := json.Unmarshal(raw, &view); err != nil {
 		return nil
 	}
-	var missing []string
+	var names []string
 	for _, tech := range view.Technologies {
-		if tech.Status == "detected" && tech.Technology != "" && !addressed[tech.Technology] {
-			missing = append(missing, tech.Technology)
+		if tech.Status == "detected" && tech.Technology != "" {
+			names = append(names, tech.Technology)
 		}
 	}
-	sort.Strings(missing)
-	return missing
+	sort.Strings(names)
+	return names
 }
 
 // BuildReport maintains backward compatibility with Phase 0 callers.

@@ -402,10 +402,6 @@ func BuildCompliancePlan(
 							applicability = "tool_unavailable"
 							reasonCode = "tool_unavailable"
 							reason = fmt.Sprintf("Outil du dépôt introuvable : node_modules/.bin/%s. Installez les dépendances (npm install) dans la cible, ou la chaîne locale avec compliance runtime node.", command)
-						case command == "eslint" && !eslintConfigured(cleanRepo):
-							applicability = "repository_unconfigured"
-							reasonCode = "repository_unconfigured"
-							reason = "Configuration ESLint absente du dépôt. Ajoutez eslint.config.js ou .eslintrc, puis relancez."
 						case command == "tsc" && len(tsconfigProjects(cleanRepo)) == 0:
 							applicability = "repository_unconfigured"
 							reasonCode = "repository_unconfigured"
