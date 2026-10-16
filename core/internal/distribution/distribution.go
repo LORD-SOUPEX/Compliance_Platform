@@ -268,6 +268,7 @@ func SyncRuntime(opts SyncOptions) (*SyncResult, error) {
 			continue
 		}
 		result.SyncedTools[name] = dest
+		rememberToolVersion(opts.CacheDir, name, plat.Tools[name].Version)
 	}
 	if !requested {
 		return nil, fmt.Errorf("%w: %s", ErrToolNotInManifest, opts.ToolName)

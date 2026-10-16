@@ -38,6 +38,30 @@ GO_BINARY = REPO_ROOT / ".tools" / "go" / "bin" / ("go.exe" if sys.platform == "
 REGISTRY_BASE_URL = "https://github.com/LORD-SOUPEX/Compliance_Platform/releases/download/tools-v1"
 REPO_SLUG = "LORD-SOUPEX/Compliance_Platform"
 RELEASE_TAG = "tools-v1"
+LOCK_PATH = REPO_ROOT / ".config" / "tools-lock.json"
+LOCK: dict = {}
+
+
+def load_tool_lock() -> dict:
+    """Versions live in .config/tools-lock.json. One edit, then --only <tool>."""
+    global LOCK
+    LOCK = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
+    for name, cfg in UPSTREAM_BINARIES.items():
+        new = str(LOCK["native"][name])
+        old = str(cfg["version"])
+        if new != old:
+            cfg["urls"] = {plat: url.replace(old, new) for plat, url in cfg["urls"].items()}
+            cfg["version"] = new
+    return LOCK
+
+
+def registry_documents() -> list[Path]:
+    config = REPO_ROOT / ".config"
+    return [
+        config / "runtime-manifest.json",
+        config / "runtime-manifest.json.sig",
+        config / "control-catalog.json",
+    ]
 
 PLATFORMS = ["windows-x64", "linux-x64", "linux-arm64", "macos-x64", "macos-arm64"]
 
@@ -280,7 +304,7 @@ def build_native_tool(tool_name: str, platform: str, cfg: dict) -> tuple[str, st
 
 
 def build_python_bundle_windows() -> tuple[str, str, str]:
-    out_name = "windows-x64-python-tools-3.11.9.tar.gz"
+    out_name = f"windows-x64-python-tools-{LOCK['python']['cpython']}.tar.gz"
     out_path = DIST_DIR / out_name
     src_python = REPO_ROOT / ".tools" / "python"
     if not src_python.exists():
@@ -320,7 +344,7 @@ def build_python_bundle_windows() -> tuple[str, str, str]:
                                 new_shebang = b"#!/usr/bin/env python"
                                 rest = lines[1] if len(lines) > 1 else b""
                                 content = new_shebang + b"\n" + rest
-                    except Exception:
+                    except OSError:
                         pass
                 
                 if content is not None:
@@ -340,18 +364,19 @@ def build_python_bundle_windows() -> tuple[str, str, str]:
 
 
 def build_node_bundle_windows() -> tuple[str, str, str]:
-    out_name = "windows-x64-node-tools-22.14.0.zip"
+    node_version = LOCK["node"]["node"]
+    out_name = f"windows-x64-node-tools-{node_version}.zip"
     out_path = DIST_DIR / out_name
-    print("  [BUNDLE] Building Node 22 bundle for windows-x64...")
+    print(f"  [BUNDLE] Building Node {node_version} bundle for windows-x64...")
 
-    node_url = "https://nodejs.org/dist/v22.14.0/win-x64/node.exe"
-    cached_node = download_cached(node_url, "node-v22.14.0-win-x64.exe")
+    node_url = f"https://nodejs.org/dist/v{node_version}/win-x64/node.exe"
+    cached_node = download_cached(node_url, f"node-v{node_version}-win-x64.exe")
 
     tmp_dir = Path(tempfile.mkdtemp(prefix="node-bundle-"))
     try:
         npm_cmd = shutil.which("npm.cmd") or shutil.which("npm") or "npm"
         subprocess.run(
-            [npm_cmd, "install", "--prefix", str(tmp_dir), "eslint@9.21.0", "typescript@5.7.3", "--no-audit", "--no-fund"],
+            [npm_cmd, "install", "--prefix", str(tmp_dir), f"eslint@{LOCK['node']['eslint']}", f"typescript@{LOCK['node']['typescript']}", "--no-audit", "--no-fund"],
             check=True,
             capture_output=True,
         )
@@ -378,12 +403,13 @@ def build_node_bundle_windows() -> tuple[str, str, str]:
 
 
 def build_psscriptanalyzer_bundle_windows() -> tuple[str, str, str]:
-    out_name = "windows-x64-powershell-modules-PSScriptAnalyzer-1.23.0.zip"
+    ps_version = LOCK["powershell"]["PSScriptAnalyzer"]
+    out_name = f"windows-x64-powershell-modules-PSScriptAnalyzer-{ps_version}.zip"
     out_path = DIST_DIR / out_name
-    print("  [BUNDLE] Building PSScriptAnalyzer 1.23.0 bundle...")
+    print(f"  [BUNDLE] Building PSScriptAnalyzer {ps_version} bundle...")
 
-    ps_url = "https://www.powershellgallery.com/api/v2/package/PSScriptAnalyzer/1.23.0"
-    cached_nupkg = download_cached(ps_url, "PSScriptAnalyzer-1.23.0.nupkg")
+    ps_url = f"https://www.powershellgallery.com/api/v2/package/PSScriptAnalyzer/{ps_version}"
+    cached_nupkg = download_cached(ps_url, f"PSScriptAnalyzer-{ps_version}.nupkg")
 
     DIST_DIR.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(cached_nupkg) as src_zf, zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as dst_zf:
@@ -402,9 +428,10 @@ def build_psscriptanalyzer_bundle_windows() -> tuple[str, str, str]:
 
 def package_posix_cpython(platform: str) -> tuple[str, str, str]:
     url = CPYTHON_STANDALONE[platform]
-    dl_name = f"cpython-standalone-{platform}-3.11.9.tar.gz"
+    cpython = LOCK["python"]["cpython"]
+    dl_name = f"cpython-standalone-{platform}-{cpython}.tar.gz"
     src_tar = download_cached(url, dl_name)
-    out_name = f"{platform}-python-3.11.9.tar.gz"
+    out_name = f"{platform}-python-{cpython}.tar.gz"
     out_path = DIST_DIR / out_name
     shutil.copy2(src_tar, out_path)
     arc_sha = sha256_file(out_path)
@@ -444,7 +471,7 @@ def get_github_token() -> str:
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if token:
         return token
-    res = subprocess.run(["git", "credential", "fill"], input="protocol=https\nhost=github.com\n", text=True, capture_output=True)
+    res = subprocess.run(["git", "credential", "fill"], input="protocol=https\nhost=github.com\n", text=True, capture_output=True, check=False)
     for line in res.stdout.splitlines():
         if line.startswith("password="):
             return line.split("=", 1)[1]
@@ -459,14 +486,14 @@ def publish_github_release(tag: str, assets: list[Path], repo_slug: str = REPO_S
     env["GH_TOKEN"] = token
 
     check_cmd = [str(gh_bin), "release", "view", tag, "--repo", repo_slug]
-    res = subprocess.run(check_cmd, env=env, capture_output=True, text=True)
+    res = subprocess.run(check_cmd, env=env, capture_output=True, text=True, check=False)
     if res.returncode != 0:
         print(f"Creating release {tag} on {repo_slug}...")
         create_cmd = [
             str(gh_bin), "release", "create", tag,
             "--repo", repo_slug,
             "--title", "Compliance Platform Tools Registry v1",
-            "--notes", "Self-hosted relocatable tools registry for Compliance Platform v2.0.20.",
+            "--notes", "Self-hosted relocatable tools registry for Compliance Platform v2.1.0. runtime-manifest.json and control-catalog.json are release assets.",
         ]
         subprocess.run(create_cmd, env=env, check=True)
 
@@ -476,7 +503,7 @@ def publish_github_release(tag: str, assets: list[Path], repo_slug: str = REPO_S
         chunk = assets[i:i + batch_size]
         upload_cmd = [str(gh_bin), "release", "upload", tag, "--repo", repo_slug, "--clobber"] + [str(p) for p in chunk]
         for attempt in range(1, 6):
-            res = subprocess.run(upload_cmd, env=env, capture_output=True, text=True)
+            res = subprocess.run(upload_cmd, env=env, capture_output=True, text=True, check=False)
             if res.returncode == 0:
                 print(f"  Uploaded {min(i + len(chunk), len(assets))}/{len(assets)} assets.")
                 break
@@ -507,7 +534,7 @@ def host_matches_platform(plat: str) -> bool:
 
 def build_python_bundle_posix(plat: str) -> tuple[str, str, str]:
     """Builds a relocatable Python bundle on Linux/macOS with checkov, bandit, pylint, pytest, pip-audit, yamllint, ansible-lint."""
-    out_name = f"{plat}-python-tools-3.11.9.tar.gz"
+    out_name = f"{plat}-python-tools-{LOCK['python']['cpython']}.tar.gz"
     out_path = DIST_DIR / out_name
     print(f"  [BUNDLE] Building relocatable Python bundle for {plat}...")
 
@@ -525,13 +552,13 @@ def build_python_bundle_posix(plat: str) -> tuple[str, str, str]:
             raise RuntimeError(f"Python binary not found at {py_bin}")
 
         pip_pkgs = [
-            "checkov==3.3.23",
-            "bandit==1.9.4",
-            "pylint==4.1.2",
-            "pytest==9.1.1",
-            "pip-audit==2.10.1",
-            "yamllint==1.35.1",
-            "ansible-lint==25.8.2",
+            f"checkov=={LOCK['python']['checkov']}",
+            f"bandit=={LOCK['python']['bandit']}",
+            f"pylint=={LOCK['python']['pylint']}",
+            f"pytest=={LOCK['python']['pytest']}",
+            f"pip-audit=={LOCK['python']['pip-audit']}",
+            f"yamllint=={LOCK['python']['yamllint']}",
+            f"ansible-lint=={LOCK['python']['ansible-lint']}",
         ]
         subprocess.run(
             [str(py_bin), "-m", "pip", "install", "--no-cache-dir", "--no-warn-script-location"] + pip_pkgs,
@@ -558,7 +585,7 @@ def build_python_bundle_posix(plat: str) -> tuple[str, str, str]:
                                 new_shebang = b"#!/usr/bin/env python3"
                                 rest = lines[1] if len(lines) > 1 else b""
                                 item.write_bytes(new_shebang + b"\n" + rest)
-                    except Exception:
+                    except OSError:
                         pass
 
         DIST_DIR.mkdir(parents=True, exist_ok=True)
@@ -581,13 +608,129 @@ def build_python_bundle_posix(plat: str) -> tuple[str, str, str]:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+def python_rows(include_ansible: bool = False) -> list[tuple[str, str, str]]:
+    rows = [
+        ("bandit", LOCK["python"]["bandit"], "bandit"),
+        ("pylint", LOCK["python"]["pylint"], "pylint"),
+        ("pytest", LOCK["python"]["pytest"], "pytest"),
+        ("pip-audit", LOCK["python"]["pip-audit"], "pip_audit"),
+        ("checkov", LOCK["python"]["checkov"], "checkov.main"),
+        ("yamllint", LOCK["python"]["yamllint"], "yamllint"),
+    ]
+    if include_ansible:
+        rows.append(("ansible-lint", LOCK["python"]["ansible-lint"], "ansiblelint"))
+    return rows
+
+
+def write_signed_manifest(manifest: dict) -> None:
+    manifest_json_path = REPO_ROOT / ".config" / "runtime-manifest.json"
+    manifest_bytes = json.dumps(manifest, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
+    manifest_json_path.write_bytes(manifest_bytes)
+    sig_hex = sign_manifest(manifest_bytes, ED25519_KEY_PATH)
+    sig_path = REPO_ROOT / ".config" / "runtime-manifest.json.sig"
+    sig_path.write_text(sig_hex, encoding="utf-8")
+    embedded_dir = REPO_ROOT / "core" / "internal" / "embedded" / "assets"
+    embedded_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(manifest_json_path, embedded_dir / "runtime-manifest.json")
+    shutil.copy2(sig_path, embedded_dir / "runtime-manifest.json.sig")
+    print("[MANIFEST] Manifeste signé et recopié dans les assets embarqués")
+
+
+def native_entry(tool_name: str, cfg: dict, out_arc: str, arc_sha: str, inner_bin: str, bin_sha: str) -> dict:
+    return {
+        "name": tool_name,
+        "version": cfg["version"],
+        "install": "archive",
+        "archive": out_arc,
+        "archive_sha256": arc_sha,
+        "binary_in_archive": inner_bin,
+        "binary_sha256": bin_sha,
+        "version_args": cfg["version_args"],
+    }
+
+
+def build_only(tool: str, args) -> None:
+    manifest_path = REPO_ROOT / ".config" / "runtime-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assets: list[Path] = []
+    if tool in UPSTREAM_BINARIES:
+        cfg = UPSTREAM_BINARIES[tool]
+        for plat in PLATFORMS:
+            out_arc, arc_sha, inner_bin, bin_sha = build_native_tool(tool, plat, cfg)
+            assets.append(DIST_DIR / out_arc)
+            manifest["platforms"][plat]["tools"][tool] = native_entry(tool, cfg, out_arc, arc_sha, inner_bin, bin_sha)
+    elif tool in {"node", "eslint", "tsc", "typescript"}:
+        node_arc, node_sha, node_bin = build_node_bundle_windows()
+        assets.append(DIST_DIR / node_arc)
+        tools = manifest["platforms"]["windows-x64"]["tools"]
+        tools["node"]["version"] = LOCK["node"]["node"]
+        tools["node"]["archive"] = node_arc
+        tools["node"]["archive_sha256"] = node_sha
+        tools["node"]["binary_in_archive"] = node_bin
+        tools["eslint"]["version"] = LOCK["node"]["eslint"]
+        tools["eslint"]["archive"] = node_arc
+        tools["eslint"]["archive_sha256"] = node_sha
+        tools["tsc"]["version"] = LOCK["node"]["typescript"]
+        tools["tsc"]["archive"] = node_arc
+        tools["tsc"]["archive_sha256"] = node_sha
+    elif tool in {"PSScriptAnalyzer", "Invoke-ScriptAnalyzer"}:
+        ps_arc, ps_sha, ps_bin = build_psscriptanalyzer_bundle_windows()
+        assets.append(DIST_DIR / ps_arc)
+        tools = manifest["platforms"]["windows-x64"]["tools"]
+        for alias in ("PSScriptAnalyzer", "Invoke-ScriptAnalyzer"):
+            tools[alias]["version"] = LOCK["powershell"]["PSScriptAnalyzer"]
+            tools[alias]["archive"] = ps_arc
+            tools[alias]["archive_sha256"] = ps_sha
+            tools[alias]["binary_in_archive"] = ps_bin
+    elif tool == "python" or tool in LOCK.get("python", {}):
+        if not host_matches_platform("windows-x64"):
+            raise SystemExit("La mise à jour d'un paquet Python se fait sur l'hôte Windows x64 qui détient .tools/python.")
+        py = REPO_ROOT / ".tools" / "python" / "python.exe"
+        if tool not in {"python", "cpython"}:
+            subprocess.run([str(py), "-m", "pip", "install", f"{tool}=={LOCK['python'][tool]}"], check=True)
+        py_arc, py_sha, py_bin = build_python_bundle_windows()
+        assets.append(DIST_DIR / py_arc)
+        tools = manifest["platforms"]["windows-x64"]["tools"]
+        tools["python"]["version"] = LOCK["python"]["cpython"]
+        tools["python"]["archive"] = py_arc
+        tools["python"]["archive_sha256"] = py_sha
+        tools["python"]["binary_in_archive"] = py_bin
+        for name, version, module in python_rows(False):
+            if name not in tools:
+                continue
+            tools[name]["version"] = version
+            tools[name]["archive"] = py_arc
+            tools[name]["archive_sha256"] = py_sha
+            tools[name]["python_module"] = module
+    else:
+        known = ", ".join(sorted(UPSTREAM_BINARIES) + ["python", "node", "eslint", "tsc", "PSScriptAnalyzer"])
+        raise SystemExit(f"Outil inconnu : {tool}. Outils : {known}")
+    write_signed_manifest(manifest)
+    if args.dry_run or args.skip_upload:
+        print("[INFO] Archive prête, téléversement ignoré.")
+        return
+    publish_github_release(args.tag, assets + registry_documents(), repo_slug=args.repo)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Build and publish Compliance Platform tools registry")
     parser.add_argument("--repo", default=REPO_SLUG, help=f"GitHub repository slug (default: {REPO_SLUG})")
     parser.add_argument("--tag", default=RELEASE_TAG, help=f"GitHub release tag (default: {RELEASE_TAG})")
     parser.add_argument("--dry-run", action="store_true", help="Build and measure archives, generate manifest, but do not upload")
     parser.add_argument("--skip-upload", action="store_true", help="Skip uploading to GitHub Releases")
+    parser.add_argument("--only", default="", help="Reconstruit et publie un seul outil, plus le manifeste et le catalogue")
+    parser.add_argument("--publish-registry", action="store_true", help="Publie runtime-manifest.json, sa signature et control-catalog.json sans reconstruire les archives")
     args = parser.parse_args()
+    load_tool_lock()
+    if args.only:
+        build_only(args.only, args)
+        return
+    if args.publish_registry:
+        if args.dry_run:
+            print("[INFO] Documents de registre prêts, téléversement ignoré.")
+            return
+        publish_github_release(args.tag, registry_documents(), repo_slug=args.repo)
+        return
 
     registry_base_url = f"https://github.com/{args.repo}/releases/download/{args.tag}"
 
@@ -621,7 +764,7 @@ def main():
             built_assets.append(DIST_DIR / py_arc)
             plat_tools["python"] = {
                 "name": "python",
-                "version": "3.11.9",
+                "version": LOCK["python"]["cpython"],
                 "install": "bundle",
                 "archive": py_arc,
                 "archive_sha256": py_sha,
@@ -629,14 +772,7 @@ def main():
                 "binary_sha256": "",
                 "version_args": ["--version"],
             }
-            py_tools = [
-                ("bandit", "1.9.4", "bandit"),
-                ("pylint", "4.1.2", "pylint"),
-                ("pytest", "9.1.1", "pytest"),
-                ("pip-audit", "2.10.1", "pip_audit"),
-                ("checkov", "3.3.23", "checkov.main"),
-                ("yamllint", "1.35.1", "yamllint"),
-            ]
+            py_tools = python_rows(False)
             for pname, pver, pmod in py_tools:
                 plat_tools[pname] = {
                     "name": pname,
@@ -655,7 +791,7 @@ def main():
             built_assets.append(DIST_DIR / node_arc)
             plat_tools["node"] = {
                 "name": "node",
-                "version": "22.14.0",
+                "version": LOCK["node"]["node"],
                 "install": "bundle",
                 "archive": node_arc,
                 "archive_sha256": node_sha,
@@ -665,7 +801,7 @@ def main():
             }
             plat_tools["eslint"] = {
                 "name": "eslint",
-                "version": "9.21.0",
+                "version": LOCK["node"]["eslint"],
                 "install": "bundle",
                 "bundle": "node",
                 "archive": node_arc,
@@ -676,7 +812,7 @@ def main():
             }
             plat_tools["tsc"] = {
                 "name": "tsc",
-                "version": "5.7.3",
+                "version": LOCK["node"]["typescript"],
                 "install": "bundle",
                 "bundle": "node",
                 "archive": node_arc,
@@ -691,7 +827,7 @@ def main():
             for ps_alias in ("PSScriptAnalyzer", "Invoke-ScriptAnalyzer"):
                 plat_tools[ps_alias] = {
                     "name": ps_alias,
-                    "version": "1.23.0",
+                    "version": LOCK["powershell"]["PSScriptAnalyzer"],
                     "install": "bundle",
                     "bundle": "powershell-modules",
                     "archive": ps_arc,
@@ -706,7 +842,7 @@ def main():
                 built_assets.append(DIST_DIR / py_arc)
                 plat_tools["python"] = {
                     "name": "python",
-                    "version": "3.11.9",
+                    "version": LOCK["python"]["cpython"],
                     "install": "bundle",
                     "archive": py_arc,
                     "archive_sha256": py_sha,
@@ -714,15 +850,7 @@ def main():
                     "binary_sha256": "",
                     "version_args": ["--version"],
                 }
-                posix_tools = [
-                    ("bandit", "1.9.4", "bandit"),
-                    ("pylint", "4.1.2", "pylint"),
-                    ("pytest", "9.1.1", "pytest"),
-                    ("pip-audit", "2.10.1", "pip_audit"),
-                    ("checkov", "3.3.23", "checkov.main"),
-                    ("yamllint", "1.35.1", "yamllint"),
-                    ("ansible-lint", "25.8.2", "ansiblelint"),
-                ]
+                posix_tools = python_rows(True)
                 for pname, pver, pmod in posix_tools:
                     plat_tools[pname] = {
                         "name": pname,
@@ -742,7 +870,7 @@ def main():
                 built_assets.append(DIST_DIR / py_arc)
                 plat_tools["python"] = {
                     "name": "python",
-                    "version": "3.11.9",
+                    "version": LOCK["python"]["cpython"],
                     "install": "bundle",
                     "archive": py_arc,
                     "archive_sha256": py_sha,
@@ -763,7 +891,7 @@ def main():
 
     manifest = {
         "schema_version": 3,
-        "manifest_version": "2.0.20",
+        "manifest_version": "2.1.0",
         "registry_base_url": registry_base_url,
         "platforms": manifest_platforms,
     }
@@ -786,10 +914,10 @@ def main():
     embedded_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(manifest_json_path, embedded_dir / "runtime-manifest.json")
     shutil.copy2(sig_path, embedded_dir / "runtime-manifest.json.sig")
-    print(f"[SYNC] Synchronized embedded runtime-manifest assets")
+    print("[SYNC] Synchronized embedded runtime-manifest assets")
 
     # Deduplicate built assets list
-    unique_assets = sorted(list(set(built_assets)), key=lambda p: p.name)
+    unique_assets = sorted(set(built_assets), key=lambda p: p.name)
     print(f"\n[SUMMARY] {len(unique_assets)} unique archive assets generated:")
     for a in unique_assets:
         size_mb = a.stat().st_size / (1024 * 1024)
@@ -799,7 +927,7 @@ def main():
         print("\n[INFO] Dry-run or skip-upload active: skipped release publishing.")
         return
 
-    publish_github_release(args.tag, unique_assets, repo_slug=args.repo)
+    publish_github_release(args.tag, unique_assets + registry_documents(), repo_slug=args.repo)
 
 
 if __name__ == "__main__":

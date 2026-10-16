@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.0
+
+- **Registre vivant** : le démon compare `runtime-manifest.json` et `control-catalog.json` publiés sur la release `tools-v1` au cache `~/.compliance/registry-cache/`, puis aux fichiers embarqués. Un outil déjà installé est remplacé quand le manifeste distant annonce une version plus haute. Hors ligne, le cache puis les fichiers du binaire suffisent. Le `.vsix` n'a pas à être réinstallé.
+- **Une commande par linter** : `.config/tools-lock.json` concentre les versions. `py scripts/build_and_publish_tools.py --only ruff` reconstruit et publie cet outil, le manifeste et le catalogue.
+
 ## 2.0.20
 
 - **Racines imbriquées** : pour `hadolint`, `trivy`, `shellcheck`, `ruff`, `pylint`, `bandit` et `pytest`, la racine parente n'audite plus les fichiers déjà couverts par une sous-racine planifiée du même outil. Un même fichier n'est plus compté deux fois.

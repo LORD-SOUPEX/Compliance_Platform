@@ -7,6 +7,7 @@
   "required": ["schema_version", "controls"],
   "properties": {
     "schema_version": { "const": 1 },
+    "catalog_revision": { "type": "integer", "minimum": 1 },
     "controls": {
       "type": "array",
       "items": { "$ref": "#/$defs/control" }

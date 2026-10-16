@@ -32,6 +32,7 @@ Développeurs et évaluateurs qui veulent contrôler un projet Terraform, conten
 - Démon Go lancé à la demande, arrêté avec l'extension.
 - Couverture des technologies détectées, pas de la taille du catalogue.
 - Le code audité n'est pas transmis. Une autorisation, mémorisée sur la machine, suffit pour télécharger les outils manquants et les exécuter.
+- Les linters et le catalogue de normes se mettent à jour depuis la release GitHub `tools-v1` sans réinstaller l'extension. Hors ligne, le dernier cache local reste utilisé.
 
 ## Stack et outils
 

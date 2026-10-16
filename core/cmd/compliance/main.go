@@ -114,6 +114,20 @@ func runDaemon(args []string) {
 		cwd, _ := os.Getwd()
 		*platformRoot = cwd
 	}
+	selection := distribution.RefreshRegistry(context.Background(), distribution.RefreshOptions{
+		LocalRoot: *platformRoot,
+		Timeout:   3 * time.Second,
+	})
+	if strings.TrimSpace(*catalogPath) == "" && selection.Source != "local" && selection.CatalogPath != "" {
+		*catalogPath = selection.CatalogPath
+	}
+	go distribution.UpgradeInstalledTools(distribution.UpgradeOptions{
+		ManifestPath: selection.ManifestPath,
+		BaselinePath: filepath.Join(*platformRoot, ".config", "runtime-manifest.json"),
+		SigPath:      selection.SigPath,
+		CacheDir:     defaultCacheDir(),
+		RegistryURL:  selection.RegistryURL,
+	})
 	resolvedCatalog, err := embedded.ResolveAsset("control-catalog.json", *catalogPath, filepath.Join(*platformRoot, ".config", "control-catalog.json"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ERROR] Catalogue de contrôles introuvable: %v\n", err)

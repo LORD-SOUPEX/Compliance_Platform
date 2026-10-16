@@ -21,6 +21,11 @@ import { engineVersionMismatch, expectedEngineVersion } from './engineVersion.js
 
 export { engineVersionMismatch, expectedEngineVersion, setExpectedEngineVersion } from './engineVersion.js';
 
+function registryAsset(name: string, fallback: string): string {
+    const cached = path.join(os.homedir(), '.compliance', 'registry-cache', name);
+    return fsSync.existsSync(cached) ? cached : fallback;
+}
+
 export interface DaemonState {
     pid: number;
     port: number;
@@ -234,8 +239,8 @@ export class DaemonClient {
 
     public async syncTools(platformRoot: string, tools: string[], options?: { registryUrl?: string; registryToken?: string }): Promise<void> {
         const staged = await this.stagedRuntime(platformRoot);
-        const manifest = path.join(staged.platformRoot, '.config', 'runtime-manifest.json');
-        const signature = path.join(staged.platformRoot, '.config', 'runtime-manifest.json.sig');
+        const manifest = registryAsset('runtime-manifest.json', path.join(staged.platformRoot, '.config', 'runtime-manifest.json'));
+        const signature = registryAsset('runtime-manifest.json.sig', path.join(staged.platformRoot, '.config', 'runtime-manifest.json.sig'));
         const installed: string[] = [];
         const failed: string[] = [];
         const extraArgs: string[] = [];

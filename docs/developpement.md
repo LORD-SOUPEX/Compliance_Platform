@@ -1,6 +1,6 @@
 # Développement
 
-Version courante : 2.0.20. Le fonctionnement du moteur, du registre et des compteurs est dans [architecture](architecture.md).
+Version courante : 2.1.0. Le fonctionnement du moteur, du registre et des compteurs est dans [architecture](architecture.md).
 
 ## Validation
 
@@ -27,7 +27,19 @@ Go utilisé par les scripts de l'extension : `.tools/go/bin/go`. Python : `py -3
 
 ## Registre `tools-v1`
 
-`scripts/build_and_publish_tools.py` reconditionne les 10 binaires natifs pour les cinq plateformes, assemble les bundles Python, Node et `PSScriptAnalyzer`, calcule les SHA-256, met à jour `.config/runtime-manifest.json` et publie les assets aplatis sur la release GitHub `tools-v1`.
+`scripts/build_and_publish_tools.py` reconditionne les 10 binaires natifs pour les cinq plateformes, assemble les bundles Python, Node et `PSScriptAnalyzer`, calcule les SHA-256, met à jour `.config/runtime-manifest.json` et publie les assets aplatis sur la release GitHub `tools-v1`, y compris `runtime-manifest.json`, `runtime-manifest.json.sig` et `control-catalog.json`.
+
+Les versions sont dans `.config/tools-lock.json`. Pour publier un seul linter sans reconstruire les autres archives :
+
+```bash
+py scripts/build_and_publish_tools.py --only ruff
+```
+
+Pour republier uniquement le manifeste et le catalogue déjà signés :
+
+```bash
+py scripts/build_and_publish_tools.py --publish-registry
+```
 
 ```bash
 py scripts/build_and_publish_tools.py --repo LORD-SOUPEX/Compliance_Platform --tag tools-v1
@@ -45,7 +57,7 @@ Le détail des paquets et de l'ordre de résolution est dans [architecture](arch
 
 ```bash
 cd vscode-extension
-npm run reinstall -- dist/compliance-local-pipelines-2.0.20.vsix
+npm run reinstall -- dist/compliance-local-pipelines-2.1.0.vsix
 ```
 
 La commande arrête le démon, retire l'extension précédente et installe le VSIX. Les sessions restent dans le dossier utilisateur.

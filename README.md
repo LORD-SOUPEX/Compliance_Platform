@@ -95,10 +95,11 @@ Compliance_Platform/
 │   │   ├── model.ts                    # Modèles d'état et normalisation multi-OS
 │   │   └── reportPanel.ts              # Panneau Webview interactif de visualisation
 │   ├── package_vsix.py                 # Packaging OPC universel et cross-compilation
-│   ├── package.json                    # Manifeste d'extension VS Code (v2.0.20)
+│   ├── package.json                    # Manifeste d'extension VS Code (v2.1.0)
 │   └── tsconfig.json
 ├── .config/                            # Contrats de configuration partagés
 │   ├── control-catalog.json            # Catalogue des contrôles (voir le tableau ci-dessus)
+│   ├── tools-lock.json                 # Versions des linters publiées sur tools-v1
 │   ├── platform-support.json           # Matrice d'éligibilité et statuts multi-OS
 │   └── runtime-manifest.json           # Manifeste des binaires d'outils (signature facultative)
 ├── docs/                               # Documentation technique exhaustive
@@ -186,7 +187,7 @@ compliance run -repo "/chemin/du/projet" -report reports/audit.json
 
 ### 4. Audit dans VS Code
 
-L'extension locale s'installe via le VSIX (`vscode-extension/dist/compliance-local-pipelines-2.0.20.vsix`). Seul Windows x64 est qualifié :
+L'extension locale s'installe via le VSIX (`vscode-extension/dist/compliance-local-pipelines-2.1.0.vsix`). Seul Windows x64 est qualifié. Le manifeste et le catalogue se mettent à jour depuis la release `tools-v1` sans réinstaller ce VSIX :
 
 - Sélection de la cible d'audit (Target externe).
 - Préparation et inspection du plan ordonnancé.

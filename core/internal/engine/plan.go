@@ -11,7 +11,6 @@ import (
 
 	"compliance/internal/discovery"
 	"compliance/internal/distribution"
-	"compliance/internal/embedded"
 	"compliance/internal/matrix"
 	"compliance/internal/osutil"
 	"compliance/internal/report"
@@ -437,7 +436,7 @@ func BuildCompliancePlan(
 						if candidate != nil && candidate.Status == "runtime_error" && candidate.Reason != "" {
 							reason = candidate.Reason
 							reasonCode = "tool_unavailable"
-						} else if manifestPath, err := embedded.ResolveAsset("runtime-manifest.json", ".config/runtime-manifest.json"); err == nil && distribution.ToolListed(manifestPath, opts.PlatformID, command) {
+						} else if manifestPath, err := distribution.ActiveAsset("runtime-manifest.json", ".config/runtime-manifest.json"); err == nil && distribution.ToolListed(manifestPath, opts.PlatformID, command) {
 							reason = fmt.Sprintf("Outil installable depuis le manifeste : %s.", command)
 							reasonCode = "tool_unavailable"
 						} else if command == "Invoke-ScriptAnalyzer" {

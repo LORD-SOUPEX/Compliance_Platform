@@ -1,6 +1,6 @@
 # Architecture
 
-Version courante : 2.0.20. Le nombre de contrôles est celui de `.config/control-catalog.json`, repris dans le tableau `catalog-controls` des README. Le guide d'usage est le [README](../README.md). La construction, la signature et le VSIX sont dans [développement](developpement.md).
+Version courante : 2.1.0. Le nombre de contrôles est celui de `.config/control-catalog.json`, repris dans le tableau `catalog-controls` des README. Le guide d'usage est le [README](../README.md). La construction, la signature et le VSIX sont dans [développement](developpement.md).
 
 ## Parcours
 
@@ -47,6 +47,8 @@ Le registre est la release GitHub `tools-v1` (`https://github.com/LORD-SOUPEX/Co
 - `PSScriptAnalyzer` 1.23.0 dans `~/.compliance/tools/powershell-modules`.
 
 L'URL du registre se change avec `compliance.registryUrl`, `-registry-url` ou `COMPLIANCE_REGISTRY_URL`. Le jeton passe par `compliance.registryToken` ou `COMPLIANCE_REGISTRY_TOKEN`, jamais en argument de ligne de commande. Une signature Ed25519 ou un SHA-256 différent produit un avertissement et n'empêche pas l'installation.
+
+Au démarrage, le démon interroge `<registry_base_url>/runtime-manifest.json` et `<registry_base_url>/control-catalog.json` pendant au plus 3 secondes. Si le manifeste distant annonce une version d'outil plus haute, un `catalog_revision` plus grand, ou un outil nouveau, les deux fichiers sont écrits dans `~/.compliance/registry-cache/`. Un outil déjà installé dans `~/.compliance/tools/` est alors remplacé par cette version. Hors ligne, le démon utilise ce cache, puis les fichiers embarqués dans le binaire. La version du `.vsix` ne change pas.
 
 ## Compteurs du rapport
 

@@ -807,9 +807,10 @@ type CatalogControl struct {
 
 // ControlCatalog contains all controls and the catalog checksum.
 type ControlCatalog struct {
-	SchemaVersion int              `json:"schema_version"`
-	Controls      []CatalogControl `json:"controls"`
-	ContentSHA256 string           `json:"content_sha256,omitempty"`
+	SchemaVersion   int              `json:"schema_version"`
+	CatalogRevision int              `json:"catalog_revision,omitempty"`
+	Controls        []CatalogControl `json:"controls"`
+	ContentSHA256   string           `json:"content_sha256,omitempty"`
 }
 
 // CandidateToolDefinition provides tool metadata for capability profiles.
