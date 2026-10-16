@@ -141,6 +141,26 @@ export function isHidden(control: LayoutControl): boolean {
     return !countsAsUnavailable(control.reasonCode);
 }
 
+export function verdictReasonLines(detail: string, reasons: string[]): string[] {
+    const fold = (value: string) => value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const redundant = new Set([
+        'au moins un controle de conformite echoue',
+        'au moins un controle execute a echoue ou une erreur critique a interrompu l evaluation'
+    ]);
+    const lines: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of [detail, ...reasons]) {
+        const text = raw.trim();
+        if (!text) { continue; }
+        const key = fold(text);
+        if (seen.has(key)) { continue; }
+        if (lines.length > 0 && redundant.has(key)) { continue; }
+        seen.add(key);
+        lines.push(text);
+    }
+    return lines;
+}
+
 export function verdictView(verdict: unknown, executed: number, complete: boolean): { label: string; kind: string; detail: string } {
     if (verdict === 'FAIL') { return { label: 'Échec', kind: 'fail', detail: 'Au moins un contrôle exécuté a échoué ou une erreur critique a interrompu l’évaluation.' }; }
     if (verdict === 'PASS' && complete && executed > 0) { return { label: 'Réussi', kind: 'pass', detail: 'Les contrôles applicables aux technologies détectées ont été exécutés sans écart.' }; }

@@ -1,6 +1,6 @@
 # Développement
 
-Version courante : 2.0.19. Le fonctionnement du moteur, du registre et des compteurs est dans [architecture](architecture.md).
+Version courante : 2.0.20. Le fonctionnement du moteur, du registre et des compteurs est dans [architecture](architecture.md).
 
 ## Validation
 
@@ -45,7 +45,7 @@ Le détail des paquets et de l'ordre de résolution est dans [architecture](arch
 
 ```bash
 cd vscode-extension
-npm run reinstall -- dist/compliance-local-pipelines-2.0.19.vsix
+npm run reinstall -- dist/compliance-local-pipelines-2.0.20.vsix
 ```
 
 La commande arrête le démon, retire l'extension précédente et installe le VSIX. Les sessions restent dans le dossier utilisateur.

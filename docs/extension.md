@@ -1,6 +1,6 @@
 # ICP - IaC Compliance Platform
 
-Audit local d'un dépôt. L'extension parle à un démon Go sur `127.0.0.1`. Aucun compte, aucune forge et aucun envoi du code. Version courante : 2.0.19.
+Audit local d'un dépôt. L'extension parle à un démon Go sur `127.0.0.1`. Aucun compte, aucune forge et aucun envoi du code. Version courante : 2.0.20.
 
 ## Architecture de la plateforme
 

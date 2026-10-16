@@ -750,7 +750,7 @@ func parsePipAudit(stdout, repo string) []report.LocatedLeak {
 		}
 		leaks = append(leaks, report.LocatedLeak{
 			File: relativeToRepo(repo, file), Line: line, Column: 1,
-			RuleID: "unpinned", Description: "Dépendance non épinglée : " + strings.TrimSpace(match[1]), Severity: "medium",
+			RuleID: "non-épinglée", Description: strings.TrimSpace(match[1]) + " n'a pas de version exacte.", Severity: "medium",
 		})
 	}
 	return leaks

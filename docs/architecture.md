@@ -1,6 +1,6 @@
 # Architecture
 
-Version courante : 2.0.19. Le nombre de contrôles est celui de `.config/control-catalog.json`, repris dans le tableau `catalog-controls` des README. Le guide d'usage est le [README](../README.md). La construction, la signature et le VSIX sont dans [développement](developpement.md).
+Version courante : 2.0.20. Le nombre de contrôles est celui de `.config/control-catalog.json`, repris dans le tableau `catalog-controls` des README. Le guide d'usage est le [README](../README.md). La construction, la signature et le VSIX sont dans [développement](developpement.md).
 
 ## Parcours
 
@@ -59,7 +59,8 @@ Un contrôle écarté n'entre pas dans **Applicables**. Les codes hors périmèt
 ## Sorties des contrôles
 
 - `yamllint` est lancé en `-f parsable`. `-c` n'est passé que si un fichier de configuration existe dans la cible ou à côté du binaire. Chaque ligne `fichier:ligne:colonne` devient une anomalie, y compris avec un chemin Windows.
-- `pip-audit` n'audite pas l'environnement Python global. Sans `requirements*.txt` ni `pyproject.toml` dans la racine, le contrôle est non applicable. Les fichiers `requirements*.txt` sont tous passés avec `-r`. `--strict` est retiré pour qu'une dépendance non épinglée n'efface pas les suivantes. Un `pyproject.toml` seul est audité comme projet.
+- `pip-audit` n'audite pas l'environnement Python global. Sans `requirements*.txt` ni `pyproject.toml` dans la racine, le contrôle est non applicable. Chaque ligne de `requirements*.txt` sans version exacte (`==`) devient une anomalie sur ce fichier et cette ligne. Seules les lignes épinglées sont envoyées à l'outil (`--no-deps`, sans `--strict`). Une erreur de résolution est rattachée au fichier concerné. Un `pyproject.toml` seul est audité comme projet.
+- Pour `hadolint`, `trivy`, `shellcheck`, `ruff`, `pylint`, `bandit` et `pytest`, une racine parente n'audite pas les fichiers déjà couverts par une sous-racine planifiée du même outil.
 - `bandit` écrit une ligne par anomalie (`{abspath}:{line}:{col}: {test_id} {severity}: {msg}`), pour que le bloc `metrics` du JSON ne consomme pas la capture avant les résultats. Un JSON précédé de texte ou coupé après un objet complet reste lu.
 - `hadolint` reste en `--format json`, une anomalie par fichier et par ligne.
 - Sans `eslint.config.*` ni `.eslintrc`, ESLint reçoit `--no-config-lookup` et une configuration minimale de règles de base. Les fichiers TypeScript utilisent `@typescript-eslint/parser` s'il est installé, sinon le TypeScript du bundle Node pour effacer les types avant l'analyse. `tsc` exige toujours un `tsconfig.json`.

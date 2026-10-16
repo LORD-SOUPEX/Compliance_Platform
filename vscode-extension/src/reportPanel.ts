@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { reportButtonCommand } from './reportActions.js';
-import { buildReportModel, LayoutControl, nonApplicableMarkup, reportDurationMs, unavailableSummary } from './reportLayout';
+import { buildReportModel, LayoutControl, nonApplicableMarkup, reportDurationMs, unavailableSummary, verdictReasonLines } from './reportLayout';
 import { controlOutputText } from './model';
 import { controlRelativeFile, Fields, fields, findingLocation, LoadedReport, loadReport, readSession, readStable, ReportControl, ReportReference, reportMessage, runsDirectory, targetFile, text } from './daemonClient';
 import { hasMachineConsent, machineConsentKey, MachineConsent } from './toolProvision';
@@ -235,7 +235,7 @@ function executedMarkup(controls: Array<LayoutControl & { label: string; showOut
 }
 
 function reasonBlock(detail: string, reasons: string[]): string {
-    const lines = [...new Set([detail, ...reasons].map(line => line.trim()).filter(Boolean))];
+    const lines = verdictReasonLines(detail, reasons);
     if (!lines.length) { return ''; }
     return `<section class="reasons"><h2>Raisons du verdict</h2><ul>${lines.map(line => `<li>${escaped(line)}</li>`).join('')}</ul></section>`;
 }

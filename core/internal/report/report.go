@@ -177,11 +177,10 @@ func ComputeVerdict(results []ExecutionResult) (string, Summary, []string) {
 	verdict := "PASS"
 	if summary.Fail > 0 {
 		verdict = "FAIL"
-		reasons = append(reasons, "Au moins un controle de conformite echoue.")
 	}
 	if summary.CriticalErrors > 0 {
 		verdict = "FAIL"
-		reasons = append(reasons, "Au moins une erreur critique empeche une evaluation complete.")
+		reasons = append(reasons, "Au moins une erreur critique empêche une évaluation complète.")
 	}
 	if summary.Success == 0 && summary.Fail == 0 && summary.Error == 0 && summary.Skipped > 0 {
 		reasons = append(reasons, "Aucun contrôle exécuté. Les autres sont ignorés (technologie absente) ou indisponibles (outil manquant ou absent du catalogue).")

@@ -43,6 +43,7 @@ type PlannedControl struct {
 	Required            bool                       `json:"required"`
 	Reason              string                     `json:"reason"`
 	Files               []string                   `json:"files"`
+	ExcludeRoots        []string                   `json:"exclude_roots,omitempty"`
 }
 
 // PlanOptions configures plan generation.
@@ -502,6 +503,7 @@ func BuildCompliancePlan(
 	}
 
 	controls = collapseRepoWideTools(controls)
+	assignNestedExclusions(controls)
 
 	if len(controls) > maxControls {
 		return nil, nil, fmt.Errorf("limite du plan depassee: %d controles maximum", maxControls)
@@ -828,6 +830,54 @@ func eslintConfigured(repo string) bool {
 	}
 	_, ok := pkg["eslintConfig"]
 	return ok
+}
+
+func assignNestedExclusions(controls []*PlannedControl) {
+	grouped := map[string][]string{}
+	for _, ctrl := range controls {
+		if ctrl == nil || ctrl.Applicability != "applicable" || ctrl.Tool == nil || repoWideCommand(ctrl.Tool.Command) {
+			continue
+		}
+		key := ctrl.Technology + "\x00" + ctrl.Tool.Command
+		root := normalizePlanRoot(ctrl.Root)
+		if !listed(grouped[key], root) {
+			grouped[key] = append(grouped[key], root)
+		}
+	}
+	for _, ctrl := range controls {
+		if ctrl == nil || ctrl.Applicability != "applicable" || ctrl.Tool == nil || repoWideCommand(ctrl.Tool.Command) {
+			continue
+		}
+		key := ctrl.Technology + "\x00" + ctrl.Tool.Command
+		var nested []string
+		for _, other := range grouped[key] {
+			if rootContains(ctrl.Root, other) {
+				nested = append(nested, other)
+			}
+		}
+		sort.Strings(nested)
+		ctrl.ExcludeRoots = nested
+	}
+}
+
+func normalizePlanRoot(root string) string {
+	root = filepath.ToSlash(filepath.Clean(strings.TrimSpace(root)))
+	if root == "" || root == "." {
+		return "."
+	}
+	return strings.TrimPrefix(root, "./")
+}
+
+func rootContains(parent, child string) bool {
+	parent = normalizePlanRoot(parent)
+	child = normalizePlanRoot(child)
+	if parent == child {
+		return false
+	}
+	if parent == "." {
+		return true
+	}
+	return strings.HasPrefix(strings.ToLower(child), strings.ToLower(parent)+"/")
 }
 
 func repoWideCommand(command string) bool {

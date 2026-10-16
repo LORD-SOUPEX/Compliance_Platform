@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -92,14 +93,16 @@ func (r *Redactor) Redact(text string) string {
 
 // Invocation represents the command line execution details for a control.
 type Invocation struct {
-	Executable      string       `json:"executable"`
-	Arguments       []string     `json:"arguments"`
-	Followups       []Invocation `json:"-"`
-	Cleanup         []string     `json:"-"`
-	GitleaksReport  string       `json:"-"`
-	ContinueOnError bool         `json:"-"`
-	RawCommandLine  string       `json:"-"`
-	Env             []string     `json:"-"`
+	Executable      string               `json:"executable"`
+	Arguments       []string             `json:"arguments"`
+	Followups       []Invocation         `json:"-"`
+	Cleanup         []string             `json:"-"`
+	GitleaksReport  string               `json:"-"`
+	ContinueOnError bool                 `json:"-"`
+	RawCommandLine  string               `json:"-"`
+	Env             []string             `json:"-"`
+	Prefound        []report.LocatedLeak `json:"-"`
+	Sources         []string             `json:"-"`
 }
 
 // BuildInvocation constructs the executable and arguments for a planned control.
@@ -141,11 +144,11 @@ func BuildInvocation(
 
 	switch command {
 	case "ruff":
-		var pyFiles []string
-		for _, f := range filesInRoot {
-			if strings.EqualFold(filepath.Ext(f), ".py") {
-				pyFiles = append(pyFiles, f)
-			}
+		pyFiles, skip := exclusiveFiles(filesInRoot, repoRoot, ctrl.ExcludeRoots, func(file string) bool {
+			return strings.EqualFold(filepath.Ext(file), ".py")
+		})
+		if skip {
+			return nil, coveredByNestedRoot()
 		}
 		if len(pyFiles) == 0 {
 			return nil, errors.New("aucune source Python pour Ruff")
@@ -160,11 +163,11 @@ func BuildInvocation(
 		return invocationWithFiles(executable, prefix, pyFiles), nil
 
 	case "pylint", "bandit":
-		var pyFiles []string
-		for _, f := range filesInRoot {
-			if strings.EqualFold(filepath.Ext(f), ".py") {
-				pyFiles = append(pyFiles, f)
-			}
+		pyFiles, skip := exclusiveFiles(filesInRoot, repoRoot, ctrl.ExcludeRoots, func(file string) bool {
+			return strings.EqualFold(filepath.Ext(file), ".py")
+		})
+		if skip {
+			return nil, coveredByNestedRoot()
 		}
 		if len(pyFiles) == 0 {
 			return nil, fmt.Errorf("aucune source Python pour %s", command)
@@ -188,6 +191,7 @@ func BuildInvocation(
 
 	case "pytest":
 		arguments = append(arguments, catalogArgs...)
+		arguments = append(arguments, ignoreNestedArgs(repoRoot, ctrl.ExcludeRoots)...)
 		arguments = append(arguments, root)
 		if isPyRuntime {
 			arguments = append([]string{"-m", "pytest"}, arguments...)
@@ -201,12 +205,41 @@ func BuildInvocation(
 				Message: "Aucun requirements*.txt ni pyproject.toml dans cette racine. L'environnement Python global n'est pas audité.",
 			}
 		}
-		if len(reqs) > 0 {
+		var prefound []report.LocatedLeak
+		var pinned []string
+		var sources []string
+		for _, req := range reqs {
+			exact, unpinned, splitErr := splitRequirements(req, repoRoot)
+			if splitErr != nil {
+				for _, path := range cleanup {
+					_ = os.Remove(path)
+				}
+				return nil, splitErr
+			}
+			prefound = append(prefound, unpinned...)
+			if len(exact) == 0 {
+				continue
+			}
+			temp, writeErr := writePinnedRequirements(exact)
+			if writeErr != nil {
+				for _, path := range cleanup {
+					_ = os.Remove(path)
+				}
+				return nil, writeErr
+			}
+			cleanup = append(cleanup, temp)
+			pinned = append(pinned, temp)
+			sources = append(sources, requirementSource(req, repoRoot))
+		}
+		if len(pinned) == 0 && project == "" {
+			return &Invocation{Prefound: prefound, Cleanup: cleanup}, nil
+		}
+		if len(pinned) > 0 {
 			arguments = append(arguments, dropFlags(catalogArgs, "--strict")...)
 			if !hasArg(arguments, "--format") && !hasArg(arguments, "-f") {
 				arguments = append(arguments, "--format", "json")
 			}
-			for _, req := range reqs {
+			for _, req := range pinned {
 				arguments = append(arguments, "-r", req)
 			}
 		} else {
@@ -215,10 +248,12 @@ func BuildInvocation(
 				arguments = append(arguments, "--format", "json")
 			}
 			arguments = append(arguments, project)
+			sources = []string{requirementSource(project, repoRoot)}
 		}
 		if isPyRuntime {
 			arguments = append([]string{"-m", "pip_audit"}, arguments...)
 		}
+		return &Invocation{Executable: executable, Arguments: arguments, Cleanup: cleanup, Prefound: prefound, Sources: sources}, nil
 
 	case "terraform", "tofu", "terragrunt":
 		arguments = append(arguments, catalogArgs...)
@@ -228,11 +263,11 @@ func BuildInvocation(
 		arguments = append(arguments, "--format", "json")
 
 	case "shellcheck":
-		var shFiles []string
-		for _, f := range filesInRoot {
-			if strings.EqualFold(filepath.Ext(f), ".sh") {
-				shFiles = append(shFiles, f)
-			}
+		shFiles, skip := exclusiveFiles(filesInRoot, repoRoot, ctrl.ExcludeRoots, func(file string) bool {
+			return strings.EqualFold(filepath.Ext(file), ".sh")
+		})
+		if skip {
+			return nil, coveredByNestedRoot()
 		}
 		if len(shFiles) == 0 {
 			return nil, errors.New("aucun script Shell pour ShellCheck")
@@ -241,11 +276,9 @@ func BuildInvocation(
 		return invocationWithFiles(executable, prefix, shFiles), nil
 
 	case "hadolint":
-		var containerFiles []string
-		for _, f := range filesInRoot {
-			if discovery.IsContainerFile(f) {
-				containerFiles = append(containerFiles, f)
-			}
+		containerFiles, skip := exclusiveFiles(filesInRoot, repoRoot, ctrl.ExcludeRoots, discovery.IsContainerFile)
+		if skip {
+			return nil, coveredByNestedRoot()
 		}
 		if len(containerFiles) == 0 {
 			return nil, errors.New("validation Compose non implementee par Hadolint")
@@ -383,8 +416,11 @@ func BuildInvocation(
 			"--skip-dirs", "node_modules",
 			"--skip-dirs", "vendor",
 			"--format", "json",
-			root,
 		}
+		for _, nested := range ctrl.ExcludeRoots {
+			arguments = append(arguments, "--skip-dirs", filepath.Join(canonicalOr(repoRoot), filepath.FromSlash(normalizePlanRoot(nested))))
+		}
+		arguments = append(arguments, root)
 
 	case "Invoke-ScriptAnalyzer":
 		if len(filesInRoot) == 0 {
@@ -534,6 +570,179 @@ func dropFlags(args []string, names ...string) []string {
 		if !drop[arg] {
 			out = append(out, arg)
 		}
+	}
+	return out
+}
+
+func coveredByNestedRoot() error {
+	return &ControlSkip{
+		Code:    "not_applicable",
+		Message: "Les fichiers de cette racine sont déjà couverts par une sous-racine du même outil.",
+	}
+}
+
+func exclusiveFiles(files []string, repo string, nested []string, keep func(string) bool) ([]string, bool) {
+	var matched []string
+	for _, file := range files {
+		if keep(file) {
+			matched = append(matched, file)
+		}
+	}
+	kept := omitNestedFiles(matched, repo, nested)
+	return kept, len(matched) > 0 && len(kept) == 0
+}
+
+func omitNestedFiles(files []string, repo string, nested []string) []string {
+	if len(nested) == 0 {
+		return files
+	}
+	kept := make([]string, 0, len(files))
+	for _, file := range files {
+		if !fileInNestedRoot(file, repo, nested) {
+			kept = append(kept, file)
+		}
+	}
+	return kept
+}
+
+func fileInNestedRoot(file, repo string, nested []string) bool {
+	repo = canonicalOr(repo)
+	file = canonicalOr(file)
+	rel, err := filepath.Rel(repo, file)
+	if err != nil {
+		rel = file
+	}
+	rel = strings.ToLower(filepath.ToSlash(rel))
+	for _, root := range nested {
+		root = strings.ToLower(normalizePlanRoot(root))
+		if root == "." {
+			continue
+		}
+		if rel == root || strings.HasPrefix(rel, root+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func ignoreNestedArgs(repo string, nested []string) []string {
+	repo = canonicalOr(repo)
+	var args []string
+	for _, root := range nested {
+		if normalizePlanRoot(root) == "." {
+			continue
+		}
+		args = append(args, "--ignore", filepath.Join(repo, filepath.FromSlash(normalizePlanRoot(root))))
+	}
+	return args
+}
+
+func canonicalOr(path string) string {
+	if resolved, err := osutil.CanonicalPath(path); err == nil && resolved != "" {
+		return resolved
+	}
+	return path
+}
+
+func splitRequirements(path, repo string) ([]string, []report.LocatedLeak, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	rel := requirementSource(path, repo)
+	var exact []string
+	var leaks []report.LocatedLeak
+	for number, line := range strings.Split(strings.ReplaceAll(string(body), "\r\n", "\n"), "\n") {
+		name, pinned, ok := classifyRequirement(line)
+		if !ok {
+			continue
+		}
+		if pinned {
+			exact = append(exact, strings.TrimSpace(stripRequirementComment(line)))
+			continue
+		}
+		leaks = append(leaks, report.LocatedLeak{
+			File: rel, Line: number + 1, Column: 1,
+			RuleID: "non-épinglée", Description: name + " n'a pas de version exacte.", Severity: "medium",
+		})
+	}
+	return exact, leaks, nil
+}
+
+func requirementSource(path, repo string) string {
+	return relativeToRepo(canonicalOr(repo), canonicalOr(path))
+}
+
+func pipAuditResolutionReason(output string) string {
+	patterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)could not find a version that satisfies the requirement[^\n]{0,180}`),
+		regexp.MustCompile(`(?i)no matching distribution found for[^\n]{0,180}`),
+		regexp.MustCompile(`(?i)failed to (?:install|resolve)[^\n]{0,180}`),
+		regexp.MustCompile(`(?i)resolution impossible[^\n]{0,180}`),
+	}
+	for _, pattern := range patterns {
+		if match := strings.TrimSpace(pattern.FindString(output)); match != "" {
+			return strings.Trim(match, " \t:.")
+		}
+	}
+	return ""
+}
+
+func stripRequirementComment(line string) string {
+	if index := strings.Index(line, " #"); index >= 0 {
+		return line[:index]
+	}
+	return line
+}
+
+func classifyRequirement(line string) (string, bool, bool) {
+	raw := strings.TrimSpace(stripRequirementComment(line))
+	if raw == "" || strings.HasPrefix(raw, "#") || strings.HasPrefix(raw, "-") {
+		return "", false, false
+	}
+	if index := strings.Index(raw, ";"); index >= 0 {
+		raw = strings.TrimSpace(raw[:index])
+	}
+	name := raw
+	for _, separator := range []string{"===", "==", ">=", "<=", "~=", "!=", ">", "<", "["} {
+		if index := strings.Index(raw, separator); index > 0 {
+			name = strings.TrimSpace(raw[:index])
+			break
+		}
+	}
+	if name == "" {
+		return "", false, false
+	}
+	return name, strings.Contains(raw, "=="), true
+}
+
+func writePinnedRequirements(lines []string) (string, error) {
+	file, err := os.CreateTemp("", "compliance-requirements-*.txt")
+	if err != nil {
+		return "", err
+	}
+	if _, err := file.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(file.Name())
+		return "", err
+	}
+	return file.Name(), nil
+}
+
+func dedupeLeaks(leaks []report.LocatedLeak) []report.LocatedLeak {
+	seen := map[string]bool{}
+	out := make([]report.LocatedLeak, 0, len(leaks))
+	for _, leak := range leaks {
+		key := leak.File + "\x00" + strconv.Itoa(leak.Line) + "\x00" + leak.RuleID + "\x00" + leak.Description
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, leak)
 	}
 	return out
 }
@@ -1231,6 +1440,21 @@ func ExecuteCompliancePlan(
 							Message:  "Budget du controle depasse avant execution.",
 							Critical: res.Critical,
 						})
+					} else if inv.Executable == "" {
+						res.Leaks = anchorLeaks(dedupeLeaks(inv.Prefound), plan.Repository, execRoot)
+						code := 0
+						if len(res.Leaks) > 0 {
+							code = 1
+							res.Status = "fail"
+							res.Diagnostics = append(res.Diagnostics, report.Diagnostic{
+								Code:     "unpinned_requirements",
+								Message:  fmt.Sprintf("%d dépendance(s) sans version exacte. Le fichier et la ligne sont dans le contrôle.", len(res.Leaks)),
+								Critical: false,
+							})
+						} else {
+							res.Status = "success"
+						}
+						res.ExitCode = &code
 					} else {
 						if res.ToolVersion == nil && ctrl.Tool != nil && ctrl.Tool.Command != "" {
 							ver, verErr := ProbeToolVersion(ctx, inv.Executable, ctrl.Tool.Command, execRoot, 5*time.Second)
@@ -1333,6 +1557,18 @@ func ExecuteCompliancePlan(
 								}
 								res.Leaks = append(res.Leaks, parseToolFindings(ctrl.Tool.Command, parsed, plan.Repository)...)
 							}
+							res.Leaks = append(res.Leaks, inv.Prefound...)
+							if ctrl.Tool != nil && ctrl.Tool.Command == "pip-audit" && exitCode != 0 {
+								if reason := pipAuditResolutionReason(stdout + "\n" + stderr); reason != "" {
+									for _, file := range inv.Sources {
+										res.Leaks = append(res.Leaks, report.LocatedLeak{
+											File: file, Line: 1, Column: 1,
+											RuleID: "résolution", Description: reason, Severity: "medium",
+										})
+									}
+								}
+							}
+							res.Leaks = dedupeLeaks(res.Leaks)
 							res.Leaks = anchorLeaks(res.Leaks, plan.Repository, execRoot)
 
 							if res.OutputTruncated {

@@ -83,3 +83,15 @@ func TestAmbiguousAndAlternativeStayOutsideApplicableScope(t *testing.T) {
 		t.Fatalf("applicable=%d executed=%d", report.Coverage.ApplicableControls, report.Coverage.ExecutedControls)
 	}
 }
+
+func TestFailVerdictDoesNotRepeatTheGenericSentence(t *testing.T) {
+	exit := 1
+	_, _, reasons := ComputeVerdict([]ExecutionResult{
+		{Status: "fail", ExitCode: &exit},
+	})
+	for _, reason := range reasons {
+		if strings.Contains(strings.ToLower(reason), "controle de conformite echoue") || strings.Contains(reason, "Au moins un controle") {
+			t.Fatalf("redundant reason %q", reason)
+		}
+	}
+}

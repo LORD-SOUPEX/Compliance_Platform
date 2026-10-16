@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.20
+
+- **Racines imbriquées** : pour `hadolint`, `trivy`, `shellcheck`, `ruff`, `pylint`, `bandit` et `pytest`, la racine parente n'audite plus les fichiers déjà couverts par une sous-racine planifiée du même outil. Un même fichier n'est plus compté deux fois.
+- **pip-audit** : chaque dépendance sans version exacte est une anomalie avec le fichier `requirements*.txt` et la ligne. L'outil n'est lancé que sur les lignes épinglées. Une erreur de résolution nomme le fichier concerné.
+- **Verdict** : la phrase sans accent « Au moins un controle de conformite echoue. » n'est plus répétée à côté de la raison déjà affichée.
+
 ## 2.0.19
 
 - **Compteurs du rapport** : Applicables ne compte plus un contrôle écarté (`ambiguous`, alternative non retenue, non applicable, technologie absente, plateforme non prise en charge, réglage local). Le bandeau et la section Indisponibles utilisent le même nombre. Les sections Lacunes de couverture et Indisponibles listent les raisons dédoublonnées et disparaissent quand elles valent 0.

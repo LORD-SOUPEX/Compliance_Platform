@@ -123,7 +123,7 @@ func TestBatchedAndStructuredFindings(t *testing.T) {
 		t.Fatalf("truncated pylint = %+v", truncated)
 	}
 	unpinned := parseToolFindings("pip-audit", "ERROR:pip_audit._cli:requirement cmakelint is not pinned: cmakelint (from RequirementLine(line_number=2, line='cmakelint', filename=WindowsPath('M:/Git/content/requirements.txt')))\n", `M:\Git\content`)
-	if len(unpinned) != 1 || unpinned[0].Line != 2 || unpinned[0].RuleID != "unpinned" || !strings.Contains(unpinned[0].File, "requirements.txt") {
+	if len(unpinned) != 1 || unpinned[0].Line != 2 || unpinned[0].RuleID != "non-épinglée" || !strings.Contains(unpinned[0].Description, "cmakelint") || !strings.Contains(unpinned[0].File, "requirements.txt") {
 		t.Fatalf("pip-audit unpinned = %+v", unpinned)
 	}
 	collected := parseToolFindings("pytest", "INTERNALERROR>   File \"M:\\Git\\content\\utils\\nist_sync\\test_gemara_export.py\", line 23, in <module>\nINTERNALERROR>     from ruamel.yaml import YAML\nINTERNALERROR> ModuleNotFoundError: No module named 'ruamel'\n", `M:\Git\content`)
@@ -381,9 +381,110 @@ func TestPipAuditSkipsRootWithoutDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		for _, path := range inv.Cleanup {
+			_ = os.Remove(path)
+		}
+	}()
 	joined := strings.Join(inv.Arguments, " ")
-	if strings.Contains(joined, "--strict") || !strings.Contains(joined, "--no-deps") || !strings.Contains(joined, "requirements-dev.txt") || !strings.Contains(joined, "requirements.txt") {
-		t.Fatalf("requirements args = %v", inv.Arguments)
+	if strings.Contains(joined, "--strict") || !strings.Contains(joined, "--no-deps") || len(inv.Prefound) != 0 || len(inv.Cleanup) != 2 {
+		t.Fatalf("pinned args = %v prefound=%d", inv.Arguments, len(inv.Prefound))
+	}
+}
+
+func TestPipAuditListsEveryUnpinnedRequirement(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "python.exe")
+	body := "-r requirements-base.txt\ncmakelint\n# comment\nruamel.yaml>=0.18.0\nrequests==2.32.3\n"
+	if err := os.WriteFile(filepath.Join(dir, "requirements.txt"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := BuildInvocation(&PlannedControl{
+		Tool:       &matrix.CandidateToolState{Command: "pip-audit", Source: &source, RuntimeManaged: true},
+		Parameters: map[string]interface{}{"arguments": []interface{}{"--no-deps", "--disable-pip", "--strict"}},
+		Root:       dir,
+	}, dir, dir, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		for _, path := range inv.Cleanup {
+			_ = os.Remove(path)
+		}
+	}()
+	if len(inv.Prefound) != 2 || inv.Prefound[0].File != "requirements.txt" || inv.Prefound[0].Line != 2 || !strings.Contains(inv.Prefound[0].Description, "cmakelint") || inv.Prefound[1].Line != 4 || !strings.Contains(inv.Prefound[1].Description, "ruamel.yaml") {
+		t.Fatalf("unpinned = %+v", inv.Prefound)
+	}
+	joined := strings.Join(inv.Arguments, " ")
+	if strings.Contains(joined, "--strict") || !strings.Contains(joined, "--no-deps") || len(inv.Cleanup) != 1 || len(inv.Sources) != 1 || inv.Sources[0] != "requirements.txt" {
+		t.Fatalf("exact pin should still be audited: %v sources=%v", inv.Arguments, inv.Sources)
+	}
+	reason := pipAuditResolutionReason("ERROR: Could not find a version that satisfies the requirement privatepkg==1.2.3 (from versions: none)\n")
+	if !strings.Contains(reason, "privatepkg==1.2.3") {
+		t.Fatalf("resolution reason = %q", reason)
+	}
+}
+
+func TestPipAuditDoesNotSpawnWhenNothingIsPinned(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "python.exe")
+	if err := os.WriteFile(filepath.Join(dir, "requirements.txt"), []byte("pyyaml\nJinja2\nsetuptools\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := BuildInvocation(&PlannedControl{
+		Tool:       &matrix.CandidateToolState{Command: "pip-audit", Source: &source, RuntimeManaged: true},
+		Parameters: map[string]interface{}{"arguments": []interface{}{"--no-deps", "--disable-pip", "--strict"}},
+		Root:       dir,
+	}, dir, dir, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv.Executable != "" || len(inv.Prefound) != 3 || inv.Prefound[0].File != "requirements.txt" || inv.Prefound[0].Line != 1 || inv.Prefound[1].Line != 2 || !strings.Contains(inv.Prefound[2].Description, "setuptools") {
+		t.Fatalf("unpinned only = exe %q leaks %+v", inv.Executable, inv.Prefound)
+	}
+}
+
+func TestParentRootOmitsFilesOwnedByNestedRoot(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "Dockerfiles"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".gitpod.Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfiles", "app.Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(dir, "hadolint.exe")
+	parent, err := BuildInvocation(&PlannedControl{
+		Tool:         &matrix.CandidateToolState{Command: "hadolint", Source: &source},
+		ExcludeRoots: []string{"Dockerfiles"},
+		Root:         ".",
+	}, dir, dir, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(parent.Arguments, " ")
+	if !strings.Contains(joined, ".gitpod.Dockerfile") || strings.Contains(joined, "app.Dockerfile") {
+		t.Fatalf("parent files = %v", parent.Arguments)
+	}
+	child, err := BuildInvocation(&PlannedControl{
+		Tool: &matrix.CandidateToolState{Command: "hadolint", Source: &source},
+		Root: "Dockerfiles",
+	}, filepath.Join(dir, "Dockerfiles"), dir, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(child.Arguments, " "), "app.Dockerfile") {
+		t.Fatalf("child files = %v", child.Arguments)
+	}
+	controls := []*PlannedControl{
+		{Technology: "docker", Applicability: "applicable", Root: ".", Tool: &matrix.CandidateToolState{Command: "hadolint"}},
+		{Technology: "docker", Applicability: "applicable", Root: "Dockerfiles", Tool: &matrix.CandidateToolState{Command: "hadolint"}},
+	}
+	assignNestedExclusions(controls)
+	if len(controls[0].ExcludeRoots) != 1 || controls[0].ExcludeRoots[0] != "Dockerfiles" || len(controls[1].ExcludeRoots) != 0 {
+		t.Fatalf("excludes = %#v %#v", controls[0].ExcludeRoots, controls[1].ExcludeRoots)
 	}
 }
 
