@@ -38,6 +38,9 @@ VSIX_MANIFEST_TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
     <DisplayName>{display_name}</DisplayName>
     <Description xml:space="preserve">{description}</Description>
     <Categories>{categories}</Categories>
+    <GalleryFlags>Public</GalleryFlags>
+    <Tags>{tags}</Tags>
+    <Icon>extension/media/icon.png</Icon>
     <Properties>
       <Property Id="Microsoft.VisualStudio.Code.Engine" Value="{engine}" />
       <Property Id="Microsoft.VisualStudio.Code.ExtensionDependencies" Value="" />
@@ -54,6 +57,7 @@ VSIX_MANIFEST_TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
     <Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true"/>
     <Asset Type="Microsoft.VisualStudio.Services.Content.Details" Path="extension/README.md" Addressable="true"/>
     <Asset Type="Microsoft.VisualStudio.Services.Content.License" Path="extension/LICENSE" Addressable="true"/>
+    <Asset Type="Microsoft.VisualStudio.Services.Icons.Default" Path="extension/media/icon.png" Addressable="true"/>
   </Assets>
 </PackageManifest>
 """
@@ -327,7 +331,7 @@ def package_vsix(target_platform=None):
     with open(package_json_path, "r", encoding="utf-8") as f:
         pkg = json.load(f)
 
-    name = pkg.get("name", "compliance-local-pipelines")
+    name = pkg.get("name", "compliance-pipelines")
     version = pkg.get("version", "0.1.0")
     publisher = pkg.get("publisher", "compliance-platform")
     display_name = html.escape(pkg.get("displayName", name), quote=False)
@@ -336,6 +340,7 @@ def package_vsix(target_platform=None):
     categories = html.escape(
         ", ".join(pkg.get("categories") or ["Linters"]), quote=False
     )
+    tags = html.escape(", ".join(pkg.get("keywords") or []), quote=False)
     publisher = html.escape(publisher, quote=False)
     name = html.escape(name, quote=False)
     version = html.escape(version, quote=False)
@@ -345,6 +350,7 @@ def package_vsix(target_platform=None):
         display_name=display_name,
         description=description,
         categories=categories,
+        tags=tags,
         engine=engine,
     )
 
@@ -466,6 +472,10 @@ def validate_marketplace_vsix(vsix_path: Path, package_json_path: Path) -> None:
             manifest_xml = archive.read("extension.vsixmanifest")
         except KeyError as exc:
             raise RuntimeError("extension.vsixmanifest absent du VSIX.") from exc
+        if b"<GalleryFlags>Public</GalleryFlags>" not in manifest_xml:
+            raise RuntimeError(
+                "GalleryFlags Public absent : le Marketplace classerait le paquet hors extension VS Code publique."
+            )
         if (
             b'TargetPlatform="universal"' in manifest_xml
             or b"TargetPlatform='universal'" in manifest_xml

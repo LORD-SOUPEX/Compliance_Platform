@@ -1,6 +1,6 @@
 # Développement
 
-Version courante : 2.1.0. Le fonctionnement du moteur, du registre et des compteurs est dans [architecture](architecture.md).
+Version courante : 2.1.3. Le fonctionnement du moteur, du registre et des compteurs est dans [architecture](architecture.md).
 
 ## Validation
 
@@ -23,7 +23,7 @@ compliance selftest
 
 Go utilisé par les scripts de l'extension : `.tools/go/bin/go`. Python : `py -3` sur Windows.
 
-`npm test` compile le TypeScript, compare la version du moteur à `package.json`, relance une partie des tests Go, vérifie le VSIX et exécute `compliance selftest`. `npm run package` produit `dist/compliance-local-pipelines-<version>.vsix`.
+`npm test` compile le TypeScript, compare la version du moteur à `package.json`, relance une partie des tests Go, vérifie le VSIX et exécute `compliance selftest`. `npm run package` produit `dist/compliance-pipelines-<version>.vsix`.
 
 ## Registre `tools-v1`
 
@@ -57,7 +57,7 @@ Le détail des paquets et de l'ordre de résolution est dans [architecture](arch
 
 ```bash
 cd vscode-extension
-npm run reinstall -- dist/compliance-local-pipelines-2.1.0.vsix
+npm run reinstall -- dist/compliance-pipelines-2.1.3.vsix
 ```
 
 La commande arrête le démon, retire l'extension précédente et installe le VSIX. Les sessions restent dans le dossier utilisateur.

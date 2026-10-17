@@ -303,6 +303,18 @@ def build_native_tool(tool_name: str, platform: str, cfg: dict) -> tuple[str, st
     return out_archive_name, arc_sha, inner_bin, bin_sha
 
 
+def assert_bundle_path_budget(root: Path) -> None:
+    """Reject a Python bundle whose longest path cannot be extracted."""
+    longest = ""
+    for dirpath, _, files in os.walk(root):
+        for name in files:
+            full = str(Path(dirpath) / name)
+            if len(full) > len(longest):
+                longest = full
+    if len(longest) > 32000:
+        raise RuntimeError(f"chemin du bundle trop long ({len(longest)}): {longest}")
+
+
 def build_python_bundle_windows() -> tuple[str, str, str]:
     out_name = f"windows-x64-python-tools-{LOCK['python']['cpython']}.tar.gz"
     out_path = DIST_DIR / out_name
@@ -320,6 +332,7 @@ def build_python_bundle_windows() -> tuple[str, str, str]:
                 encoding="utf-8",
             )
 
+    assert_bundle_path_budget(src_python)
     print("  [BUNDLE] Building relocatable Python bundle for windows-x64...")
     DIST_DIR.mkdir(parents=True, exist_ok=True)
     with tarfile.open(out_path, "w:gz") as tf:

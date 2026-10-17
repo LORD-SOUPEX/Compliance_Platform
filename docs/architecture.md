@@ -1,6 +1,6 @@
 # Architecture
 
-Version courante : 2.1.0. Le nombre de contrôles est celui de `.config/control-catalog.json`, repris dans le tableau `catalog-controls` des README. Le guide d'usage est le [README](../README.md). La construction, la signature et le VSIX sont dans [développement](developpement.md).
+Version courante : 2.1.3. Le nombre de contrôles est celui de `.config/control-catalog.json`, repris dans le tableau `catalog-controls` des README. Le guide d'usage est le [README](../README.md). La construction, la signature et le VSIX sont dans [développement](developpement.md).
 
 ## Parcours
 
@@ -37,7 +37,7 @@ Le moteur reçoit un dossier local. Il ne demande ni compte de forge ni réseau 
 1. `eslint` et `tsc` : `node_modules/.bin` de la cible, sinon `~/.compliance/tools/node`.
 2. Les autres outils : `.tools/bin` du dépôt de développement, puis `~/.compliance/tools/{bin,python,node,powershell-modules}`, puis `PATH`.
 
-Les outils Python du registre passent par `python -m`, pas par un shebang figé. Sur Windows, `ansible` et `ansible-lint` sont incompatibles avant cette recherche : `yamllint` couvre les playbooks. Une longue liste de fichiers est découpée sous 24 000 caractères.
+Les outils Python du registre passent par `python -m`, pas par un shebang figé. Checkov est qualifié par un import court (`python -c`), pas par le CLI, avec un délai de 60 secondes et un interpréteur isolé (`PYTHONNOUSERSITE`, `PYTHONPATH` vide). Trivy est qualifié avec un cache local et sans vérification de version en ligne. Un échec ou un délai de sonde est `probe_failed` : le rapport le montre et ne propose pas de le réinstaller. Seul un binaire absent du disque reste « installable depuis le manifeste ». Sur Windows, `ansible` et `ansible-lint` sont incompatibles avant cette recherche : `yamllint` couvre les playbooks. Une longue liste de fichiers est découpée sous 24 000 caractères. L'extraction d'une archive utilise les chemins étendus Windows quand le chemin dépasse 248 caractères.
 
 Le registre est la release GitHub `tools-v1` (`https://github.com/LORD-SOUPEX/Compliance_Platform/releases/tag/tools-v1`). Les assets sont à plat : `<plateforme>-<outil>-<version>.<ext>`.
 
@@ -46,7 +46,7 @@ Le registre est la release GitHub `tools-v1` (`https://github.com/LORD-SOUPEX/Co
 - Bundle Node Windows x64 : Node 22.14.0, ESLint 9.21.0, TypeScript 5.7.3. Aucun `npm install`.
 - `PSScriptAnalyzer` 1.23.0 dans `~/.compliance/tools/powershell-modules`.
 
-L'URL du registre se change avec `compliance.registryUrl`, `-registry-url` ou `COMPLIANCE_REGISTRY_URL`. Le jeton passe par `compliance.registryToken` ou `COMPLIANCE_REGISTRY_TOKEN`, jamais en argument de ligne de commande. Une signature Ed25519 ou un SHA-256 différent produit un avertissement et n'empêche pas l'installation.
+L'URL du registre se change avec `compliance.registryUrl`, `-registry-url` ou `COMPLIANCE_REGISTRY_URL`. Le jeton passe par `compliance.registryToken` ou `COMPLIANCE_REGISTRY_TOKEN`, jamais en argument de ligne de commande. Une signature Ed25519 absente ou différente produit un avertissement et n'empêche pas l'installation. Une somme SHA-256 d'archive ou de binaire différente refuse l'outil. Le bundle d'autorité de certification d'entreprise est lu depuis `COMPLIANCE_CA_BUNDLE`, `SSL_CERT_FILE`, un fichier local, puis le magasin Windows, et il est transmis aux sondes, aux contrôles et aux téléchargements. Les variables `HTTPS_PROXY` et `HTTP_PROXY` du processus sont conservées.
 
 Au démarrage, le démon interroge `<registry_base_url>/runtime-manifest.json` et `<registry_base_url>/control-catalog.json` pendant au plus 3 secondes. Si le manifeste distant annonce une version d'outil plus haute, un `catalog_revision` plus grand, ou un outil nouveau, les deux fichiers sont écrits dans `~/.compliance/registry-cache/`. Un outil déjà installé dans `~/.compliance/tools/` est alors remplacé par cette version. Hors ligne, le démon utilise ce cache, puis les fichiers embarqués dans le binaire. La version du `.vsix` ne change pas.
 
@@ -54,7 +54,7 @@ Au démarrage, le démon interroge `<registry_base_url>/runtime-manifest.json` e
 
 Un contrôle écarté n'entre pas dans **Applicables**. Les codes hors périmètre sont `technology_absent`, `not_applicable`, `platform_unsupported`, `alternative_not_selected`, `ambiguous` et `user_disabled`.
 
-**Applicables** = contrôles exécutés (réussi, échec, erreur) + contrôles indisponibles. **Indisponibles** reprend exactement ces contrôles qui devaient tourner et ne l'ont pas fait (`tool_unavailable`, `capability_unavailable`, `repository_unconfigured`, `platform_unavailable`, `permission_denied`, et les autres codes qui restent dans le périmètre). Le bandeau et la section du bas utilisent ce même compte. La section liste les raisons dédoublonnées par technologie, outil et message, avec le nombre de racines quand il y en a plusieurs. Elle est absente quand le compte est 0.
+**Applicables** = contrôles exécutés (réussi, échec, erreur) + contrôles indisponibles. **Indisponibles** reprend exactement ces contrôles qui devaient tourner et ne l'ont pas fait (`tool_unavailable`, `probe_failed`, `capability_unavailable`, `repository_unconfigured`, `platform_unavailable`, `permission_denied`, et les autres codes qui restent dans le périmètre). Le bouton d'installation ne retient que `tool_unavailable`. Le bandeau et la section du bas utilisent ce même compte. La section liste les raisons dédoublonnées par technologie, outil et message, avec le nombre de racines quand il y en a plusieurs. Elle est absente quand le compte est 0.
 
 **Lacunes de couverture** liste les technologies détectées dont un contrôle est indisponible, plus la note Vue lorsqu'elle s'applique. La liste est visible. La section est absente quand elle est vide. Un YAML Helm non confirmé (`ambiguous`) ou une alternative non retenue ne crée ni un applicable ni un indisponible.
 

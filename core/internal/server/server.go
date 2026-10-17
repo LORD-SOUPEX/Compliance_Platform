@@ -792,7 +792,7 @@ func mapPresentationStatus(res *report.ExecutionResult) string {
 	if len(res.Diagnostics) > 0 {
 		code := res.Diagnostics[0].Code
 		switch code {
-		case "capability_unavailable", "tool_unavailable":
+		case "capability_unavailable", "tool_unavailable", "probe_failed":
 			return "Blocked"
 		case "technology_absent", "not_applicable", "platform_unsupported", "alternative_not_selected":
 			return "Not applicable"
@@ -1543,7 +1543,7 @@ func ComputePresentations(rep map[string]interface{}) ([]PresentationItem, error
 				code, _ := firstDiag["code"].(string)
 				msg, _ := firstDiag["message"].(string)
 				switch code {
-				case "capability_unavailable", "tool_unavailable", "repository_unconfigured", "platform_unavailable", "dependency_failed":
+				case "capability_unavailable", "tool_unavailable", "probe_failed", "repository_unconfigured", "platform_unavailable", "dependency_failed":
 					presStatus = "Blocked"
 				case "user_disabled", "ambiguous":
 					presStatus = "Not applicable"
@@ -1630,7 +1630,7 @@ func ComputePresentations(rep map[string]interface{}) ([]PresentationItem, error
 			status = "Pending"
 		} else if code == "permission_denied" {
 			status = "Skipped"
-		} else if applicability == "ambiguous" || applicability == "capability_unavailable" || applicability == "tool_unavailable" || applicability == "repository_unconfigured" {
+		} else if applicability == "ambiguous" || applicability == "capability_unavailable" || applicability == "tool_unavailable" || applicability == "probe_failed" || applicability == "repository_unconfigured" {
 			status = "Blocked"
 		} else {
 			status = "Not applicable"

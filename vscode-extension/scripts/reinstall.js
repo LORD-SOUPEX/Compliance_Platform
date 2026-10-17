@@ -10,12 +10,12 @@ if (!vsix || !fs.existsSync(vsix)) {
 }
 require('./uninstall.js');
 const code = process.env.VSCODE_CLI || 'code';
-const id = 'compliance-platform.compliance-local-pipelines';
+const id = 'compliance-platform.compliance-pipelines';
 spawnSync(code, ['--uninstall-extension', id], { stdio: 'inherit' });
 const extensions = path.join(process.env.USERPROFILE || os.homedir(), '.vscode', 'extensions');
 if (fs.existsSync(extensions)) {
     for (const name of fs.readdirSync(extensions)) {
-        if (/^compliance-platform\.compliance-local-pipelines/i.test(name)) {
+        if (/^compliance-platform\.compliance-pipelines/i.test(name)) {
             fs.rmSync(path.join(extensions, name), { recursive: true, force: true });
         }
     }

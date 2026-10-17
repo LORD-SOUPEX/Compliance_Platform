@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -15,6 +16,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"compliance/internal/osutil"
 
 	"github.com/ulikunitz/xz"
 )
@@ -68,6 +71,13 @@ func installEntry(cacheDir, platform, key string, tool ToolEntry, tools map[stri
 }
 
 func installBundle(cacheDir, platform, key string, tool ToolEntry, client *http.Client, opts SyncOptions, registryBase string) (string, error) {
+	if needsQualification(key, tool) {
+		if existing := resolvedBundlePath(cacheDir, platform, key, tool); existing != "" {
+			if err := qualifyExtracted(key, tool, existing); err == nil {
+				return existing, nil
+			}
+		}
+	}
 	archiveURL := tool.resolveURL(registryBase)
 	body, err := loadArchive(key, archiveURL, client, opts)
 	if err != nil {
@@ -75,7 +85,7 @@ func installBundle(cacheDir, platform, key string, tool ToolEntry, client *http.
 	}
 	actualSHA := fmt.Sprintf("%x", sha256.Sum256(body))
 	if tool.ArchiveSHA256 != "" && !strings.EqualFold(actualSHA, tool.ArchiveSHA256) {
-		fmt.Fprintf(os.Stderr, "[WARN] Somme SHA-256 divergente pour l'archive de %s (obtenu: %s, attendu: %s). Installation maintenue sans blocage.\n", key, actualSHA, tool.ArchiveSHA256)
+		return "", fmt.Errorf("%w pour %s (obtenu: %s, attendu: %s)", ErrArchiveHashMismatch, key, actualSHA, tool.ArchiveSHA256)
 	}
 	if err := extractTree(body, archiveURL, cacheDir); err != nil {
 		return "", fmt.Errorf("extraction du bundle pour %s: %w", key, err)
@@ -84,10 +94,20 @@ func installBundle(cacheDir, platform, key string, tool ToolEntry, client *http.
 	if dest != "" && runtime.GOOS != "windows" && !strings.HasSuffix(dest, ".psd1") {
 		_ = os.Chmod(dest, 0755)
 	}
+	if err := qualifyExtracted(key, tool, dest); err != nil {
+		return "", err
+	}
 	return dest, nil
 }
 
 func installBinary(cacheDir, platform, key string, tool ToolEntry, client *http.Client, opts SyncOptions, registryBase string) (string, error) {
+	binDir := filepath.Join(cacheDir, "bin", platform)
+	dest := filepath.Join(binDir, executableFileName(key, tool))
+	if needsQualification(key, tool) && executablePresent(dest) {
+		if err := qualifyExtracted(key, tool, dest); err == nil {
+			return dest, nil
+		}
+	}
 	archiveURL := tool.resolveURL(registryBase)
 	body, err := loadArchive(key, archiveURL, client, opts)
 	if err != nil {
@@ -95,7 +115,7 @@ func installBinary(cacheDir, platform, key string, tool ToolEntry, client *http.
 	}
 	actualSHA := fmt.Sprintf("%x", sha256.Sum256(body))
 	if tool.ArchiveSHA256 != "" && !strings.EqualFold(actualSHA, tool.ArchiveSHA256) {
-		fmt.Fprintf(os.Stderr, "[WARN] Somme SHA-256 divergente pour l'archive de %s (obtenu: %s, attendu: %s). Installation maintenue sans blocage.\n", key, actualSHA, tool.ArchiveSHA256)
+		return "", fmt.Errorf("%w pour %s (obtenu: %s, attendu: %s)", ErrArchiveHashMismatch, key, actualSHA, tool.ArchiveSHA256)
 	}
 	binBytes, err := extractBinary(body, tool.BinaryInArchive, archiveURL)
 	if err != nil {
@@ -104,17 +124,21 @@ func installBinary(cacheDir, platform, key string, tool ToolEntry, client *http.
 	if tool.BinarySHA256 != "" {
 		actualBinSHA := fmt.Sprintf("%x", sha256.Sum256(binBytes))
 		if !strings.EqualFold(actualBinSHA, tool.BinarySHA256) {
-			fmt.Fprintf(os.Stderr, "[WARN] Somme SHA-256 divergente pour le binaire de %s (obtenu: %s, attendu: %s). Installation maintenue sans blocage.\n", key, actualBinSHA, tool.BinarySHA256)
+			return "", fmt.Errorf("%w pour %s (obtenu: %s, attendu: %s)", ErrBinaryHashMismatch, key, actualBinSHA, tool.BinarySHA256)
 		}
 	}
-	binDir := filepath.Join(cacheDir, "bin", platform)
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		return "", err
 	}
-	dest := filepath.Join(binDir, executableFileName(key, tool))
 	tempPath := fmt.Sprintf("%s.tmp.%d", dest, time.Now().UnixNano())
 	if err := os.WriteFile(tempPath, binBytes, 0755); err != nil {
 		return "", fmt.Errorf("écriture temporaire de l'exécutable %s: %w", tempPath, err)
+	}
+	if needsQualification(key, tool) {
+		if err := qualifyExtracted(key, tool, tempPath); err != nil {
+			_ = os.Remove(tempPath)
+			return "", err
+		}
 	}
 	if err := os.Rename(tempPath, dest); err != nil {
 		_ = os.Remove(tempPath)
@@ -124,6 +148,47 @@ func installBinary(cacheDir, platform, key string, tool ToolEntry, client *http.
 		return "", fmt.Errorf("permission d'exécution sur %s: %w", dest, err)
 	}
 	return dest, nil
+}
+
+func needsQualification(key string, tool ToolEntry) bool {
+	return key == "checkov" || tool.PythonModule == "checkov.main" || key == "trivy" || strings.EqualFold(tool.Name, "trivy")
+}
+
+func qualifyExtracted(key string, tool ToolEntry, dest string) error {
+	if !needsQualification(key, tool) {
+		return nil
+	}
+	if dest == "" {
+		return fmt.Errorf("outil %s extrait sans exécutable à qualifier", key)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), osutil.ProbeTimeoutFor(key))
+	defer cancel()
+	var err error
+	switch {
+	case key == "checkov" || tool.PythonModule == "checkov.main":
+		err = osutil.QualifyCheckov(ctx, dest)
+	default:
+		err = osutil.QualifyTrivy(ctx, dest)
+	}
+	if err != nil {
+		return fmt.Errorf("qualification de %s après installation: %w", key, err)
+	}
+	return nil
+}
+
+func materialize(path string) string {
+	if runtime.GOOS != "windows" || path == "" || strings.HasPrefix(path, `\\?\`) || strings.HasPrefix(path, `\\`) {
+		return path
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil || len(abs) < 248 {
+		return path
+	}
+	return `\\?\` + abs
+}
+
+func mkdirAll(path string, perm os.FileMode) error {
+	return os.MkdirAll(materialize(path), perm)
 }
 
 func resolvedBundlePath(cacheDir, platform, key string, tool ToolEntry) string {
@@ -297,12 +362,12 @@ func extractTree(body []byte, sourceURL, dest string) error {
 				return err
 			}
 			if file.FileInfo().IsDir() {
-				if err := os.MkdirAll(target, 0755); err != nil {
+				if err := mkdirAll(target, 0755); err != nil {
 					return err
 				}
 				continue
 			}
-			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			if err := mkdirAll(filepath.Dir(target), 0755); err != nil {
 				return err
 			}
 			rc, err := file.Open()
@@ -355,11 +420,11 @@ func extractTarTree(tr *tar.Reader, dest string) error {
 		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0755); err != nil {
+			if err := mkdirAll(target, 0755); err != nil {
 				return err
 			}
 		case tar.TypeReg, tar.TypeRegA:
-			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			if err := mkdirAll(filepath.Dir(target), 0755); err != nil {
 				return err
 			}
 			mode := os.FileMode(0644)
@@ -383,7 +448,7 @@ func extractTarTree(tr *tar.Reader, dest string) error {
 			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 				return fmt.Errorf("lien symbolique sortant du répertoire de destination interdit: %s -> %s", hdr.Name, hdr.Linkname)
 			}
-			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			if err := mkdirAll(filepath.Dir(target), 0755); err != nil {
 				return err
 			}
 			_ = os.Remove(target)
@@ -405,7 +470,7 @@ func extractTarTree(tr *tar.Reader, dest string) error {
 }
 
 func writeFile(path string, r io.Reader, mode os.FileMode) error {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	file, err := os.OpenFile(materialize(path), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
 	if err != nil {
 		return err
 	}
@@ -413,7 +478,7 @@ func writeFile(path string, r io.Reader, mode os.FileMode) error {
 	if _, err := io.Copy(file, r); err != nil {
 		return err
 	}
-	return os.Chmod(path, mode)
+	return os.Chmod(materialize(path), mode)
 }
 
 func safeJoin(dest, name string) (string, error) {

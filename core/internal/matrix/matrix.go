@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -18,6 +17,7 @@ import (
 	"time"
 
 	"compliance/internal/discovery"
+	"compliance/internal/distribution"
 	"compliance/internal/osutil"
 )
 
@@ -142,6 +142,7 @@ type CandidateToolResolver interface {
 // DefaultCandidateResolver resolves candidate tools across local bin, venv, and PATH.
 type DefaultCandidateResolver struct {
 	PlatformRoot string
+	CacheRoot    string
 	cache        sync.Map
 }
 
@@ -180,24 +181,23 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 			return st
 		}
 
-		probeArgs := []string{"--version"}
-		if command == "terraform" || command == "tofu" || command == "opentofu" {
-			probeArgs = []string{"version"}
+		probeArgs := distribution.VersionArgs(platform.ID, command)
+		if len(probeArgs) == 0 {
+			probeArgs = []string{"--version"}
+			if command == "terraform" || command == "tofu" || command == "opentofu" {
+				probeArgs = []string{"version"}
+			}
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		timeout := osutil.ProbeTimeoutFor(command)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-
-		exe, args := osutil.ScriptCommand(exePath, probeArgs)
-		var cmd *exec.Cmd
-		if strings.EqualFold(filepath.Ext(exe), ".cmd") || strings.EqualFold(filepath.Ext(exe), ".bat") {
-			cmd = exec.CommandContext(ctx, "cmd.exe", append([]string{"/c", exe}, args...)...)
-		} else {
-			cmd = exec.CommandContext(ctx, exe, args...)
-		}
-		osutil.SetHideWindow(cmd)
-		out, err := cmd.CombinedOutput()
+		started := time.Now()
+		stdout, stderr, err := osutil.ProbeQuiet(ctx, command, exePath, probeArgs)
 		if err != nil {
+			if ctx.Err() != nil {
+				err = fmt.Errorf("délai de sonde dépassé (%s)", timeout)
+			}
 			st := CandidateToolState{
 				Name:           name,
 				Command:        command,
@@ -206,13 +206,15 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 				Version:        nil,
 				RuntimeManaged: isVenv,
 				Platform:       platform.ID,
-				Reason:         fmt.Sprintf("Qualification d'execution impossible: %v (sortie: %s)", err, string(out)),
+				Reason:         osutil.FormatProbeFailure(exePath, err, stdout, stderr, time.Since(started)),
 			}
-			r.cache.Store(cacheKey, st)
+			if !transientProbeError(ctx, err) {
+				r.cache.Store(cacheKey, st)
+			}
 			return st
 		}
 
-		verMatch := reVersion.FindString(string(out))
+		verMatch := reVersion.FindString(stdout + " " + stderr)
 		var ver *string
 		if verMatch != "" {
 			ver = &verMatch
@@ -241,30 +243,51 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 		return st
 	}
 
-	probePythonTool := func(pyExe string) (CandidateToolState, bool) {
+	probePythonTool := func(pyExe string) CandidateToolState {
 		norm := filepath.ToSlash(pyExe)
 		cacheKey := norm + ":" + command
 		if val, ok := r.cache.Load(cacheKey); ok {
 			st := val.(CandidateToolState)
 			st.Name = name
 			st.Command = command
-			return st, true
+			return st
 		}
 
-		modName := pythonModuleName(command)
-		probeArgs := []string{"-m", modName, "--version"}
+		modName, versionArgs := distribution.PythonProbeSpec(platform.ID, command)
+		if modName == "" {
+			modName = pythonModuleName(command)
+		}
+		probeArgs := osutil.PythonModuleArgs(modName, versionArgs)
+		if command == "checkov" {
+			probeArgs = osutil.CheckovProbeArgs()
+		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		timeout := osutil.ProbeTimeoutFor(command)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
-
-		cmd := exec.CommandContext(ctx, pyExe, probeArgs...)
-		osutil.SetHideWindow(cmd)
-		out, err := cmd.CombinedOutput()
+		started := time.Now()
+		stdout, stderr, err := osutil.ProbeQuiet(ctx, command, pyExe, probeArgs)
 		if err != nil {
-			return CandidateToolState{}, false
+			if ctx.Err() != nil {
+				err = fmt.Errorf("délai de sonde dépassé (%s)", timeout)
+			}
+			st := CandidateToolState{
+				Name:           name,
+				Command:        command,
+				Status:         "runtime_error",
+				Source:         &norm,
+				Version:        nil,
+				RuntimeManaged: true,
+				Platform:       platform.ID,
+				Reason:         osutil.FormatProbeFailure(pyExe, err, stdout, stderr, time.Since(started)),
+			}
+			if !transientProbeError(ctx, err) {
+				r.cache.Store(cacheKey, st)
+			}
+			return st
 		}
 
-		verMatch := reVersion.FindString(string(out))
+		verMatch := reVersion.FindString(stdout + " " + stderr)
 		var ver *string
 		if verMatch != "" {
 			ver = &verMatch
@@ -286,7 +309,7 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 			Reason:         reason,
 		}
 		r.cache.Store(cacheKey, st)
-		return st, true
+		return st
 	}
 
 	// 2. Strict order for Node tools (eslint, tsc):
@@ -428,7 +451,7 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 		return probeCommand(toolBin, false)
 	}
 
-	cacheRoot := osutil.DefaultToolCacheDir()
+	cacheRoot := r.cacheDir()
 
 	// If Python tool: check relocatable Python bundle (.tools/python ➔ ~/.compliance/tools/python)
 	if isPythonTool(command) {
@@ -436,12 +459,21 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 			filepath.Join(root, ".tools", "python"),
 			filepath.Join(cacheRoot, "python"),
 		}
+		var pythonFailure *CandidateToolState
 		for _, pDir := range pyDirs {
 			if pyExe := findBundlePython(pDir); pyExe != "" {
-				if st, ok := probePythonTool(pyExe); ok {
+				st := probePythonTool(pyExe)
+				if st.Status == "available" {
 					return st
 				}
+				if st.Status == "runtime_error" {
+					copy := st
+					pythonFailure = &copy
+				}
 			}
+		}
+		if pythonFailure != nil {
+			return *pythonFailure
 		}
 	}
 
@@ -976,6 +1008,27 @@ func (c *ControlCatalog) GetCapabilityProfile(technology string) []CapabilityPro
 	}
 
 	return profiles
+}
+
+func (r *DefaultCandidateResolver) cacheDir() string {
+	if r != nil && r.CacheRoot != "" {
+		return r.CacheRoot
+	}
+	return osutil.DefaultToolCacheDir()
+}
+
+func transientProbeError(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	if ctx.Err() != nil {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "used by another process") ||
+		strings.Contains(msg, "sharing violation") ||
+		strings.Contains(msg, "être utilisé par un autre processus") ||
+		strings.Contains(msg, "processus ne peut pas accéder")
 }
 
 func isPythonTool(command string) bool {

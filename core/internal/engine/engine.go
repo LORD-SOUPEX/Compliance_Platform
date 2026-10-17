@@ -1151,6 +1151,11 @@ func explainNonExecution(ctrl *PlannedControl) string {
 			command = "outil"
 		}
 		return fmt.Sprintf("Outil manquant : %s. L'extension peut l'installer depuis le manifeste, après accord, dans le dossier utilisateur.", command)
+	case "probe_failed":
+		if ctrl.Reason != "" {
+			return ctrl.Reason
+		}
+		return fmt.Sprintf("Qualification d'execution impossible pour %s.", command)
 	case "platform_unsupported":
 		if ctrl.Reason != "" {
 			return ctrl.Reason
@@ -1217,6 +1222,24 @@ func powershellHost(goos, source string) string {
 	return "pwsh"
 }
 
+func versionProbeArgs(executable, command string) []string {
+	if command == "checkov" {
+		return osutil.CheckovProbeArgs()
+	}
+	base := strings.ToLower(filepath.Base(executable))
+	if strings.Contains(base, "python") && isPythonTool(command) {
+		module, versionArgs := distribution.PythonProbeSpec(distribution.DetectPlatform(), command)
+		if module == "" {
+			module = pythonModuleName(command)
+		}
+		return osutil.PythonModuleArgs(module, versionArgs)
+	}
+	if command == "terraform" || command == "tofu" || command == "opentofu" {
+		return []string{"version"}
+	}
+	return []string{"--version"}
+}
+
 // ProbeToolVersion runs the version command of a tool and returns the parsed version string.
 func ProbeToolVersion(
 	ctx context.Context,
@@ -1229,9 +1252,9 @@ func ProbeToolVersion(
 		timeout = 10 * time.Second
 	}
 
-	args := []string{"--version"}
-	if command == "terraform" || command == "tofu" || command == "opentofu" {
-		args = []string{"version"}
+	args := versionProbeArgs(executable, command)
+	if command == "checkov" && timeout < osutil.ProbeTimeoutFor(command) {
+		timeout = osutil.ProbeTimeoutFor(command)
 	}
 
 	exe, probeArgs := osutil.ScriptCommand(executable, args)
@@ -1239,6 +1262,7 @@ func ProbeToolVersion(
 		Executable:       exe,
 		Args:             probeArgs,
 		WorkingDirectory: dir,
+		Env:              osutil.ToolEnviron(command),
 		Limits: osutil.ProcessLimits{
 			Timeout:        timeout,
 			MaxOutputBytes: 64 * 1024,
@@ -1457,7 +1481,7 @@ func ExecuteCompliancePlan(
 						res.ExitCode = &code
 					} else {
 						if res.ToolVersion == nil && ctrl.Tool != nil && ctrl.Tool.Command != "" {
-							ver, verErr := ProbeToolVersion(ctx, inv.Executable, ctrl.Tool.Command, execRoot, 5*time.Second)
+							ver, verErr := ProbeToolVersion(ctx, inv.Executable, ctrl.Tool.Command, execRoot, osutil.ProbeTimeoutFor(ctrl.Tool.Command))
 							if verErr == nil && ver != "" {
 								res.ToolVersion = &ver
 							}
@@ -1474,7 +1498,11 @@ func ExecuteCompliancePlan(
 							if call.RawCommandLine == "" {
 								exe, args = osutil.ScriptCommand(call.Executable, call.Arguments)
 							}
-							env := withoutColor(osutil.AugmentedEnviron())
+							commandName := ""
+							if ctrl.Tool != nil {
+								commandName = ctrl.Tool.Command
+							}
+							env := withoutColor(osutil.ToolEnviron(commandName))
 							if len(call.Env) > 0 {
 								env = append(env, call.Env...)
 							}
@@ -1784,24 +1812,16 @@ func RunPythonPipeline(ctx context.Context, opts PipelineOptions) (*report.Repor
 			args := append([]string{}, baseArgs...)
 			args = append(args, pyFiles...)
 
-			var env []string
+			commandName := "ruff"
 			if step.isPythonTool {
-				if len(opts.BanditEnv) > 0 {
-					env = append(env, opts.BanditEnv...)
-				}
-				if opts.CABundlePath != "" {
-					if len(env) == 0 {
-						env = os.Environ()
-					}
-					env = append(env,
-						"SSL_CERT_FILE="+opts.CABundlePath,
-						"REQUESTS_CA_BUNDLE="+opts.CABundlePath,
-						"PIP_CERT="+opts.CABundlePath,
-					)
-				}
+				commandName = "bandit"
 			}
-			if len(env) == 0 {
-				env = osutil.AugmentedEnviron()
+			if opts.CABundlePath != "" {
+				osutil.SetEnterpriseCABundle(opts.CABundlePath)
+			}
+			env := osutil.ToolEnviron(commandName)
+			if step.isPythonTool && len(opts.BanditEnv) > 0 {
+				env = append(env, opts.BanditEnv...)
 			}
 			env = withoutColor(env)
 

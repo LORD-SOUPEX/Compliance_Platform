@@ -373,7 +373,7 @@ func BuildComplianceReport(opts ReportOptions) *Report {
 			switch r.Diagnostics[0].Code {
 			case "technology_absent", "not_applicable", "platform_unsupported", "permission_denied", "ambiguous", "alternative_not_selected":
 				continue
-			case "capability_unavailable", "tool_unavailable", "repository_unconfigured":
+			case "capability_unavailable", "tool_unavailable", "probe_failed", "repository_unconfigured":
 				blockingSkippedCount++
 				continue
 			}
@@ -593,7 +593,7 @@ func technologyCoverage(discovery interface{}, results []ExecutionResult) (int, 
 		switch result.Diagnostics[0].Code {
 		case "user_disabled":
 			item.disabled = true
-		case "tool_unavailable", "capability_unavailable", "repository_unconfigured", "platform_unavailable":
+		case "tool_unavailable", "probe_failed", "capability_unavailable", "repository_unconfigured", "platform_unavailable":
 			if item.gap == "" {
 				item.gap = result.Technology + " : " + result.Diagnostics[0].Message
 			}

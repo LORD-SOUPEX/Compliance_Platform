@@ -31,8 +31,11 @@ export function classifyProvisionError(message: string): { code: string; message
     if (lower.includes('échec') || lower.includes('echec')) {
         return { code: 'partial', message };
     }
-    if (lower.includes('proxy')) {
+    if (lower.includes('proxy') || lower.includes('407')) {
         return { code: 'proxy', message };
+    }
+    if (lower.includes('x509') || lower.includes('certificate') || lower.includes('certificat') || lower.includes('tls')) {
+        return { code: 'certificate', message };
     }
     if (!lower.includes('code http') && (lower.includes('no such host') || lower.includes('connection refused') || lower.includes('i/o timeout') || lower.includes('dial tcp'))) {
         return { code: 'network', message: 'Réseau indisponible. Relancez l’installation quand la connexion est disponible.' };

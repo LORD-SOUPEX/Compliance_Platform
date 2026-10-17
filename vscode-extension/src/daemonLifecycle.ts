@@ -13,7 +13,7 @@ export function residualExtensionDirectories(entries: string[], current: string)
     const currentResolved = path.resolve(current);
     return entries.filter(entry => {
         const base = path.basename(entry);
-        return /compliance-platform\.compliance-local-pipelines/i.test(base) && path.resolve(entry) !== currentResolved;
+        return /compliance-platform\.compliance-pipelines/i.test(base) && path.resolve(entry) !== currentResolved;
     });
 }
 

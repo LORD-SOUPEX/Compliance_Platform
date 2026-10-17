@@ -125,7 +125,7 @@ export function parsePreparation(text: string, target: string, allowPermissions 
         }
         technologies.add(technology.technology);
     }
-    const applicability = new Set(['applicable', 'not_applicable', 'capability_unavailable', 'tool_unavailable', 'technology_absent', 'ambiguous', 'platform_unsupported', 'platform_unavailable', 'repository_unconfigured', 'user_disabled', 'permission_denied']);
+    const applicability = new Set(['applicable', 'not_applicable', 'capability_unavailable', 'tool_unavailable', 'probe_failed', 'technology_absent', 'ambiguous', 'platform_unsupported', 'platform_unavailable', 'repository_unconfigured', 'user_disabled', 'permission_denied']);
     const ids = new Set<string>();
     for (const control of report.execution_plan.controls) {
         const id = isRecord(control) && typeof control.id === 'string' && control.id ? control.id : '(sans identifiant)';

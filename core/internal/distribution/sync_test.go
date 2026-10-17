@@ -195,17 +195,15 @@ func TestSyncInstallsWhenSignatureAndHashesDoNotMatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	cache := filepath.Join(dir, "tools")
-	result, err := SyncRuntime(SyncOptions{ManifestPath: manifestPath, SigPath: sigPath, CacheDir: cache, Platform: "windows-x64", ToolName: "rumdl"})
-	if err != nil {
-		t.Fatal(err)
+	_, err = SyncRuntime(SyncOptions{ManifestPath: manifestPath, SigPath: sigPath, CacheDir: cache, Platform: "windows-x64", ToolName: "rumdl"})
+	if err == nil || !strings.Contains(err.Error(), "SHA-256") {
+		t.Fatalf("hash mismatch must refuse the binary, err = %v", err)
 	}
-	installed := result.SyncedTools["rumdl"]
-	got, err := os.ReadFile(installed)
-	if err != nil || string(got) != string(payload) {
-		t.Fatalf("installed = %q err = %v", got, err)
+	if ClassifySyncError(err) != "hash" {
+		t.Fatalf("hash class = %s (%v)", ClassifySyncError(err), err)
 	}
-	if !strings.Contains(filepath.ToSlash(installed), "/tools/bin/windows-x64/") {
-		t.Fatalf("cache path = %s", installed)
+	if _, statErr := os.Stat(filepath.Join(cache, "bin", "windows-x64", "rumdl.exe")); !os.IsNotExist(statErr) {
+		t.Fatalf("binary installed despite hash mismatch: %v", statErr)
 	}
 
 	manifest.Platforms["windows-x64"].Tools["rumdl"] = ToolEntry{Name: "rumdl", Version: "0.2.79", ArchiveURL: "http://example.com/rumdl.zip", BinaryInArchive: "rumdl.exe"}

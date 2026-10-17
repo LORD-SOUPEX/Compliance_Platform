@@ -1,8 +1,8 @@
-const { buildReportModel, nonApplicableMarkup, reportDurationMs, unavailableSummary, groupUnavailableLines, countsAsUnavailable, verdictReasonLines } = require("../.extension-build/src/reportLayout.js");
+const { buildReportModel, nonApplicableMarkup, reportDurationMs, unavailableSummary, groupUnavailableLines, countsAsUnavailable, uniqueTools, verdictReasonLines } = require("../.extension-build/src/reportLayout.js");
 const { parsePreparation } = require("../.extension-build/src/model.js");
 const { unwiredReportActions, reportButtonCommand } = require("../.extension-build/src/reportActions.js");
 const { engineVersionMismatch } = require("../.extension-build/src/engineVersion.js");
-const { hasMachineConsent, shouldAskMachineConsent, machineConsentText, classifyProvisionError, selectManifestTools } = require("../.extension-build/src/toolProvision.js");
+const { hasMachineConsent, shouldAskMachineConsent, machineConsentText, classifyProvisionError, selectManifestTools, missingToolCommands } = require("../.extension-build/src/toolProvision.js");
 const fs = require("fs");
 const pkg = require("../package.json");
 const ver = fs.readFileSync("../core/internal/version/version.go", "utf8");
@@ -30,7 +30,12 @@ const grouped = unavailableSummary([{ id: "python/linting/ruff/a", name: "ruff",
 if (grouped.length !== 1 || !grouped[0].includes("2 racines concernées") || groupUnavailableLines(["python/linting/ruff/a — Outil installable", "python/linting/ruff/b — Outil installable"]).length !== 1 || groupUnavailableLines(["terraform/security/checkov/a - Outil installable depuis le manifeste : checkov.", "terraform/security/checkov/b - Outil installable depuis le manifeste : checkov."]).length !== 1) fail("unavailable group");
 const verdictLines = verdictReasonLines("Au moins un contrôle exécuté a échoué ou une erreur critique a interrompu l’évaluation.", ["Couverture complète : 5 technologie(s) couverte(s) sur 5 détectée(s).", "Au moins un controle de conformite echoue."]);
 if (verdictLines.length !== 2 || verdictLines.some(line => line.includes("controle de conformite")) || !verdictLines[0].includes("échoué")) fail("verdict reasons " + JSON.stringify(verdictLines));
-if (countsAsUnavailable("not_applicable") || countsAsUnavailable("platform_unsupported") || countsAsUnavailable("ambiguous") || countsAsUnavailable("alternative_not_selected") || countsAsUnavailable("") || !countsAsUnavailable("tool_unavailable") || !countsAsUnavailable("repository_unconfigured")) fail("unavailable classification");
+if (countsAsUnavailable("not_applicable") || countsAsUnavailable("platform_unsupported") || countsAsUnavailable("ambiguous") || countsAsUnavailable("alternative_not_selected") || countsAsUnavailable("") || !countsAsUnavailable("tool_unavailable") || !countsAsUnavailable("probe_failed") || !countsAsUnavailable("repository_unconfigured")) fail("unavailable classification");
+const probeControls = [{ id: "docker/security/trivy/.", name: "trivy", technology: "docker", resultStatus: "skipped", reasonCode: "probe_failed", reasonMessage: "Qualification d'execution impossible: exit status 1 (stdout: aucune sortie ; stderr: aucune sortie)", stdout: "", stderr: "" }, { id: "terraform/security/checkov/.", name: "checkov", technology: "terraform", resultStatus: "skipped", reasonCode: "tool_unavailable", reasonMessage: "Outil installable depuis le manifeste : checkov.", stdout: "", stderr: "" }];
+const probeModel = buildReportModel({ verdict: "PASS", coverage: {}, technologies: [{ technology: "docker", status: "detected" }, { technology: "terraform", status: "detected" }], controls: probeControls });
+if (probeModel.tools.length !== 1 || probeModel.tools[0] !== "checkov" || uniqueTools(probeControls).join(",") !== "checkov" || !probeModel.gaps.some(gap => gap.startsWith("docker")) || !probeModel.gaps.some(gap => gap.startsWith("terraform"))) fail("probe provision " + JSON.stringify(probeModel.tools) + " " + JSON.stringify(probeModel.gaps));
+const missing = missingToolCommands({ execution_plan: { controls: [{ id: "docker/security/trivy/.", tool: { command: "trivy" } }, { id: "terraform/security/checkov/.", tool: { command: "checkov" } }] }, execution_results: [{ control_id: "docker/security/trivy/.", diagnostics: [{ code: "probe_failed" }] }, { control_id: "terraform/security/checkov/.", diagnostics: [{ code: "tool_unavailable" }] }] });
+if (missing.length !== 1 || missing[0] !== "checkov") fail("missing tools " + missing.join(","));
 const aligned = buildReportModel({ verdict: "FAIL", coverage: { applicable_controls: 31, executed_controls: 23 }, controls: [{ id: "python/lint/ruff/.", name: "ruff", technology: "python", resultStatus: "fail", reasonCode: "exit_nonzero", reasonMessage: "1", stdout: "", stderr: "" }, { id: "javascript/linting/eslint/.", name: "eslint", technology: "javascript", resultStatus: "skipped", reasonCode: "repository_unconfigured", reasonMessage: "Configuration ESLint absente du dépôt.", stdout: "", stderr: "" }, { id: "kubernetes/security/trivy/.", name: "trivy", technology: "kubernetes", resultStatus: "skipped", reasonCode: "ambiguous", reasonMessage: "Le YAML contient des marqueurs de template Helm.", stdout: "", stderr: "" }, { id: "helm/security/trivy/.", name: "trivy", technology: "helm", resultStatus: "skipped", reasonCode: "alternative_not_selected", reasonMessage: "checkov retenu", stdout: "", stderr: "" }] });
 const card = label => aligned.cards.find(item => item.label === label).value;
 if (card("Applicables") !== 2 || card("Exécutés") !== 1 || card("Indisponibles") !== 1) fail("counters " + JSON.stringify(aligned.cards));
@@ -59,7 +64,7 @@ if (sessionDirectory("D:\\reports", "D:\\env", "D:\\default") !== "D:\\reports" 
 if (applicationValue({ workspaceValue: ["markdown"] }, []).length !== 0) fail("workspace setting was accepted");
 if (applicationValue({ globalValue: ["markdown"], workspaceValue: ["python"] }, [])[0] !== "markdown") fail("global setting ignored");
 if (!isOurDaemonImage("compliance-windows-amd64.exe") || isOurDaemonImage("code.exe")) fail("daemon image");
-if (residualExtensionDirectories(["C:/ext/compliance-platform.compliance-local-pipelines-2.0.5", "C:/ext/other"], "C:/ext/compliance-platform.compliance-local-pipelines-2.0.6").length !== 1) fail("residuals");
+if (residualExtensionDirectories(["C:/ext/compliance-platform.compliance-pipelines-2.0.5", "C:/ext/other"], "C:/ext/compliance-platform.compliance-pipelines-2.0.6").length !== 1) fail("residuals");
 if (!shouldReplaceDaemon("2.0.5", "2.0.6", "compliance.exe") || shouldReplaceDaemon("2.0.6", "2.0.6", "compliance.exe")) fail("daemon version");
 if (checks.length) {
     console.error(checks.join("\n"));

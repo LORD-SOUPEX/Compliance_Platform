@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"compliance/internal/osutil"
+
 	"github.com/ulikunitz/xz"
 )
 
@@ -155,6 +157,64 @@ func ToolListed(manifestPath, platform, tool string) bool {
 	return false
 }
 
+func activeTool(platform, command string) (ToolEntry, bool) {
+	path, err := ActiveAsset("runtime-manifest.json", ".config/runtime-manifest.json")
+	if err != nil || platform == "" || command == "" {
+		return ToolEntry{}, false
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return ToolEntry{}, false
+	}
+	var manifest RuntimeManifest
+	if err := json.Unmarshal(body, &manifest); err != nil {
+		return ToolEntry{}, false
+	}
+	entry, ok := manifest.Platforms[platform]
+	if !ok {
+		return ToolEntry{}, false
+	}
+	for _, name := range manifestAliases(command) {
+		if tool, found := entry.Tools[name]; found {
+			return tool, true
+		}
+	}
+	return ToolEntry{}, false
+}
+
+// VersionArgs returns the manifest qualification arguments for a native tool.
+func VersionArgs(platform, command string) []string {
+	tool, ok := activeTool(platform, command)
+	if !ok || len(tool.VersionArgs) == 0 {
+		return nil
+	}
+	return append([]string{}, tool.VersionArgs...)
+}
+
+// PythonProbeSpec returns the module and version arguments declared for a Python tool.
+// Checkov keeps its manifest module for documentation, but qualification uses a short import.
+func PythonProbeSpec(platform, command string) (string, []string) {
+	module := command
+	switch command {
+	case "pip-audit":
+		module = "pip_audit"
+	case "ansible-lint":
+		module = "ansiblelint"
+	}
+	args := []string{"--version"}
+	tool, ok := activeTool(platform, command)
+	if !ok {
+		return module, args
+	}
+	if command != "checkov" && tool.PythonModule != "" {
+		module = tool.PythonModule
+	}
+	if command != "checkov" && len(tool.VersionArgs) > 0 {
+		args = append([]string{}, tool.VersionArgs...)
+	}
+	return module, args
+}
+
 func manifestAliases(tool string) []string {
 	switch tool {
 	case "tofu", "opentofu":
@@ -212,6 +272,9 @@ func SyncRuntime(opts SyncOptions) (*SyncResult, error) {
 		opts.PublicKey = ed25519.PublicKey(pubBytes)
 	}
 
+	if strings.TrimSpace(opts.CABundlePath) != "" {
+		osutil.SetEnterpriseCABundle(opts.CABundlePath)
+	}
 	client := buildHTTPClient(opts.CABundlePath)
 
 	manifestBytes, err := fetchBytes(opts.ManifestPath, client, opts.RegistryToken)
@@ -292,8 +355,12 @@ func ClassifySyncError(err error) string {
 	}
 	message := strings.ToLower(err.Error())
 	switch {
-	case strings.Contains(message, "proxy"):
+	case strings.Contains(message, "proxy"), strings.Contains(message, "407"):
 		return "proxy"
+	case strings.Contains(message, "x509"), strings.Contains(message, "certificate"), strings.Contains(message, "certificat"), strings.Contains(message, "tls"):
+		return "certificate"
+	case strings.Contains(message, "sha-256"), strings.Contains(message, "sha256"):
+		return "hash"
 	case strings.Contains(message, "code http"):
 		return "http"
 	case strings.Contains(message, "no such host"), strings.Contains(message, "connection refused"),
@@ -543,6 +610,9 @@ func fetchBytes(uriOrPath string, client *http.Client, token string) ([]byte, er
 func buildHTTPClient(caBundlePath string) *http.Client {
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
+	}
+	if strings.TrimSpace(caBundlePath) == "" {
+		caBundlePath = osutil.EnterpriseCABundle()
 	}
 
 	if caBundlePath != "" {

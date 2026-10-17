@@ -35,7 +35,7 @@ function escapeHtml(value: string): string {
     return value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character] || character));
 }
 
-const gapCodes = new Set(['tool_unavailable', 'capability_unavailable', 'repository_unconfigured', 'platform_unavailable']);
+const gapCodes = new Set(['tool_unavailable', 'probe_failed', 'capability_unavailable', 'repository_unconfigured', 'platform_unavailable']);
 
 export function countsAsUnavailable(code: string): boolean {
     return code !== '' && !hiddenCodes.has(code);

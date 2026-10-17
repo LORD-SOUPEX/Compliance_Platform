@@ -433,20 +433,7 @@ func BuildCompliancePlan(
 							reason = fmt.Sprintf("Outil non pris en charge sur cette plateforme : %s.", command)
 						}
 					} else if applicability == "tool_unavailable" && command != "eslint" && command != "tsc" && command != "none" {
-						if candidate != nil && candidate.Status == "runtime_error" && candidate.Reason != "" {
-							reason = candidate.Reason
-							reasonCode = "tool_unavailable"
-						} else if manifestPath, err := distribution.ActiveAsset("runtime-manifest.json", ".config/runtime-manifest.json"); err == nil && distribution.ToolListed(manifestPath, opts.PlatformID, command) {
-							reason = fmt.Sprintf("Outil installable depuis le manifeste : %s.", command)
-							reasonCode = "tool_unavailable"
-						} else if command == "Invoke-ScriptAnalyzer" {
-							reason = "Module PowerShell PSScriptAnalyzer absent. Installez-le pour l'utilisateur courant, puis relancez."
-							reasonCode = "tool_unavailable"
-						} else {
-							applicability = "platform_unavailable"
-							reasonCode = "platform_unavailable"
-							reason = fmt.Sprintf("Outil non disponible sur cette plateforme : %s.", command)
-						}
+						applicability, reasonCode, reason = refineUnavailableTool(applicability, reasonCode, reason, command, opts.PlatformID, candidate)
 					}
 
 					controlID := fmt.Sprintf("%s/%s/%s/%s", tech.Technology, capability.Name, command, root)
@@ -910,6 +897,33 @@ func unionStrings(left, right []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// refineUnavailableTool keeps a failed qualification out of the install list.
+// Only a tool that was not found on disk, and that the manifest ships, stays tool_unavailable.
+func refineUnavailableTool(applicability, reasonCode, reason, command, platformID string, candidate *matrix.CandidateToolState) (string, string, string) {
+	if candidate != nil && candidate.Status == "runtime_error" {
+		if candidate.Reason != "" {
+			reason = candidate.Reason
+		} else if reason == "" {
+			reason = fmt.Sprintf("Qualification d'execution impossible pour %s.", command)
+		}
+		return "probe_failed", "probe_failed", reason
+	}
+	missing := candidate == nil || candidate.Status == "not_installed" || candidate.Status == ""
+	if missing {
+		if manifestPath, err := distribution.ActiveAsset("runtime-manifest.json", ".config/runtime-manifest.json"); err == nil && distribution.ToolListed(manifestPath, platformID, command) {
+			return "tool_unavailable", "tool_unavailable", fmt.Sprintf("Outil installable depuis le manifeste : %s.", command)
+		}
+		if command == "Invoke-ScriptAnalyzer" {
+			return "tool_unavailable", "tool_unavailable", "Module PowerShell PSScriptAnalyzer absent. Installez-le pour l'utilisateur courant, puis relancez."
+		}
+		return "platform_unavailable", "platform_unavailable", fmt.Sprintf("Outil non disponible sur cette plateforme : %s.", command)
+	}
+	if candidate != nil && candidate.Reason != "" {
+		reason = candidate.Reason
+	}
+	return applicability, reasonCode, reason
 }
 
 func platformSupported(support []string, platformID string) bool {

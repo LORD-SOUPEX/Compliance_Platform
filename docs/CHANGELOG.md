@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.1.3
+
+- **Sonde et installation** : un outil présent dont la qualification échoue ou expire reste un échec de sonde (`probe_failed`). Il n'est plus réécrit en « Outil installable depuis le manifeste » et ne relance pas l'installation. Seul un outil absent du disque et déclaré au manifeste reste `tool_unavailable`.
+- **Checkov** : la qualification importe le module et affiche sa version, avec un délai de 60 secondes. L'interpréteur reçoit `PYTHONNOUSERSITE=1`, un `PYTHONPATH` vide et `PYTHONDONTWRITEBYTECODE=1`. L'extraction Windows utilise les chemins étendus au-delà de 248 caractères.
+- **Trivy** : la qualification impose `TRIVY_SKIP_VERSION_CHECK`, `TRIVY_SKIP_DB_UPDATE`, `TRIVY_DISABLE_TELEMETRY` et un cache sous `~/.compliance/cache/trivy`. Une sortie vide au code 1 est réessayée une fois sans console masquée, puis le rapport nomme le binaire.
+- **Certificats et proxy** : le bundle d'entreprise (`COMPLIANCE_CA_BUNDLE`, `SSL_CERT_FILE`, fichier local, puis magasin Windows) est injecté dans les sondes, les contrôles et les téléchargements (`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `PIP_CERT`). Les variables de proxy du processus sont conservées. Une somme SHA-256 divergente refuse l'exécutable.
+
+## 2.1.2
+
+- **Marketplace VS Code** : l'identifiant technique est `compliance-pipelines` (`compliance-platform.compliance-pipelines`). Le nom affiché sur le Marketplace est « ICP IaC Compliance Platform », l'ancien libellé restant réservé par la fiche précédente. Le manifeste déclare `GalleryFlags` Public et la cible `Microsoft.VisualStudio.Code`. `package.json` contient `engines.vscode` et aucune clé `private`.
+
+## 2.1.1
+
+- **Marketplace** : republication publique. `package.json` ne contient pas de clé `private`. La version 2.1.0, déjà déposée, ne peut pas être réécrite.
+
 ## 2.1.0
 
 - **Registre vivant** : le démon compare `runtime-manifest.json` et `control-catalog.json` publiés sur la release `tools-v1` au cache `~/.compliance/registry-cache/`, puis aux fichiers embarqués. Un outil déjà installé est remplacé quand le manifeste distant annonce une version plus haute. Hors ligne, le cache puis les fichiers du binaire suffisent. Le `.vsix` n'a pas à être réinstallé.

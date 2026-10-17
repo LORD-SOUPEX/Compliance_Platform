@@ -1,6 +1,6 @@
 # ICP - IaC Compliance Platform
 
-Audit local d'un dépôt. L'extension parle à un démon Go sur `127.0.0.1`. Aucun compte, aucune forge et aucun envoi du code. Version courante : 2.1.0.
+Audit local d'un dépôt. L'extension parle à un démon Go sur `127.0.0.1`. Aucun compte, aucune forge et aucun envoi du code. Version courante : 2.1.3.
 
 ## Architecture de la plateforme
 
@@ -29,7 +29,7 @@ Développeurs et évaluateurs qui veulent un contrôle local sur un projet Terra
 ## Comment c'est fait
 
 - Démon Go local, port éphémère, jeton Bearer. L'extension le démarre et le compare à sa version ; un démon plus ancien est arrêté.
-- Catalogue embarqué (`.config/control-catalog.json`) et manifeste d'outils (`.config/runtime-manifest.json`). Une signature absente ou différente est journalisée en warning sans bloquer l'installation.
+- Catalogue embarqué (`.config/control-catalog.json`) et manifeste d'outils (`.config/runtime-manifest.json`). Une signature absente ou différente est journalisée en warning sans bloquer l'installation. Une somme SHA-256 différente refuse l'outil. Un exécutable déjà présent dont la sonde échoue reste un échec de qualification : le rapport le nomme et ne le réinstalle pas.
 - Le code de la cible n'est pas transmis. Les outils s'exécutent sur la machine après l'autorisation unique mémorisée sur cette machine.
 
 ## Contrôles
