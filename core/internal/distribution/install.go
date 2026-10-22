@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -71,7 +72,7 @@ func installEntry(cacheDir, platform, key string, tool ToolEntry, tools map[stri
 }
 
 func installBundle(cacheDir, platform, key string, tool ToolEntry, client *http.Client, opts SyncOptions, registryBase string) (string, error) {
-	if needsQualification(key, tool) {
+	if needsQualification(key, tool) || bundleCurrent(cacheDir, tool) {
 		if existing := resolvedBundlePath(cacheDir, platform, key, tool); existing != "" {
 			if err := qualifyExtracted(key, tool, existing); err == nil {
 				return existing, nil
@@ -90,6 +91,7 @@ func installBundle(cacheDir, platform, key string, tool ToolEntry, client *http.
 	if err := installTree(body, archiveURL, cacheDir, tool.BinaryInArchive); err != nil {
 		return "", fmt.Errorf("extraction du bundle pour %s: %w", key, err)
 	}
+	markBundle(cacheDir, tool, actualSHA)
 	dest := resolvedBundlePath(cacheDir, platform, key, tool)
 	if dest != "" && runtime.GOOS != "windows" && !strings.HasSuffix(dest, ".psd1") {
 		_ = os.Chmod(dest, 0755)
@@ -98,6 +100,31 @@ func installBundle(cacheDir, platform, key string, tool ToolEntry, client *http.
 		return "", err
 	}
 	return dest, nil
+}
+
+// bundleMarker records the archive a bundle folder was extracted from. Every
+// tool of the Python or Node bundle shares one archive: the first install
+// extracts it, the next ones find the marker and skip the download.
+const bundleMarker = ".archive-sha256"
+
+func bundleCurrent(cacheDir string, tool ToolEntry) bool {
+	root := bundleRoot(tool.BinaryInArchive)
+	if root == "" || tool.ArchiveSHA256 == "" {
+		return false
+	}
+	recorded, err := os.ReadFile(filepath.Join(cacheDir, filepath.FromSlash(root), bundleMarker))
+	return err == nil && strings.EqualFold(strings.TrimSpace(string(recorded)), tool.ArchiveSHA256)
+}
+
+func markBundle(cacheDir string, tool ToolEntry, archiveSHA string) {
+	root := bundleRoot(tool.BinaryInArchive)
+	if root == "" {
+		return
+	}
+	path := filepath.Join(cacheDir, filepath.FromSlash(root), bundleMarker)
+	if err := os.WriteFile(materialize(path), []byte(archiveSHA+"\n"), 0o644); err != nil {
+		slog.Warn("bundle_marker_not_written", "path", path, "err", err)
+	}
 }
 
 func installBinary(cacheDir, platform, key string, tool ToolEntry, client *http.Client, opts SyncOptions, registryBase string) (string, error) {

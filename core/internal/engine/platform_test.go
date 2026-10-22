@@ -47,7 +47,7 @@ func TestPowershellHostDoesNotUseWindowsPowerShellOnDarwin(t *testing.T) {
 
 func TestNothingExecutableIsNotAFailure(t *testing.T) {
 	repo := t.TempDir()
-	if err := os.WriteFile(filepath.Join(repo, "package.json"), []byte(`{"name":"empty"}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, "package.json"), []byte("{\n\t\"name\": \"empty\"\n}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	catalog, err := embedded.ResolveAsset("control-catalog.json")
@@ -65,6 +65,11 @@ func TestNothingExecutableIsNotAFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	if rep.Summary.Error != 0 || rep.Summary.Fail != 0 {
+		for _, r := range rep.ExecutionResults {
+			if r.Status == "fail" || r.Status == "error" {
+				t.Logf("%s %s", r.ControlId, r.Status)
+			}
+		}
 		t.Fatalf("summary = %+v, want no executed failure", rep.Summary)
 	}
 	status, message := controlOutcome(t, rep, "javascript/linting/eslint/.")

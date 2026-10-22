@@ -1,5 +1,10 @@
 # Changelog
 
+## Non publié
+
+- **Installation des outils** : un bundle (Python, Node) est extrait une seule fois. Son archive est notée dans le dossier du bundle (`.archive-sha256`), et les autres outils du même bundle le réutilisent sans téléchargement ni extraction. Un premier audit installait 5 outils Python en 35 s chacun ; c'est désormais 35 s pour tout le bundle.
+- **Journal** : un contrôle annoncé « exécution en cours » puis non exécuté (outil ou chaîne absente, par exemple `go` pour golangci-lint) a maintenant sa ligne « non exécuté » avec la raison.
+
 ## 2.2.0
 
 - **Nouvelle clé de signature du registre** : le manifeste des outils est signé par une nouvelle clé Ed25519, dont la clé publique est intégrée au moteur 2.2.0. Avec une version 2.1.x, la signature du nouveau manifeste de `tools-v1` n'est pas reconnue : l'installation continue (chaque archive reste contrôlée par SHA-256) avec un avertissement, qui disparaît avec la 2.2.0.

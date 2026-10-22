@@ -541,6 +541,7 @@ async function stream(
                             } else if (code === 'technology_absent') {
                                 absent.push(technology);
                             } else if (countsAsUnavailable(code)) {
+                                controlLog.info('non exécuté', { reason: reason?.message || code });
                                 unavailable.push(`${id} — ${reason?.message || 'indisponible'}`);
                             } else {
                                 controlLog.debug('non exécuté', { reason: code, message: reason?.message });

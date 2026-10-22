@@ -295,3 +295,62 @@ func sha(body []byte) string {
 	sum := sha256.Sum256(body)
 	return hex.EncodeToString(sum[:])
 }
+
+func TestBundleToolsShareOneExtraction(t *testing.T) {
+	var archive bytes.Buffer
+	zw := zip.NewWriter(&archive)
+	for _, name := range []string{"node/node.exe", "node/node_modules/.bin/stylelint.cmd", "node/node_modules/.bin/htmlhint.cmd"} {
+		entry, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := entry.Write([]byte("x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	body := archive.Bytes()
+	downloads := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		downloads++
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+	tools := map[string]ToolEntry{}
+	for _, name := range []string{"stylelint", "htmlhint"} {
+		tools[name] = ToolEntry{
+			Name:            name,
+			Version:         "1.0.0",
+			Install:         "bundle",
+			Bundle:          "node",
+			ArchiveURL:      server.URL + "/node-tools.zip",
+			ArchiveSHA256:   sha(body),
+			BinaryInArchive: "node/node_modules/.bin/" + name + ".cmd",
+		}
+	}
+	dir := t.TempDir()
+	manifest := RuntimeManifest{SchemaVersion: 3, ManifestVersion: "test", Platforms: map[string]PlatformManifest{"windows-x64": {Status: "qualified", Tools: tools}}}
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(dir, "manifest.json")
+	if err := os.WriteFile(manifestPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cache := filepath.Join(dir, "cache")
+	// The test server is plain HTTP: allowed only through the loopback exception of requireHTTPSArchive.
+	for _, name := range []string{"stylelint", "htmlhint", "stylelint"} {
+		if _, err := SyncRuntime(SyncOptions{ManifestPath: manifestPath, CacheDir: cache, Platform: "windows-x64", ToolName: name}); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	if downloads != 1 {
+		t.Fatalf("bundle downloaded %d times, want 1", downloads)
+	}
+	if !fileExists(filepath.Join(cache, "node", "node_modules", ".bin", "htmlhint.cmd")) {
+		t.Fatal("htmlhint launcher missing")
+	}
+}
