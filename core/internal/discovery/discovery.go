@@ -85,10 +85,12 @@ var allKnownTechnologies = []string{
 	"opentofu",
 	"powershell",
 	"python",
+	"secrets",
 	"shell",
 	"terraform",
 	"terragrunt",
 	"typescript",
+	"yaml",
 }
 
 var pythonMarkers = []string{
@@ -506,6 +508,25 @@ func DiscoverAll(repoRoot string) (*DiscoveryResult, error) {
 		}
 	}
 
+	// 13. Secrets: any repository can leak one. Gitleaks scans the whole tree once.
+	for _, f := range discoveredFiles {
+		accumulators["secrets"].addEvidence(f.relPath, ".", "detected", "")
+	}
+
+	// 14. YAML outside Ansible roots (their own yamllint control covers them) and
+	// outside templates, which are not YAML until rendered.
+	ansibleRoots := accumulators["ansible"].roots
+	for _, f := range yamlFiles {
+		if underRoot(f.relPath, ansibleRoots) {
+			continue
+		}
+		content, readErr := os.ReadFile(f.absPath)
+		if readErr != nil || strings.Contains(string(content), "{{") {
+			continue
+		}
+		accumulators["yaml"].addEvidence(f.relPath, toRelRoot(absRepo, f.dir), "detected", "")
+	}
+
 	// Build sorted Technologies list
 	techRecords := make([]TechnologyRecord, 0, len(allKnownTechnologies))
 	projectRoots := make([]ProjectRootEntry, 0)
@@ -615,6 +636,16 @@ func toRelRoot(repoRoot, dir string) string {
 }
 
 // CollectSources lists files under relRoot, honoring the same exclusions as DiscoverAll.
+// underRoot reports whether relPath sits in one of roots ("." holds everything).
+func underRoot(relPath string, roots map[string]bool) bool {
+	for root := range roots {
+		if root == "." || relPath == root || strings.HasPrefix(relPath, root+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // IsContainerFile reports Dockerfiles and Containerfiles, including
 // Dockerfile.*, *.Dockerfile and files nested in a subdirectory.
 func IsContainerFile(name string) bool {

@@ -3,7 +3,7 @@
 scripts/build_and_publish_tools.py — Build & Publish Tools Registry for Compliance Platform
 
 Builds standalone, relocatable archives for:
-  - 10 native tools across 5 platforms (windows-x64, linux-x64, linux-arm64, macos-x64, macos-arm64)
+  - 12 native tools across 5 platforms (windows-x64, linux-x64, linux-arm64, macos-x64, macos-arm64)
   - Python bundle for windows-x64 (relocatable CPython 3.11.9 with checkov, bandit, pylint, pytest, pip-audit, yamllint)
   - CPython standalone for POSIX platforms (linux-x64, linux-arm64, macos-x64, macos-arm64)
   - Node bundle for windows-x64 (portable Node 22 LTS with eslint and typescript)
@@ -176,6 +176,28 @@ UPSTREAM_BINARIES = {
             "linux-arm64": "https://github.com/rvben/rumdl/releases/download/v0.2.79/rumdl-v0.2.79-aarch64-unknown-linux-musl.tar.gz",
             "macos-x64": "https://github.com/rvben/rumdl/releases/download/v0.2.79/rumdl-v0.2.79-x86_64-apple-darwin.tar.gz",
             "macos-arm64": "https://github.com/rvben/rumdl/releases/download/v0.2.79/rumdl-v0.2.79-aarch64-apple-darwin.tar.gz",
+        },
+    },    "shfmt": {
+        "version": "3.14.1",
+        "version_args": ["--version"],
+        "bare_binary": True,
+        "urls": {
+            "windows-x64": "https://github.com/mvdan/sh/releases/download/v3.14.1/shfmt_v3.14.1_windows_amd64.exe",
+            "linux-x64": "https://github.com/mvdan/sh/releases/download/v3.14.1/shfmt_v3.14.1_linux_amd64",
+            "linux-arm64": "https://github.com/mvdan/sh/releases/download/v3.14.1/shfmt_v3.14.1_linux_arm64",
+            "macos-x64": "https://github.com/mvdan/sh/releases/download/v3.14.1/shfmt_v3.14.1_darwin_amd64",
+            "macos-arm64": "https://github.com/mvdan/sh/releases/download/v3.14.1/shfmt_v3.14.1_darwin_arm64",
+        },
+    },
+    "kubeconform": {
+        "version": "0.8.0",
+        "version_args": ["-v"],
+        "urls": {
+            "windows-x64": "https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-windows-amd64.zip",
+            "linux-x64": "https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz",
+            "linux-arm64": "https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-arm64.tar.gz",
+            "macos-x64": "https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-darwin-amd64.tar.gz",
+            "macos-arm64": "https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-darwin-arm64.tar.gz",
         },
     },
 }

@@ -98,3 +98,18 @@ func TestGenerationChangesAfterInstall(t *testing.T) {
 		t.Fatalf("generation did not move: %q", first)
 	}
 }
+
+func TestWindowsArm64BorrowsX64Tools(t *testing.T) {
+	manifest := RuntimeManifest{Platforms: map[string]PlatformManifest{
+		"windows-arm64": {Tools: map[string]ToolEntry{"rumdl": {Version: "arm"}}},
+		"windows-x64":   {Tools: map[string]ToolEntry{"rumdl": {Version: "x64"}, "ruff": {Version: "x64"}}},
+		"linux-x64":     {Tools: map[string]ToolEntry{"ruff": {Version: "linux"}}},
+	}}
+	tools, origin, ok := toolsForHost(manifest, "windows-arm64")
+	if !ok || tools["rumdl"].Version != "arm" || origin["rumdl"] != "windows-arm64" || origin["ruff"] != "windows-x64" {
+		t.Fatalf("arm64 tools = %v origin = %v", tools, origin)
+	}
+	if linux, _, _ := toolsForHost(manifest, "linux-arm64"); len(linux) != 0 {
+		t.Fatalf("only Windows on ARM borrows x64 tools: %v", linux)
+	}
+}

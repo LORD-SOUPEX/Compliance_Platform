@@ -281,6 +281,32 @@ func BuildInvocation(
 		prefix := append([]string{"--format=json"}, catalogArgs...)
 		return invocationWithFiles(executable, prefix, shFiles), nil
 
+	case "shfmt":
+		shFiles, skip := exclusiveFiles(filesInRoot, repoRoot, ctrl.ExcludeRoots, func(file string) bool {
+			return strings.EqualFold(filepath.Ext(file), ".sh")
+		})
+		if skip {
+			return nil, coveredByNestedRoot()
+		}
+		if len(shFiles) == 0 {
+			return nil, errors.New("aucun script Shell pour shfmt")
+		}
+		// -l lists the files whose formatting differs; nothing is rewritten.
+		return invocationWithFiles(executable, append([]string{"-l"}, catalogArgs...), shFiles), nil
+
+	case "kubeconform":
+		manifests, skip := exclusiveFiles(filesInRoot, repoRoot, ctrl.ExcludeRoots, kubernetesManifest)
+		if skip {
+			return nil, coveredByNestedRoot()
+		}
+		if len(manifests) == 0 {
+			return nil, &ControlSkip{Code: "not_applicable", Message: "Aucun manifeste Kubernetes rendu dans cette racine."}
+		}
+		cache := filepath.Join(filepath.Dir(osutil.TrivyCacheDir()), "kubeconform")
+		_ = os.MkdirAll(cache, 0o755)
+		prefix := []string{"-output", "json", "-summary", "-ignore-missing-schemas", "-cache", cache}
+		return invocationWithFiles(executable, append(prefix, catalogArgs...), manifests), nil
+
 	case "hadolint":
 		containerFiles, skip := exclusiveFiles(filesInRoot, repoRoot, ctrl.ExcludeRoots, discovery.IsContainerFile)
 		if skip {
@@ -307,7 +333,17 @@ func BuildInvocation(
 		if config := yamllintConfig(root, platformRoot, configured); config != "" {
 			arguments = append(arguments, "-c", config)
 		}
-		arguments = append(arguments, root)
+		if ctrl.Technology == "yaml" {
+			// Generic YAML roots are folders: lint their own files, not the
+			// sub-folders that belong to other roots (Ansible, other YAML roots).
+			yamlFiles := yamlFilesOf(root)
+			if len(yamlFiles) == 0 {
+				return nil, &ControlSkip{Code: "not_applicable", Message: "Aucun fichier YAML hors template dans cette racine."}
+			}
+			arguments = append(arguments, yamlFiles...)
+		} else {
+			arguments = append(arguments, root)
+		}
 		if isPyRuntime {
 			arguments = append([]string{"-m", "yamllint"}, arguments...)
 		}
@@ -468,6 +504,44 @@ func BuildInvocation(
 		GitleaksReport: gitleaksReport,
 		Env:            extraEnv,
 	}, nil
+}
+
+// kubernetesManifest keeps rendered manifests: YAML with apiVersion and kind, no template marker.
+func kubernetesManifest(file string) bool {
+	ext := strings.ToLower(filepath.Ext(file))
+	if ext != ".yml" && ext != ".yaml" {
+		return false
+	}
+	info, err := os.Stat(file)
+	if err != nil || info.Size() > 1024*1024 {
+		return false
+	}
+	body, err := os.ReadFile(file)
+	if err != nil {
+		return false
+	}
+	text := string(body)
+	return strings.Contains(text, "apiVersion:") && strings.Contains(text, "kind:") && !strings.Contains(text, "{{")
+}
+
+// yamlFilesOf lists the YAML files directly in dir, templates excluded.
+func yamlFilesOf(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, entry := range entries {
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		if entry.IsDir() || (ext != ".yml" && ext != ".yaml") {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		if body, err := os.ReadFile(path); err == nil && !strings.Contains(string(body), "{{") {
+			files = append(files, path)
+		}
+	}
+	return files
 }
 
 // toolCrashed tells a tool that stopped on its own error from a tool that
@@ -1331,6 +1405,9 @@ func versionProbeArgs(executable, command string) []string {
 	}
 	if command == "terraform" || command == "tofu" || command == "opentofu" {
 		return []string{"version"}
+	}
+	if command == "kubeconform" {
+		return []string{"-v"}
 	}
 	return []string{"--version"}
 }

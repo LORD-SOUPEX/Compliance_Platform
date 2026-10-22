@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_revision": 1,
+  "catalog_revision": 2,
   "controls": [
     {
       "id": "terraform.format.terraform",
@@ -1053,8 +1053,16 @@
       "severity": "medium",
       "selection_policy": "all",
       "applicability": {
-        "technology_status": ["detected"],
-        "evidence_extensions": [".js", ".jsx", ".mjs", ".cjs", ".vue"]
+        "technology_status": [
+          "detected"
+        ],
+        "evidence_extensions": [
+          ".js",
+          ".jsx",
+          ".mjs",
+          ".cjs",
+          ".vue"
+        ]
       },
       "parameters": {},
       "dependencies": [],
@@ -1062,34 +1070,17 @@
       "cost": "low",
       "side_effect_level": "read_only",
       "permissions": [],
-      "platform_support": ["windows-x64", "linux-x64", "linux-arm64", "macos-x64", "macos-arm64"],
+      "platform_support": [
+        "windows-x64",
+        "linux-x64",
+        "linux-arm64",
+        "macos-x64",
+        "macos-arm64"
+      ],
       "objective": "Lint JavaScript, JSX et Vue avec la configuration ESLint du dépôt, ou une configuration minimale si elle est absente.",
-      "limitations": ["Utilise node_modules/.bin/eslint du projet cible lorsqu'il est présent, sinon eslint installé dans ~/.compliance/tools/node. Sans configuration, le moteur passe --no-config-lookup et des règles de base."]
-    },
-    {
-      "id": "javascript.security.gitleaks",
-      "name": "JavaScript secrets",
-      "technology": "javascript",
-      "capability": "security",
-      "tool": {
-        "name": "gitleaks",
-        "command": "gitleaks"
-      },
-      "severity": "high",
-      "selection_policy": "all",
-      "applicability": {
-        "technology_status": ["detected"],
-        "evidence_extensions": [".js", ".jsx", ".vue", "package.json"]
-      },
-      "parameters": {},
-      "dependencies": [],
-      "timeout_seconds": 300,
-      "cost": "medium",
-      "side_effect_level": "read_only",
-      "permissions": [],
-      "platform_support": ["windows-x64", "linux-x64", "linux-arm64", "macos-x64", "macos-arm64"],
-      "objective": "Rechercher des secrets dans les sources JavaScript du dépôt.",
-      "limitations": ["Scan du dossier cible sans historique git. node_modules, .git, dist, build et .venv sont exclus. Le secret n'est pas recopié dans le rapport."]
+      "limitations": [
+        "Utilise node_modules/.bin/eslint du projet cible lorsqu'il est présent, sinon eslint installé dans ~/.compliance/tools/node. Sans configuration, le moteur passe --no-config-lookup et des règles de base."
+      ]
     },
     {
       "id": "typescript.lint.eslint",
@@ -1103,8 +1094,16 @@
       "severity": "medium",
       "selection_policy": "all",
       "applicability": {
-        "technology_status": ["detected"],
-        "evidence_extensions": [".ts", ".tsx", ".mts", ".cts", "tsconfig.json"]
+        "technology_status": [
+          "detected"
+        ],
+        "evidence_extensions": [
+          ".ts",
+          ".tsx",
+          ".mts",
+          ".cts",
+          "tsconfig.json"
+        ]
       },
       "parameters": {},
       "dependencies": [],
@@ -1112,9 +1111,17 @@
       "cost": "low",
       "side_effect_level": "read_only",
       "permissions": [],
-      "platform_support": ["windows-x64", "linux-x64", "linux-arm64", "macos-x64", "macos-arm64"],
+      "platform_support": [
+        "windows-x64",
+        "linux-x64",
+        "linux-arm64",
+        "macos-x64",
+        "macos-arm64"
+      ],
       "objective": "Lint TypeScript avec la configuration ESLint du dépôt, ou une configuration minimale si elle est absente.",
-      "limitations": ["Utilise node_modules/.bin/eslint du projet cible, sinon la chaîne ~/.compliance/tools/node. Sans configuration, le moteur passe --no-config-lookup et des règles de base. Un seul contrôle couvre toutes les racines."]
+      "limitations": [
+        "Utilise node_modules/.bin/eslint du projet cible, sinon la chaîne ~/.compliance/tools/node. Sans configuration, le moteur passe --no-config-lookup et des règles de base. Un seul contrôle couvre toutes les racines."
+      ]
     },
     {
       "id": "typescript.check.tsc",
@@ -1128,8 +1135,16 @@
       "severity": "medium",
       "selection_policy": "all",
       "applicability": {
-        "technology_status": ["detected"],
-        "evidence_extensions": [".ts", ".tsx", ".mts", ".cts", "tsconfig.json"]
+        "technology_status": [
+          "detected"
+        ],
+        "evidence_extensions": [
+          ".ts",
+          ".tsx",
+          ".mts",
+          ".cts",
+          "tsconfig.json"
+        ]
       },
       "parameters": {},
       "dependencies": [],
@@ -1137,21 +1152,36 @@
       "cost": "low",
       "side_effect_level": "read_only",
       "permissions": [],
-      "platform_support": ["windows-x64", "linux-x64", "linux-arm64", "macos-x64", "macos-arm64"],
+      "platform_support": [
+        "windows-x64",
+        "linux-x64",
+        "linux-arm64",
+        "macos-x64",
+        "macos-arm64"
+      ],
       "objective": "Vérifier les types sans émission (tsc --noEmit) pour chaque tsconfig du dépôt.",
-      "limitations": ["Utilise node_modules/.bin/tsc du projet cible, sinon typescript installé dans ~/.compliance/tools/node. Aucun fichier n'est émis."]
+      "limitations": [
+        "Utilise node_modules/.bin/tsc du projet cible, sinon typescript installé dans ~/.compliance/tools/node. Aucun fichier n'est émis."
+      ]
     },
     {
       "id": "markdown.lint.rumdl",
       "name": "Markdown lint",
       "technology": "markdown",
       "capability": "documentation",
-      "tool": { "name": "rumdl", "command": "rumdl" },
+      "tool": {
+        "name": "rumdl",
+        "command": "rumdl"
+      },
       "severity": "low",
       "selection_policy": "all",
       "applicability": {
-        "technology_status": ["detected"],
-        "evidence_extensions": [".md"]
+        "technology_status": [
+          "detected"
+        ],
+        "evidence_extensions": [
+          ".md"
+        ]
       },
       "parameters": {},
       "dependencies": [],
@@ -1159,9 +1189,169 @@
       "cost": "low",
       "side_effect_level": "read_only",
       "permissions": [],
-      "platform_support": ["windows-x64", "linux-x64", "linux-arm64", "macos-x64", "macos-arm64"],
+      "platform_support": [
+        "windows-x64",
+        "linux-x64",
+        "linux-arm64",
+        "macos-x64",
+        "macos-arm64"
+      ],
       "objective": "Lint Markdown avec rumdl (binaire MIT). La commande est rumdl check sur la racine.",
-      "limitations": ["rumdl 0.2.79 ne publie pas de binaire windows-arm64. Sans configuration Markdown du dépôt (.rumdl.toml, rumdl.toml, .markdownlint.json, .markdownlint.yaml, .markdownlintrc ou un pyproject.toml qui mentionne rumdl), la règle de longueur de ligne MD013 est désactivée. Si une de ces configurations est présente, rumdl l'applique telle quelle et MD013 reste active. L'installation depuis le manifeste ne dépend pas d'une signature."]
+      "limitations": [
+        "rumdl 0.2.79 ne publie pas de binaire windows-arm64. Sans configuration Markdown du dépôt (.rumdl.toml, rumdl.toml, .markdownlint.json, .markdownlint.yaml, .markdownlintrc ou un pyproject.toml qui mentionne rumdl), la règle de longueur de ligne MD013 est désactivée. Si une de ces configurations est présente, rumdl l'applique telle quelle et MD013 reste active. L'installation depuis le manifeste ne dépend pas d'une signature."
+      ]
+    },
+    {
+      "id": "secrets.security.gitleaks",
+      "name": "Secrets",
+      "technology": "secrets",
+      "capability": "security",
+      "tool": {
+        "name": "gitleaks",
+        "command": "gitleaks"
+      },
+      "severity": "high",
+      "selection_policy": "all",
+      "applicability": {
+        "technology_status": [
+          "detected"
+        ],
+        "evidence_extensions": []
+      },
+      "parameters": {},
+      "dependencies": [],
+      "timeout_seconds": 300,
+      "cost": "medium",
+      "side_effect_level": "read_only",
+      "permissions": [],
+      "platform_support": [
+        "windows-x64",
+        "linux-x64",
+        "linux-arm64",
+        "macos-x64",
+        "macos-arm64"
+      ],
+      "objective": "Rechercher des secrets dans tout le dépôt, quelles que soient ses technologies.",
+      "limitations": [
+        "Scan du dossier cible sans historique git. Les dossiers ignorés par la découverte, node_modules et .venv sont exclus. Le secret n'est pas recopié dans le rapport."
+      ]
+    },
+    {
+      "id": "yaml.lint.yamllint",
+      "name": "YAML lint",
+      "technology": "yaml",
+      "capability": "linting",
+      "tool": {
+        "name": "yamllint",
+        "command": "yamllint"
+      },
+      "severity": "low",
+      "selection_policy": "all",
+      "applicability": {
+        "technology_status": [
+          "detected"
+        ],
+        "evidence_extensions": [
+          ".yml",
+          ".yaml"
+        ]
+      },
+      "parameters": {
+        "configuration": ".yamllint.yml"
+      },
+      "dependencies": [],
+      "timeout_seconds": 300,
+      "cost": "low",
+      "side_effect_level": "read_only",
+      "permissions": [],
+      "platform_support": [
+        "windows-x64",
+        "linux-x64",
+        "linux-arm64",
+        "macos-x64",
+        "macos-arm64"
+      ],
+      "objective": "Vérifier la syntaxe et la forme des fichiers YAML hors Ansible.",
+      "limitations": [
+        "Les fichiers contenant des marqueurs de template ({{) ne sont pas analysés."
+      ]
+    },
+    {
+      "id": "shell.format.shfmt",
+      "name": "Shell format",
+      "technology": "shell",
+      "capability": "formatting",
+      "tool": {
+        "name": "shfmt",
+        "command": "shfmt"
+      },
+      "severity": "low",
+      "selection_policy": "all",
+      "applicability": {
+        "technology_status": [
+          "detected"
+        ],
+        "evidence_extensions": [
+          ".sh"
+        ]
+      },
+      "parameters": {},
+      "dependencies": [],
+      "timeout_seconds": 300,
+      "cost": "low",
+      "side_effect_level": "read_only",
+      "permissions": [],
+      "platform_support": [
+        "windows-x64",
+        "linux-x64",
+        "linux-arm64",
+        "macos-x64",
+        "macos-arm64"
+      ],
+      "objective": "Vérifier le formatage des scripts Shell.",
+      "limitations": [
+        "Les scripts sont détectés par l'extension .sh."
+      ]
+    },
+    {
+      "id": "kubernetes.schema.kubeconform",
+      "name": "Kubernetes schema",
+      "technology": "kubernetes",
+      "capability": "schema validation",
+      "tool": {
+        "name": "kubeconform",
+        "command": "kubeconform"
+      },
+      "severity": "medium",
+      "selection_policy": "all",
+      "applicability": {
+        "technology_status": [
+          "detected"
+        ],
+        "evidence_extensions": [
+          ".yml",
+          ".yaml"
+        ]
+      },
+      "parameters": {},
+      "dependencies": [],
+      "timeout_seconds": 300,
+      "cost": "low",
+      "side_effect_level": "network",
+      "permissions": [
+        "network"
+      ],
+      "platform_support": [
+        "windows-x64",
+        "linux-x64",
+        "linux-arm64",
+        "macos-x64",
+        "macos-arm64"
+      ],
+      "objective": "Valider les manifestes Kubernetes contre les schémas de l'API.",
+      "limitations": [
+        "Les schémas sont téléchargés depuis le dépôt public kubernetes-json-schema. Les ressources sans schéma connu (CRD) sont ignorées."
+      ]
     }
   ]
 }

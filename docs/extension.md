@@ -65,10 +65,13 @@ ESLint et `tsc` sont résolus en priorité dans le `node_modules` de la cible si
 | helm.policy.checkov | helm | checkov |
 | shell.lint.shellcheck | shell | shellcheck |
 | javascript.lint.eslint | javascript | eslint |
-| javascript.security.gitleaks | javascript | gitleaks |
 | typescript.lint.eslint | typescript | eslint |
 | typescript.check.tsc | typescript | tsc |
 | markdown.lint.rumdl | markdown | rumdl |
+| secrets.security.gitleaks | secrets | gitleaks |
+| yaml.lint.yamllint | yaml | yamllint |
+| shell.format.shfmt | shell | shfmt |
+| kubernetes.schema.kubeconform | kubernetes | kubeconform |
 <!-- catalog-controls:end -->
 
 ## Démarrage

@@ -228,8 +228,8 @@ func UpgradeInstalledTools(opts UpgradeOptions) []string {
 		baseline = active
 	}
 	platform := DetectPlatform()
-	activeTools := active.Platforms[platform].Tools
-	baseTools := baseline.Platforms[platform].Tools
+	activeTools, origin, _ := toolsForHost(active, platform)
+	baseTools, _, _ := toolsForHost(baseline, platform)
 	stamp := readInstalledVersions(opts.CacheDir)
 	changed := false
 	var upgraded []string
@@ -239,7 +239,7 @@ func UpgradeInstalledTools(opts UpgradeOptions) []string {
 	}
 	for _, name := range names {
 		entry := activeTools[name]
-		if !toolPresent(opts.CacheDir, platform, name, entry) {
+		if !toolPresent(opts.CacheDir, origin[name], name, entry) {
 			continue
 		}
 		known := stamp[name]

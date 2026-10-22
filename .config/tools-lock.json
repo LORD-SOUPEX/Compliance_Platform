@@ -9,7 +9,9 @@
     "hadolint": "2.15.1",
     "terragrunt": "1.1.6",
     "shellcheck": "0.10.0",
-    "rumdl": "0.2.79"
+    "rumdl": "0.2.79",
+    "shfmt": "3.14.1",
+    "kubeconform": "0.8.0"
   },
   "python": {
     "cpython": "3.11.9",

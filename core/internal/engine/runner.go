@@ -70,6 +70,10 @@ func parseToolFindings(command, stdout, repo string) []report.LocatedLeak {
 		leaks = parseFmtFiles(stdout, repo)
 	case "terragrunt":
 		leaks = parseTerragruntFmt(stdout, repo)
+	case "shfmt":
+		leaks = parseShfmt(stdout, repo)
+	case "kubeconform":
+		leaks = parseKubeconform(stdout, repo)
 	case "Invoke-ScriptAnalyzer":
 		leaks = parsePSScriptAnalyzer(stdout, repo)
 	case "ruff":
@@ -353,6 +357,54 @@ func parseTrivy(stdout, repo string) []report.LocatedLeak {
 			})
 		}
 	}
+	return leaks
+}
+
+// parseShfmt reads the file list printed by shfmt -l.
+func parseShfmt(stdout, repo string) []report.LocatedLeak {
+	var leaks []report.LocatedLeak
+	for _, line := range strings.Split(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.HasSuffix(strings.ToLower(line), ".sh") {
+			continue
+		}
+		leaks = append(leaks, report.LocatedLeak{
+			File: relativeToRepo(repo, line), Line: 1, Column: 1, RuleID: "shfmt", Description: "Le formatage du script diffère de shfmt.", Severity: "low",
+		})
+	}
+	return leaks
+}
+
+// parseKubeconform reads kubeconform -output json: one entry per invalid or failed resource.
+func parseKubeconform(stdout, repo string) []report.LocatedLeak {
+	var leaks []report.LocatedLeak
+	decodeJSONDocuments(stdout, func(raw json.RawMessage) {
+		var doc struct {
+			Resources []struct {
+				Filename string `json:"filename"`
+				Kind     string `json:"kind"`
+				Name     string `json:"name"`
+				Status   string `json:"status"`
+				Msg      string `json:"msg"`
+			} `json:"resources"`
+		}
+		if json.Unmarshal(raw, &doc) != nil {
+			return
+		}
+		for _, resource := range doc.Resources {
+			if resource.Status != "statusInvalid" && resource.Status != "statusError" {
+				continue
+			}
+			severity := "medium"
+			if resource.Status == "statusError" {
+				severity = "high"
+			}
+			description := strings.TrimSpace(resource.Kind + " " + resource.Name + " : " + resource.Msg)
+			leaks = append(leaks, report.LocatedLeak{
+				File: relativeToRepo(repo, resource.Filename), Line: 1, Column: 1, RuleID: resource.Status, Description: description, Severity: severity,
+			})
+		}
+	})
 	return leaks
 }
 

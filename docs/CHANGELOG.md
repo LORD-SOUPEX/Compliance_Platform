@@ -28,6 +28,11 @@
 - **ESLint, tsc, Gitleaks** : ces contrôles réunissent plusieurs racines, mais n'analysaient que la première. ESLint tourne maintenant une fois par racine, dans cette racine. `tsc` vérifie tous les `tsconfig.json` même après une erreur. Gitleaks parcourt tout le dépôt.
 - **Lecture des sorties** : analyseurs ajoutés pour PSScriptAnalyzer (fichier, ligne, règle) et `terragrunt hcl fmt` ; ESLint lit une sortie par exécution.
 - **Trivy** : au premier lancement, sans base de vulnérabilités, l'outil s'arrêtait en `FATAL` et le contrôle passait pour un échec de conformité. La base est téléchargée pour cet appel (le contrôle a déjà la permission réseau). Un outil arrêté sur sa propre erreur rend le statut « erreur » (`tool_failed`), pas « échec ».
+- **Secrets sur tout dépôt** : Gitleaks ne dépend plus de JavaScript. La technologie `secrets` est détectée dans tout dépôt et le contrôle `secrets.security.gitleaks` remplace `javascript.security.gitleaks`.
+- **YAML générique** : `yaml.lint.yamllint` vérifie les fichiers YAML hors racines Ansible (déjà couvertes) et hors templates (`{{`), dossier par dossier.
+- **shfmt** (`shell.format.shfmt`) liste les scripts dont le formatage diffère ; **kubeconform** (`kubernetes.schema.kubeconform`, permission réseau) valide les manifestes rendus contre les schémas de l'API Kubernetes, avec un cache local.
+- **Windows sur ARM** : un outil absent de l'entrée `windows-arm64` du manifeste est pris dans `windows-x64` (émulation x64 de Windows 11), pour l'installation, la résolution et le bouton d'installation de l'extension.
+- **Catalogue** : révision 2. Les versions de shfmt (3.14.1) et kubeconform (0.8.0) sont dans `.config/tools-lock.json` et `scripts/build_and_publish_tools.py`, prêtes à publier sur `tools-v1`.
 - **`compliance run`** prend le verrou partagé des outils comme le démon : un audit lancé pendant une installation attend sa fin. `COMPLIANCE_TOOLS_DIR` déplace le dossier des outils sans changer le profil utilisateur.
 
 ## 2.1.3

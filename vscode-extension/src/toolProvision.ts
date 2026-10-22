@@ -46,8 +46,10 @@ export function classifyProvisionError(message: string): { code: string; message
 export function selectManifestTools(manifest: unknown, platform: string, commands: string[]): ProvisionTool[] {
     if (!manifest || typeof manifest !== 'object') { return []; }
     const platforms = (manifest as { platforms?: Record<string, { tools?: Record<string, { version?: string; archive_url?: string }> }> }).platforms;
-    const tools = platforms?.[platform]?.tools;
-    if (!tools) { return []; }
+    // Windows 11 on ARM runs x64 tools through emulation: same rule as the engine (PlatformCandidates).
+    const candidates = platform === 'windows-arm64' ? ['windows-arm64', 'windows-x64'] : [platform];
+    const tools: Record<string, { version?: string; archive_url?: string }> = {};
+    for (const candidate of [...candidates].reverse()) { Object.assign(tools, platforms?.[candidate]?.tools || {}); }
     return commands.filter(command => tools[command]).map(command => ({
         command,
         version: String(tools[command].version || ''),

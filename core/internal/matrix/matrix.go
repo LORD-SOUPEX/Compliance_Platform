@@ -240,6 +240,9 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 			if command == "terraform" || command == "tofu" || command == "opentofu" {
 				probeArgs = []string{"version"}
 			}
+			if command == "kubeconform" {
+				probeArgs = []string{"-v"}
+			}
 		}
 
 		timeout := osutil.ProbeTimeoutFor(command)
@@ -541,9 +544,11 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 	}
 
 	// Native binary in registry cache (~/.compliance/tools/bin/<platform>/<command>[.exe])
-	cached := filepath.Join(cacheRoot, "bin", platform.ID, command+ext)
-	if info, err := os.Stat(cached); err == nil && !info.IsDir() {
-		return probeCommand(cached, true)
+	for _, candidate := range distribution.PlatformCandidates(platform.ID) {
+		cached := filepath.Join(cacheRoot, "bin", candidate, command+ext)
+		if info, err := os.Stat(cached); err == nil && !info.IsDir() {
+			return probeCommand(cached, true)
+		}
 	}
 
 	// Darwin tool directories, then system PATH

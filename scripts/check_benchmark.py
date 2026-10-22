@@ -19,7 +19,7 @@ from collections import Counter
 
 EXPECTED_TECHNOLOGIES = {
     "ansible", "docker", "helm", "javascript", "kubernetes", "markdown", "opentofu",
-    "powershell", "python", "shell", "terraform", "terragrunt", "typescript",
+    "powershell", "python", "secrets", "shell", "terraform", "terragrunt", "typescript", "yaml",
 }
 
 

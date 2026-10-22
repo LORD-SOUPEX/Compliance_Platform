@@ -60,10 +60,13 @@ Les sessions conservées vont de 1 à 1000 (`compliance.maxSessions`, défaut 5)
 | helm.policy.checkov | helm | checkov |
 | shell.lint.shellcheck | shell | shellcheck |
 | javascript.lint.eslint | javascript | eslint |
-| javascript.security.gitleaks | javascript | gitleaks |
 | typescript.lint.eslint | typescript | eslint |
 | typescript.check.tsc | typescript | tsc |
 | markdown.lint.rumdl | markdown | rumdl |
+| secrets.security.gitleaks | secrets | gitleaks |
+| yaml.lint.yamllint | yaml | yamllint |
+| shell.format.shfmt | shell | shfmt |
+| kubernetes.schema.kubeconform | kubernetes | kubeconform |
 <!-- catalog-controls:end -->
 
 ---

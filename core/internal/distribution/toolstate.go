@@ -22,6 +22,38 @@ const (
 	toolsGenerationName = ".generation"
 )
 
+// PlatformCandidates lists the manifest platforms that can serve a host, best first.
+// Windows 11 on ARM runs x64 binaries through emulation: a tool absent from the
+// windows-arm64 entry is taken from windows-x64.
+func PlatformCandidates(platform string) []string {
+	if platform == "windows-arm64" {
+		return []string{"windows-arm64", "windows-x64"}
+	}
+	return []string{platform}
+}
+
+// toolsForHost merges the manifest entries usable on platform: each tool comes
+// from the first candidate platform that lists it, with that platform's id.
+func toolsForHost(manifest RuntimeManifest, platform string) (map[string]ToolEntry, map[string]string, bool) {
+	tools := map[string]ToolEntry{}
+	origin := map[string]string{}
+	known := false
+	for _, candidate := range PlatformCandidates(platform) {
+		entry, ok := manifest.Platforms[candidate]
+		if !ok {
+			continue
+		}
+		known = true
+		for name, tool := range entry.Tools {
+			if _, seen := tools[name]; !seen {
+				tools[name] = tool
+				origin[name] = candidate
+			}
+		}
+	}
+	return tools, origin, known
+}
+
 // LockTools takes the cross-process lock of the tools folder. Audits and plans
 // take it shared; installations and upgrades take it exclusive. The same lock
 // serialises the daemon, `compliance runtime sync` and several VS Code windows.
@@ -57,9 +89,15 @@ func ToolsGeneration(cacheDir string) string {
 	return strings.TrimSpace(string(body))
 }
 
+// bumpToolsGeneration always moves the value forward: two installations within
+// the clock resolution (coarse on Windows) must still produce two generations.
 func bumpToolsGeneration(cacheDir string) {
+	next := time.Now().UnixNano()
+	if previous, err := strconv.ParseInt(ToolsGeneration(cacheDir), 10, 64); err == nil && next <= previous {
+		next = previous + 1
+	}
 	path := filepath.Join(cacheDir, toolsGenerationName)
-	_ = os.WriteFile(path, []byte(strconv.FormatInt(time.Now().UnixNano(), 10)), 0o644)
+	_ = os.WriteFile(path, []byte(strconv.FormatInt(next, 10)), 0o644)
 }
 
 // cleanupInterrupted removes staging and trash folders left by an installation

@@ -573,3 +573,48 @@ func TestToolCrashIsNotAComplianceFailure(t *testing.T) {
 		t.Fatal("findings or another tool taken for a crash")
 	}
 }
+
+func TestShfmtAndKubeconformParsers(t *testing.T) {
+	repo := t.TempDir()
+	script := filepath.Join(repo, "scripts", "a.sh")
+	shfmt := parseShfmt(script+"\nnot-a-script.txt\n", repo)
+	if len(shfmt) != 1 || shfmt[0].File != "scripts/a.sh" || shfmt[0].RuleID != "shfmt" {
+		t.Fatalf("shfmt = %+v", shfmt)
+	}
+	manifest := filepath.Join(repo, "k8s", "pod.yaml")
+	raw, _ := json.Marshal(map[string]interface{}{"resources": []map[string]string{
+		{"filename": manifest, "kind": "Pod", "name": "debug", "status": "statusInvalid", "msg": "spec.containers: Required value"},
+		{"filename": manifest, "kind": "Service", "name": "ok", "status": "statusValid"},
+	}})
+	kube := parseKubeconform(string(raw), repo)
+	if len(kube) != 1 || kube[0].File != "k8s/pod.yaml" || kube[0].Severity != "medium" || !strings.Contains(kube[0].Description, "Required value") {
+		t.Fatalf("kubeconform = %+v", kube)
+	}
+}
+
+func TestManifestAndYAMLFileSelection(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"pod.yaml":      "apiVersion: v1\nkind: Pod\n",
+		"values.yaml":   "replicas: 2\n",
+		"template.yaml": "apiVersion: v1\nkind: Pod\nname: {{ .Values.name }}\n",
+		"notes.txt":     "x\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", "other.yml"), []byte("a: 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !kubernetesManifest(filepath.Join(dir, "pod.yaml")) || kubernetesManifest(filepath.Join(dir, "values.yaml")) || kubernetesManifest(filepath.Join(dir, "template.yaml")) {
+		t.Fatal("manifest selection")
+	}
+	files := yamlFilesOf(dir)
+	if len(files) != 2 {
+		t.Fatalf("own YAML files without templates or sub-folders expected, got %v", files)
+	}
+}

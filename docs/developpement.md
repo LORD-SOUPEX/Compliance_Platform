@@ -32,7 +32,7 @@ export COMPLIANCE_TOOLS_DIR="$PWD/.tools/registry"
 python scripts/check_benchmark.py benchmark.json --min-executed 25
 ```
 
-Le vérificateur exige les 13 technologies, aucune erreur d'exécution, une anomalie localisée pour chaque contrôle en échec et un processus enregistré pour chaque contrôle exécuté.
+Le vérificateur exige les 15 technologies, aucune erreur d'exécution, une anomalie localisée pour chaque contrôle en échec et un processus enregistré pour chaque contrôle exécuté.
 
 ## Registre `tools-v1`
 

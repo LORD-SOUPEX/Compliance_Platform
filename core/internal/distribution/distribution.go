@@ -136,12 +136,12 @@ func ToolListed(manifestPath, platform, tool string) bool {
 	if err := json.Unmarshal(body, &manifest); err != nil {
 		return false
 	}
-	entry, ok := manifest.Platforms[platform]
+	tools, _, ok := toolsForHost(manifest, platform)
 	if !ok {
 		return false
 	}
 	for _, name := range manifestAliases(tool) {
-		if _, ok = entry.Tools[name]; ok {
+		if _, ok = tools[name]; ok {
 			return true
 		}
 	}
@@ -161,12 +161,12 @@ func activeTool(platform, command string) (ToolEntry, bool) {
 	if err := json.Unmarshal(body, &manifest); err != nil {
 		return ToolEntry{}, false
 	}
-	entry, ok := manifest.Platforms[platform]
+	tools, _, ok := toolsForHost(manifest, platform)
 	if !ok {
 		return ToolEntry{}, false
 	}
 	for _, name := range manifestAliases(command) {
-		if tool, found := entry.Tools[name]; found {
+		if tool, found := tools[name]; found {
 			return tool, true
 		}
 	}
@@ -290,7 +290,7 @@ func SyncRuntime(opts SyncOptions) (*SyncResult, error) {
 
 	registryBase := ResolveRegistryURL(opts.RegistryURL, manifest.RegistryBaseURL)
 
-	plat, ok := manifest.Platforms[opts.Platform]
+	hostTools, origin, ok := toolsForHost(manifest, opts.Platform)
 	if !ok {
 		return nil, fmt.Errorf("%w: %s", ErrPlatformUnsupported, opts.Platform)
 	}
@@ -305,8 +305,8 @@ func SyncRuntime(opts SyncOptions) (*SyncResult, error) {
 		SyncedTools: make(map[string]string),
 	}
 
-	names := make([]string, 0, len(plat.Tools))
-	for name := range plat.Tools {
+	names := make([]string, 0, len(hostTools))
+	for name := range hostTools {
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -323,13 +323,14 @@ func SyncRuntime(opts SyncOptions) (*SyncResult, error) {
 			continue
 		}
 		requested = true
-		dest, err := installEntry(opts.CacheDir, opts.Platform, name, plat.Tools[name], plat.Tools, client, opts, registryBase)
+		// A tool borrowed from windows-x64 is installed under bin/windows-x64, where the resolver looks too.
+		dest, err := installEntry(opts.CacheDir, origin[name], name, hostTools[name], hostTools, client, opts, registryBase)
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("%s (%s)", name, err))
 			continue
 		}
 		result.SyncedTools[name] = dest
-		rememberToolVersion(opts.CacheDir, name, plat.Tools[name].Version)
+		rememberToolVersion(opts.CacheDir, name, hostTools[name].Version)
 	}
 	if len(result.SyncedTools) > 0 {
 		bumpToolsGeneration(opts.CacheDir)
