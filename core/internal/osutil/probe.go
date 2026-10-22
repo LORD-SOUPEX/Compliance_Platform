@@ -21,9 +21,10 @@ var ProbeTimeoutFor = func(command string) time.Duration {
 }
 
 // CheckovProbeArgs imports the package and prints its version without
-// starting the Checkov CLI, which pulls policies and the network.
+// starting the Checkov CLI, which pulls policies and the network. Checkov 3
+// has no checkov.__version__: the installed distribution metadata gives it.
 func CheckovProbeArgs() []string {
-	return []string{"-c", "import checkov; print(getattr(checkov, '__version__', ''))"}
+	return []string{"-c", "import importlib.metadata as m, checkov; print(getattr(checkov, '__version__', '') or m.version('checkov'))"}
 }
 
 // PythonModuleArgs builds `python -m <module> <version args>`.

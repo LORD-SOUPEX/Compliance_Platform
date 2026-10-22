@@ -4,6 +4,7 @@ package osutil
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -194,7 +195,8 @@ func runBoundedOS(ctx context.Context, spec CommandSpec) (*ProcessResult, error)
 		<-waitCh
 	case waitErr := <-waitCh:
 		if waitErr != nil {
-			if exitErr, ok := waitErr.(*exec.ExitError); ok {
+			var exitErr *exec.ExitError
+			if errors.As(waitErr, &exitErr) {
 				result.ExitCode = exitErr.ExitCode()
 			} else {
 				result.ExitCode = 1
@@ -232,5 +234,5 @@ func SetHideWindow(cmd *exec.Cmd) {
 }
 
 func errorsIs(err, target error) bool {
-	return err == target
+	return errors.Is(err, target)
 }

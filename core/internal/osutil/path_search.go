@@ -77,7 +77,12 @@ func ScriptCommand(exePath string, args []string) (string, []string) {
 }
 
 // DefaultToolCacheDir is the distribution cache written by compliance runtime sync.
+// COMPLIANCE_TOOLS_DIR moves it (isolated local tests) without changing
+// the user profile, which some tools (hadolint) need to stay the real one.
 func DefaultToolCacheDir() string {
+	if dir := strings.TrimSpace(os.Getenv("COMPLIANCE_TOOLS_DIR")); dir != "" {
+		return dir
+	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return filepath.Join(".compliance", "tools")

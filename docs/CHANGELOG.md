@@ -18,6 +18,17 @@
 - **Plusieurs fenêtres** : fermer ou recharger une fenêtre n'arrête plus le démon des autres. Chaque fenêtre s'enregistre (`/api/v1/clients`) ; le démon s'arrête seul 30 minutes après le départ de la dernière (`COMPLIANCE_DAEMON_IDLE_MINUTES`, 0 désactive). Un démon lancé à la main ne s'arrête jamais seul.
 - **Barre d'état** : état du moteur (démarrage, prêt, mise à jour d'outils, indisponible), activité en cours, progression par outil pendant une installation.
 - **Selftest** : 24 étapes, avec le verrou des outils, le PATH vivant, la rotation du journal et la capture complète des sorties.
+- **Projets Node en sous-dossier** : ESLint et `tsc` sont cherchés dans `node_modules/.bin` de la racine du contrôle puis de ses parents, et la configuration ESLint d'un sous-dossier est respectée. Un dépôt dont l'application Node vit dans un sous-dossier n'est plus signalé « outil introuvable ».
+- **Masquage par défaut** : les jetons de forge (`ghp_`, `glpat_`), les clés AWS et les clés privées sont masqués dans les sorties d'outils, en plus des motifs `compliance.reportRedactionPatterns`.
+- **VSIX** : il n'est plus versionné dans Git ; `npm run package` le produit dans `vscode-extension/dist/`.
+- **Messages** : accents rétablis dans les messages de l'extension.
+- **Démo multi-technologies** : le dossier local `devsecops-compliance-benchmark` couvre toutes les technologies du catalogue ; `scripts/check_benchmark.py` vérifie un rapport de cet audit. Les défauts suivants en sont issus.
+- **OpenTofu** : TFLint et Checkov n'analysaient aucun fichier `.tofu` et rendaient un succès. Ils tournent maintenant sur une copie où `x.tofu` devient `x.tf`, et les anomalies citent les vrais fichiers `.tofu`. Le formatage `tofu fmt` est rattaché au fichier.
+- **Checkov** : la sonde lisait `checkov.__version__`, absent de Checkov 3 : l'outil du registre n'était jamais qualifié. La version vient désormais des métadonnées du paquet. Un Checkov qui n'a analysé aucune ressource rend un avertissement « rien analysé » (cas du chart Helm sans binaire `helm`) au lieu d'un succès.
+- **ESLint, tsc, Gitleaks** : ces contrôles réunissent plusieurs racines, mais n'analysaient que la première. ESLint tourne maintenant une fois par racine, dans cette racine. `tsc` vérifie tous les `tsconfig.json` même après une erreur. Gitleaks parcourt tout le dépôt.
+- **Lecture des sorties** : analyseurs ajoutés pour PSScriptAnalyzer (fichier, ligne, règle) et `terragrunt hcl fmt` ; ESLint lit une sortie par exécution.
+- **Trivy** : au premier lancement, sans base de vulnérabilités, l'outil s'arrêtait en `FATAL` et le contrôle passait pour un échec de conformité. La base est téléchargée pour cet appel (le contrôle a déjà la permission réseau). Un outil arrêté sur sa propre erreur rend le statut « erreur » (`tool_failed`), pas « échec ».
+- **`compliance run`** prend le verrou partagé des outils comme le démon : un audit lancé pendant une installation attend sa fin. `COMPLIANCE_TOOLS_DIR` déplace le dossier des outils sans changer le profil utilisateur.
 
 ## 2.1.3
 

@@ -255,33 +255,6 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-func findNode(root string) string {
-	if runtime.GOOS == "windows" {
-		winExe := filepath.Join(root, "node.exe")
-		if executablePresent(winExe) {
-			return winExe
-		}
-	} else {
-		posixExe := filepath.Join(root, "bin", "node")
-		if executablePresent(posixExe) {
-			return posixExe
-		}
-	}
-	var found string
-	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		base := strings.ToLower(d.Name())
-		if base == "node.exe" || base == "node" {
-			found = path
-			return filepath.SkipAll
-		}
-		return nil
-	})
-	return found
-}
-
 func pythonBinaryName(base string) bool {
 	name := strings.TrimSuffix(base, ".exe")
 	rest, ok := strings.CutPrefix(name, "python3.")
@@ -408,7 +381,7 @@ func extractTree(body []byte, sourceURL, dest string) error {
 func extractTarTree(tr *tar.Reader, dest string) error {
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return nil
 		}
 		if err != nil {
@@ -423,7 +396,7 @@ func extractTarTree(tr *tar.Reader, dest string) error {
 			if err := mkdirAll(target, 0755); err != nil {
 				return err
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg, tar.TypeRegA: //nolint:staticcheck // archives older than Go 1.11 still use TypeRegA
 			if err := mkdirAll(filepath.Dir(target), 0755); err != nil {
 				return err
 			}

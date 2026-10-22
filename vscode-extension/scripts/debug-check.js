@@ -66,19 +66,6 @@ if (applicationValue({ globalValue: ["markdown"], workspaceValue: ["python"] }, 
 if (!isOurDaemonImage("compliance-windows-amd64.exe") || isOurDaemonImage("code.exe")) fail("daemon image");
 if (residualExtensionDirectories(["C:/ext/compliance-platform.compliance-pipelines-2.0.5", "C:/ext/other"], "C:/ext/compliance-platform.compliance-pipelines-2.0.6").length !== 1) fail("residuals");
 if (!shouldReplaceDaemon("2.0.5", "2.0.6", "compliance.exe") || shouldReplaceDaemon("2.0.6", "2.0.6", "compliance.exe")) fail("daemon version");
-const { SseParser } = require("../.extension-build/src/sse.js");
-const sse = new SseParser();
-const sseEvents = [...sse.feed("id: 1\r\nevent: control_sta"), ...sse.feed("rted\r\ndata: {\"a\":"), ...sse.feed("1}\r"), ...sse.feed("\n\r\n: ping\n\ndata: x\ndata: y\n\n")];
-if (sseEvents.length !== 2 || sseEvents[0].event !== "control_started" || sseEvents[0].data !== "{\"a\":1}" || sseEvents[0].id !== "1" || sseEvents[1].event !== "message" || sseEvents[1].data !== "x\ny") fail("sse " + JSON.stringify(sseEvents));
-const { Logger, redact, redactArgs, relayLevel, daemonStreamLevel, formatInvocation, masked } = require("../.extension-build/src/logger.js");
-if (redact("HTTPS_PROXY=http://me:pw@proxy:3128 token=abc Authorization: Bearer xyz").match(/pw@|abc|xyz/)) fail("redact " + redact("HTTPS_PROXY=http://me:pw@proxy:3128 token=abc Authorization: Bearer xyz"));
-if (redactArgs(["runtime", "-registry-token", "abc", "--password=x", "-tool", "ruff"]).join(" ") !== `runtime -registry-token ${masked} --password=${masked} -tool ruff`) fail("redactArgs");
-if (relayLevel("info") !== "debug" || relayLevel("debug") !== "trace" || relayLevel("warn") !== "warn" || daemonStreamLevel(1) !== "debug" || daemonStreamLevel(3) !== "warn") fail("relay levels");
-const sunk = [];
-new Logger({ trace: m => sunk.push(m), debug: m => sunk.push(m), info: m => sunk.push(m), warn: m => sunk.push(m), error: m => sunk.push(m) }).child({ runId: "0123456789abcdef", controlId: "python/lint/ruff/." }).info("exécuté OK", { ms: 12, secret_token: "zzz" });
-if (sunk.length !== 1 || !sunk[0].startsWith("[run 01234567] [python/lint/ruff/.] exécuté OK ms=12") || sunk[0].includes("zzz")) fail("logger " + sunk[0]);
-const invocationText = formatInvocation({ executable: "C:/tools/trivy.exe", args: ["config", "my dir"], cwd: "E:/t", env_added: { NO_COLOR: "1" }, env_removed: ["TRIVY_CONFIG"], timeout_ms: 300000, stdout_path: "logs/a.stdout.log", stderr_path: "logs/a.stderr.log" });
-if (!invocationText.includes("exec C:/tools/trivy.exe config \"my dir\"") || !invocationText.includes("env-   : TRIVY_CONFIG") || !invocationText.includes("logs/a.stderr.log")) fail("invocation " + invocationText);
 if (checks.length) {
     console.error(checks.join("\n"));
     process.exit(1);

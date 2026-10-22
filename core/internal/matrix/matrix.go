@@ -623,7 +623,7 @@ func BuildCapabilityMatrix(
 			}
 
 			// Calculate availability
-			availability := "unavailable"
+			var availability string
 			if disc.Status == "ambiguous" {
 				availability = "ambiguous"
 			} else if disc.Status == "absent" {

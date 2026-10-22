@@ -194,7 +194,7 @@ compliance run -repo "/chemin/du/projet" -report reports/audit.json
 
 ### 4. Audit dans VS Code
 
-L'extension locale s'installe via le VSIX (`vscode-extension/dist/compliance-pipelines-2.1.3.vsix`). Seul Windows x64 est qualifié. Le manifeste et le catalogue se mettent à jour depuis la release `tools-v1` sans réinstaller ce VSIX :
+L'extension s'installe depuis le Marketplace, ou par le VSIX construit en local par `npm run package` dans `vscode-extension/dist/`. Le VSIX n'est pas versionné dans Git. Le manifeste et le catalogue se mettent à jour depuis la release `tools-v1` sans réinstaller ce VSIX :
 
 - Sélection de la cible d'audit (Target externe).
 - Préparation et inspection du plan ordonnancé.

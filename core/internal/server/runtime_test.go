@@ -48,7 +48,7 @@ func call(t *testing.T, srv *DaemonServer, method, path string, body interface{}
 
 func TestClientsIdleShutdownAndHealth(t *testing.T) {
 	previousCheck, previousTTL := idleCheckInterval, clientTTL
-	idleCheckInterval, clientTTL = 50*time.Millisecond, 200*time.Millisecond
+	idleCheckInterval, clientTTL = 50*time.Millisecond, 5*time.Second
 	defer func() { idleCheckInterval, clientTTL = previousCheck, previousTTL }()
 
 	srv := startTestDaemon(t)

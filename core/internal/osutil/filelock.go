@@ -45,7 +45,7 @@ func LockFile(ctx context.Context, path string, exclusive bool, onWait func()) (
 		select {
 		case <-ctx.Done():
 			_ = file.Close()
-			return nil, fmt.Errorf("%w (%s): %v", ErrLockTimeout, path, ctx.Err())
+			return nil, fmt.Errorf("%w (%s): %w", ErrLockTimeout, path, ctx.Err())
 		case <-time.After(200 * time.Millisecond):
 		}
 	}

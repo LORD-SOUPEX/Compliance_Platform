@@ -226,6 +226,7 @@ func Run(platformRoot string) (bool, []TestStep) {
 
 	// Step 7: Endpoint GET /api/v1/health
 	recordStep("Endpoint GET /api/v1/health (200, status=ok)", func() error {
+		//nolint:bodyclose // sendReq reads and closes the body
 		resp, body, err := sendReq("GET", "/api/v1/health", nil, nil)
 		if err != nil {
 			return err
@@ -247,6 +248,7 @@ func Run(platformRoot string) (bool, []TestStep) {
 	recordStep("Guardrail : rejet requête sur workspace non approuvé (400/403)", func() error {
 		unapprovedDir := filepath.Join(tempDir, "unapproved")
 		_ = os.MkdirAll(unapprovedDir, 0755)
+		//nolint:bodyclose // sendReq reads and closes the body
 		resp, _, err := sendReq("POST", "/api/v1/plans", map[string]interface{}{
 			"target_path": unapprovedDir,
 		}, nil)
@@ -261,6 +263,7 @@ func Run(platformRoot string) (bool, []TestStep) {
 
 	// Step 9: Endpoint POST /api/v1/workspaces/approve
 	recordStep("Endpoint POST /api/v1/workspaces/approve (200)", func() error {
+		//nolint:bodyclose // sendReq reads and closes the body
 		resp, body, err := sendReq("POST", "/api/v1/workspaces/approve", map[string]string{
 			"workspace_path": fixtureDir,
 		}, nil)
@@ -275,6 +278,7 @@ func Run(platformRoot string) (bool, []TestStep) {
 
 	// Step 10: Endpoint POST /api/v1/discovery
 	recordStep("Endpoint POST /api/v1/discovery (200)", func() error {
+		//nolint:bodyclose // sendReq reads and closes the body
 		resp, body, err := sendReq("POST", "/api/v1/discovery", map[string]string{
 			"target_path": fixtureDir,
 		}, nil)
@@ -296,6 +300,7 @@ func Run(platformRoot string) (bool, []TestStep) {
 
 	// Step 11: Endpoint POST /api/v1/plans
 	recordStep("Endpoint POST /api/v1/plans (200)", func() error {
+		//nolint:bodyclose // sendReq reads and closes the body
 		resp, body, err := sendReq("POST", "/api/v1/plans", map[string]interface{}{
 			"target_path": fixtureDir,
 		}, nil)
@@ -317,6 +322,7 @@ func Run(platformRoot string) (bool, []TestStep) {
 
 	// Step 12: Guardrail - apply_destroy without confirmation rejected (400)
 	recordStep("Guardrail : rejet apply_destroy sans confirmation explicite (400)", func() error {
+		//nolint:bodyclose // sendReq reads and closes the body
 		resp, _, err := sendReq("POST", "/api/v1/runs", map[string]interface{}{
 			"target_path":           fixtureDir,
 			"control_id":            "terraform/apply_destroy",
@@ -336,6 +342,7 @@ func Run(platformRoot string) (bool, []TestStep) {
 
 	// Step 13: Endpoint POST /api/v1/runs (plan_only run produces full canonical report)
 	recordStep("Endpoint POST /api/v1/runs (201, run_id créé)", func() error {
+		//nolint:bodyclose // sendReq reads and closes the body
 		resp, body, err := sendReq("POST", "/api/v1/runs", map[string]interface{}{
 			"target_path": fixtureDir,
 			"plan_only":   true,
@@ -391,6 +398,7 @@ func Run(platformRoot string) (bool, []TestStep) {
 	// Step 15: Endpoint POST /api/v1/runs/{id}/cancel
 	recordStep("Endpoint POST /api/v1/runs/{id}/cancel (200, annulation immédiate)", func() error {
 		// Launch a full run to cancel
+		//nolint:bodyclose // sendReq reads and closes the body
 		cResp, cBody, cErr := sendReq("POST", "/api/v1/runs", map[string]interface{}{
 			"target_path": fixtureDir,
 			"plan_only":   false,
@@ -407,6 +415,7 @@ func Run(platformRoot string) (bool, []TestStep) {
 		}
 		cancelRunID, _ = runResp["run_id"].(string)
 
+		//nolint:bodyclose // sendReq reads and closes the body
 		resp, body, err := sendReq("POST", fmt.Sprintf("/api/v1/runs/%s/cancel", cancelRunID), nil, nil)
 		if err != nil {
 			return err
@@ -438,6 +447,7 @@ func Run(platformRoot string) (bool, []TestStep) {
 	recordStep("Endpoint GET /api/v1/runs/{id}/report (200)", func() error {
 		deadline := time.Now().Add(5 * time.Second)
 		for time.Now().Before(deadline) {
+			//nolint:bodyclose // sendReq reads and closes the body
 			resp, body, err := sendReq("GET", fmt.Sprintf("/api/v1/runs/%s/report", completedRunID), nil, nil)
 			if err == nil && resp.StatusCode == http.StatusOK {
 				var rep map[string]interface{}
@@ -456,6 +466,7 @@ func Run(platformRoot string) (bool, []TestStep) {
 
 	// Step 18: Endpoint GET /api/v1/runs/{id}/logs/{control_id}
 	recordStep("Endpoint GET /api/v1/runs/{id}/logs/{control_id} (200 ou 404 géré)", func() error {
+		//nolint:bodyclose // sendReq reads and closes the body
 		resp, _, err := sendReq("GET", fmt.Sprintf("/api/v1/runs/%s/logs/nonexistent-control", completedRunID), nil, nil)
 		if err != nil {
 			return err
@@ -469,6 +480,7 @@ func Run(platformRoot string) (bool, []TestStep) {
 
 	// Step 19: Endpoint POST /api/v1/shutdown
 	recordStep("Endpoint POST /api/v1/shutdown (200, arrêt ordonné)", func() error {
+		//nolint:bodyclose // sendReq reads and closes the body
 		resp, _, err := sendReq("POST", "/api/v1/shutdown", nil, nil)
 		if err != nil {
 			return err
@@ -514,7 +526,7 @@ func Run(platformRoot string) (bool, []TestStep) {
 		if _, err := osutil.LockFile(short, lockPath, true, nil); !errors.Is(err, osutil.ErrLockTimeout) {
 			first()
 			second()
-			return fmt.Errorf("une installation a pris le verrou pendant un audit: %v", err)
+			return fmt.Errorf("une installation a pris le verrou pendant un audit: %w", err)
 		}
 		first()
 		second()
@@ -627,11 +639,18 @@ func PrintResults(passed bool, steps []TestStep) {
 	}
 	fmt.Printf("Résultat global : %s (%d/%d étapes réussies) en %d ms\n", verdict, passCount, len(steps), totalDur.Milliseconds())
 
-	statusQualification := "Windows x64 Qualifié"
-	if runtime.GOOS == "linux" {
-		statusQualification = "Linux x64 Qualifié (Selftest exécuté)"
-	} else if runtime.GOOS == "darwin" {
-		statusQualification = "macOS Qualifié (Selftest exécuté)"
+	arch := map[string]string{"amd64": "x64", "arm64": "ARM64"}[runtime.GOARCH]
+	if arch == "" {
+		arch = runtime.GOARCH
+	}
+	var statusQualification string
+	switch runtime.GOOS {
+	case "linux":
+		statusQualification = "Linux " + arch + " Qualifié (Selftest exécuté)"
+	case "darwin":
+		statusQualification = "macOS " + arch + " Qualifié (Selftest exécuté)"
+	default:
+		statusQualification = "Windows " + arch + " Qualifié"
 	}
 	if passed {
 		fmt.Printf("Statut plateforme : %s\n", statusQualification)

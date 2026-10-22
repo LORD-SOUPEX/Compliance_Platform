@@ -388,8 +388,12 @@ def package_vsix(target_platform=None):
         raise RuntimeError(
             "Build artifacts in .extension-build/src/ missing. Run Build first."
         )
-    for file in build_src.glob("*.js"):
-        extension_files.append((file, f"extension/.extension-build/src/{file.name}"))
+    # Modules live in sub-folders (daemon/, session/, report/); tests are not shipped.
+    for file in sorted(build_src.rglob("*.js")):
+        relative = file.relative_to(build_src).as_posix()
+        if relative.startswith("test/"):
+            continue
+        extension_files.append((file, f"extension/.extension-build/src/{relative}"))
 
     # 3. Binaries in bin/
     bin_dir = ext_dir / "bin"

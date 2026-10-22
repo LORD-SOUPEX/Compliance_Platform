@@ -3,6 +3,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -53,7 +54,7 @@ func AcquireLock(lockPath string) error {
 	r1, _, callErr := procLockFileEx.Call(file.Fd(), lockfileExclusiveLock|lockfileFailImmediately, 0, 1, 0, uintptr(unsafe.Pointer(&overlapped)))
 	if r1 == 0 {
 		_ = file.Close()
-		if callErr == errorLockViolation || callErr == errorIOPending {
+		if errors.Is(callErr, errorLockViolation) || errors.Is(callErr, errorIOPending) {
 			holder := ""
 			if data, readErr := os.ReadFile(lockPath); readErr == nil && len(data) > 0 {
 				holder = fmt.Sprintf(" (PID %s)", string(data))

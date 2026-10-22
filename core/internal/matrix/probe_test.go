@@ -21,7 +21,7 @@ import (
 
 func main() {
 	joined := strings.Join(os.Args[1:], " ")
-	if strings.Contains(joined, "import checkov") {
+	if strings.Contains(joined, "import") && strings.Contains(joined, "checkov") {
 		if os.Getenv("COMPLIANCE_PROBE_SLOW") == "1" {
 			time.Sleep(5 * time.Second)
 		}

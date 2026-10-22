@@ -227,7 +227,7 @@ Le dépôt contient Go, TypeScript, Python, JSON/YAML et Markdown : quatre des t
 
 ### 4.2 Actions correctives prioritaires
 
-1. **CI GitHub Actions** (`.github/workflows/ci.yml`), matrice `windows-latest`, `ubuntu-latest`, `ubuntu-24.04-arm`, `macos-13`, `macos-14` : `gofmt -l`, `go vet`, `go test -race`, `golangci-lint`, `govulncheck`, `tsc --noEmit`, ESLint, tests TS, `compliance selftest`, **`compliance run -repo .`** (dogfooding, rapport publié en artefact), puis `npm run package` (VSIX en artefact, plus dans Git). C'est aussi ce qui qualifierait Linux et macOS (aujourd'hui « Targeted »).
+1. ~~**CI GitHub Actions**~~ (abandonné : tout reste en local) (`.github/workflows/ci.yml`), matrice `windows-latest`, `ubuntu-latest`, `ubuntu-24.04-arm`, `macos-13`, `macos-14` : `gofmt -l`, `go vet`, `go test -race`, `golangci-lint`, `govulncheck`, `tsc --noEmit`, ESLint, tests TS, `compliance selftest`, **`compliance run -repo .`** (dogfooding, rapport publié en artefact), puis `npm run package` (VSIX en artefact, plus dans Git). C'est aussi ce qui qualifierait Linux et macOS (aujourd'hui « Targeted »).
 2. **Réparer pre-commit** : retirer les hooks orphelins ou recréer les scripts en version portable (Python), et pointer gitleaks vers le binaire résolu par `compliance` lui-même.
 3. **SecretStorage** pour `registryToken`, avec migration automatique du réglage existant puis effacement.
 4. **ESLint (flat config) + `typescript-eslint` strict** sur `vscode-extension/src`, avec les règles `no-floating-promises`, `no-explicit-any`, `no-empty` (catch) et `no-misused-promises`.
@@ -298,7 +298,7 @@ Ajouter un outil touche aujourd'hui sept endroits : catalogue, discovery, `Build
 | Linux | Préférer les builds **statiques ou musl** (ruff, trivy, biome, actionlint sont statiques) pour couvrir Alpine et les vieilles glibc. Bundle Python : `python-build-standalone` (`install_only` relocalisable) pour les 4 cibles POSIX. |
 | Windows | Chemins longs (`\\?\`, déjà géré au-delà de 248 caractères), exclusion Defender documentée pour `~/.compliance/tools`, verrous de fichiers : extraction en staging puis renommage (§2.3 B). |
 | windows-arm64 | Manifeste vide aujourd'hui. Court terme : **repli sur les assets `windows-x64`** (émulation x64 de Windows 11 ARM), signalé `platform_qualification_status: emulated`. Moyen terme : assets natifs quand l'amont les publie (ruff, biome, trivy, gitleaks le font). |
-| Bundles Python et Node POSIX | Construits en CI sur des runners natifs (matrice §4.2) par `build_and_publish_tools.py` : Node officiel `node-v22.x-<os>-<arch>.tar.xz` + `npm ci --omit=dev` d'un `package-lock` figé (eslint, typescript, stylelint, htmlhint) ; Python standalone + `pip install --require-hashes -r tools-requirements.lock`. |
+| Bundles Python et Node POSIX | Construits sur un hôte natif de chaque plateforme par `build_and_publish_tools.py` : Node officiel `node-v22.x-<os>-<arch>.tar.xz` + `npm ci --omit=dev` d'un `package-lock` figé (eslint, typescript, stylelint, htmlhint) ; Python standalone + `pip install --require-hashes -r tools-requirements.lock`. |
 | Intégrité | SHA-256 de l'archive et du binaire obligatoires (déjà bloquants). Vérification en amont **des checksums publiés par chaque projet** dans le script de build. Signature Ed25519 du manifeste, avec réglage `compliance.requireSignedManifest` (défaut `false`, `true` en entreprise). Facultatif : attestations GitHub (`actions/attest-build-provenance`). |
 | Versionnement des releases | `tools-v1` est un tag **mutable** dont les assets sont remplacés en place. Proposition : releases immuables `tools-<AAAA.MM.N>` contenant les archives, et `tools-v1` réduit à un **canal** ne portant que `runtime-manifest.json`, sa signature et le catalogue (pointant vers les URL immuables). Les caches et miroirs (Artifactory/Nexus via `compliance.registryUrl`) restent cohérents et un retour arrière revient à republier le manifeste. |
 | Proxy / CA | Déjà gérés (`HTTPS_PROXY`, CA d'entreprise exportée). À journaliser au niveau `debug` (proxy utilisé, source de la CA) pour le diagnostic. |
@@ -315,6 +315,8 @@ Ordre retenu : on **instrumente d'abord** (phase 1) pour confirmer H1 à H10, pu
 > - Le fichier `<contrôle>.log` garde son format pour rester compatible avec les rapports existants. La commande exécutée est dans `invocations[]`, pas en en-tête.
 > - Phase 2 : l'installation reste faite par `compliance runtime sync` (processus séparé) et non par une route du démon. Le verrou inter-processus des outils, l'extraction en staging et le compteur `.generation` apportent l'exclusion et l'invalidation visées. Le PATH effectif est journalisé (`path_refreshed`) plutôt qu'inscrit dans le rapport.
 > - Phase 2 : `restore()` n'attend pas le superviseur ; il partage le démarrage du démon.
+> - Décision du 2026-10-22 : **tout reste en local**. Pas de CI/CD (la forge, Bitbucket ou GitLab, n'est pas choisie) ni d'analyse de dépôt distant ; les éléments CI de ce plan sont abandonnés. Les vérifications tournent sur le poste : tests, lint, selftest, audit de la démo locale `devsecops-compliance-benchmark` (`scripts/check_benchmark.py`).
+> - Phase 3 réalisée. Écarts : le registre `ToolAdapter` côté Go est reporté au début de la phase 4, où il sert ; les types TypeScript générés depuis les schémas et l'externalisation `vscode.l10n` ne sont pas faits (produit uniquement en français) ; `npm test` reste le script d'intégration existant, `npm run test:unit` est le nouveau test rapide. Le dogfooding a trouvé et fait corriger deux défauts du moteur (outils Node et configuration ESLint d'un sous-dossier ignorés) et un masquage par défaut jamais appliqué.
 
 ### Phase 0 — Corrections immédiates (faible risque)
 
@@ -365,7 +367,6 @@ Ordre retenu : on **instrumente d'abord** (phase 1) pour confirmer H1 à H10, pu
 
 | Étape | Fichiers |
 | --- | --- |
-| CI multi-OS (tests, lint, selftest, `compliance run -repo .`, packaging en artefact) | **nouveau** `.github/workflows/ci.yml`, **nouveau** `.github/workflows/release.yml` |
 | ESLint flat config + `typescript-eslint` strict ; correction des `any`, des `catch {}` silencieux et des promesses flottantes | **nouveau** `vscode-extension/eslint.config.mjs`, [package.json](vscode-extension/package.json), `vscode-extension/src/*.ts` |
 | Tests TS (`node:test` pour la logique pure, `@vscode/test-electron` pour l'activation) ; `pretest` sans effet de bord de packaging | [vscode-extension/src/test/](vscode-extension/src/test/), [package.json](vscode-extension/package.json), [scripts/debug-check.js](vscode-extension/scripts/debug-check.js) (migré) |
 | `golangci-lint` (+ `govulncheck`) | **nouveau** `core/.golangci.yml` |
@@ -384,7 +385,7 @@ Ordre retenu : on **instrumente d'abord** (phase 1) pour confirmer H1 à H10, pu
 | P1 : Biome (avec politique ESLint ou Biome), Stylelint (`css`), Trivy `fs` (dépendances et secrets), Checkov `dockerfile` / `github_actions` | mêmes fichiers que P0 + [plan.go](core/internal/engine/plan.go) (`selection_policy`) |
 | P2 : HTMLHint, kubeconform, shfmt, osv-scanner, golangci-lint | idem |
 | Releases immuables `tools-<AAAA.MM.N>` + canal `tools-v1` ; `compliance.requireSignedManifest` | [scripts/build_and_publish_tools.py](scripts/build_and_publish_tools.py), [registry.go](core/internal/distribution/registry.go), [package.json](vscode-extension/package.json) |
-| Qualification `qualified` de Linux et macOS via les runners CI (selftest + audit d'un dépôt de fixtures multi-technologies) | [.config/platform-support.json](.config/platform-support.json), README (section Plateformes) |
+| Qualification `qualified` de Linux et macOS par un selftest et l'audit de la démo locale sur un poste de chaque OS | [.config/platform-support.json](.config/platform-support.json), README (section Plateformes) |
 
 ### Synthèse des dépendances entre phases
 
@@ -392,10 +393,9 @@ Ordre retenu : on **instrumente d'abord** (phase 1) pour confirmer H1 à H10, pu
 flowchart LR
     P0[Phase 0<br/>correctifs sûrs] --> P1[Phase 1<br/>observabilité]
     P1 --> P2[Phase 2<br/>init stable]
-    P0 --> P3[Phase 3<br/>CI et dette]
+    P0 --> P3[Phase 3<br/>qualité et dette]
     P3 --> P4[Phase 4<br/>outils]
     P2 --> P4
-    P3 -. runners multi-OS .-> P2
 ```
 
-La phase 3 (CI) peut démarrer en parallèle de la phase 1. Ses runners multi-OS servent à valider la phase 2 hors Windows et à qualifier les bundles POSIX de la phase 4.
+La phase 3 peut démarrer en parallèle de la phase 1. Sans CI, la validation hors Windows passe par le selftest et l'audit de la démo sur un poste Linux et un poste macOS.

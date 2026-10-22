@@ -17,7 +17,7 @@ class PipelineTree implements vscode.TreeDataProvider<PlanNode> {
     private readonly changed = new vscode.EventEmitter<PlanNode | undefined>();
     readonly onDidChangeTreeData = this.changed.event;
     status: VisualStatus = 'Pending';
-    message = 'Aucune Target selectionnee.';
+    message = 'Aucune Target sélectionnée.';
     constructor(readonly controller: SessionController) {}
     refresh(): void { this.changed.fire(undefined); }
     dispose(): void { this.changed.dispose(); }
@@ -27,7 +27,7 @@ class PipelineTree implements vscode.TreeDataProvider<PlanNode> {
         const session = this.controller.audit;
         return [
             { id: 'source', label: 'Pipeline source', description: this.controller.source, detail: report ? `Produit : ${report.metadata.platform_qualification_status || 'non qualifie'}\nCatalogue : ${report.metadata.catalog_sha256 || 'inconnu'}` : this.controller.source, children: [] },
-            { id: 'target', label: 'Target', description: this.controller.target || 'Non selectionnee', children: [] },
+            { id: 'target', label: 'Target', description: this.controller.target || 'Non sélectionnée', children: [] },
             { id: 'session', label: session ? `Session ${session.runId}` : 'Preparation', status: session?.status || this.status, reason: session?.reason || (this.status === 'Blocked' ? { code: 'incomplete_scan', message: this.message } : undefined), detail: this.message, children: [] },
             { id: 'pipelines', label: 'Pipelines', children: session?.snapshot ? session.nodes() : report ? projectPlan(report) : [] }
         ];
@@ -43,7 +43,7 @@ class PipelineTree implements vscode.TreeDataProvider<PlanNode> {
         item.tooltip = [node.label, node.description, node.reason ? `${node.reason.code}: ${node.reason.message}` : undefined, node.detail].filter(Boolean).join('\n');
         const icons: Record<VisualStatus, string> = { Pending: 'clock', Running: 'loading~spin', Succeeded: 'pass', Failed: 'error', Error: 'stop-circle', Warning: 'warning', Skipped: 'debug-step-over', Blocked: 'lock', 'Not applicable': 'circle-slash' };
         if (node.status) { item.iconPath = new vscode.ThemeIcon(icons[node.status]); }
-        if (node.output_path) { item.contextValue = 'complianceControlOutput'; item.command = { command: 'compliance.openLastReport', title: 'Ouvrir le controle dans le rapport', arguments: [node.id] }; }
+        if (node.output_path) { item.contextValue = 'complianceControlOutput'; item.command = { command: 'compliance.openLastReport', title: 'Ouvrir le contrôle dans le rapport', arguments: [node.id] }; }
         else if (this.controller.audit?.terminal && this.controller.audit.reportPath && (node.id === 'session' || node.id.startsWith('root/') || node.id.startsWith('technology/'))) {
             item.command = { command: 'compliance.openLastReport', title: 'Ouvrir le rapport de session', arguments: [node.id === 'session' ? undefined : node.id] };
         }
@@ -73,7 +73,7 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
     const channel = vscode.window.createOutputChannel('Compliance', { log: true });
     const log = new Logger(channel);
     setDaemonLogger(log);
-    log.info('extension activée', { version: context.extension.packageJSON?.version, platform: `${process.platform}-${process.arch}`, vscode: vscode.version, source });
+    log.info('extension activée', { version: (context.extension.packageJSON as { version?: string }).version, platform: `${process.platform}-${process.arch}`, vscode: vscode.version, source });
     const supervisor = new DaemonSupervisor(source, log);
     activeSupervisor = supervisor;
     const showError = async (message: string, error?: unknown) => {
@@ -81,7 +81,7 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
         log.error(text);
         await vscode.window.showErrorMessage(text, 'Voir le journal').then(choice => { if (choice) { channel.show(true); } });
     };
-    let provisionToolsRef: (commands: string[]) => Promise<boolean> = async () => false;
+    let provisionToolsRef: (commands: string[]) => Promise<boolean> = () => Promise.resolve(false);
     const reports = new ReportPanel(context, source, async commands => {
         const installed = await provisionToolsRef(commands);
         if (installed && controller.canRun(vscode.workspace.isTrusted)) { await launch(1); }
@@ -111,7 +111,7 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
     const sourceWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(source, '{.config/control-catalog.json,.tools/runtime/index.json,requirements-dev.lock}'));
     const invalidate = () => {
         controller.cancel(); controller.sourceValid = false; controller.preparation = undefined;
-        tree.status = 'Blocked'; tree.message = 'Pipeline source modifiee ; actualiser la preparation.'; update();
+        tree.status = 'Blocked'; tree.message = 'Pipeline source modifiée ; actualiser la préparation.'; update();
     };
     async function refresh(): Promise<void> {
         if (controller.busy || !controller.target) { return; }
@@ -122,7 +122,7 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
         if (!vscode.workspace.isTrusted) { await vscode.window.showWarningMessage('Approuver le workspace avant de sonder les outils locaux.'); return; }
         controller.busy = true; controller.abort = new AbortController(); controller.preparation = undefined; controller.audit = undefined; controller.sourceValid = false;
         tree.status = 'Running';
-        tree.message = 'Discovery, Matrix et Resolver ; aucun controle execute.';
+        tree.message = 'Discovery, Matrix et Resolver ; aucun contrôle exécuté.';
         update();
         log.info('préparation', { source, target: controller.target });
         const stopFeed = await followDaemonLog();
@@ -141,8 +141,8 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
             const waiting = controller.preparation.report.execution_plan.controls.filter(control => control.reason_code === 'permission_denied');
             const authorized = hasMachineConsent(context.globalState.get<MachineConsent>(machineConsentKey));
             tree.message = waiting.length && !authorized
-                ? `Plan prepare. ${waiting.length} controle(s) exigent l'autorisation machine, demandee une seule fois au lancement.`
-                : `Plan prepare. Session : ${controller.preparation.directory}`;
+                ? `Plan préparé. ${waiting.length} contrôle(s) exigent l'autorisation machine, demandée une seule fois au lancement.`
+                : `Plan préparé. Session : ${controller.preparation.directory}`;
             log.debug('rendu', { ms: Date.now() - renderStarted });
             log.info(tree.message, { ms: Date.now() - started });
         } catch (error) {
@@ -194,7 +194,7 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
     }
     async function provisionTools(commands: string[], trigger: 'auto' | 'manual'): Promise<boolean> {
         const manifestPath = await manifestInUse();
-        const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+        const manifest: unknown = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
         log.debug('manifeste actif', { manifest: manifestPath, platform: hostPlatform(), requested: commands.join(',') });
         const known = selectManifestTools(manifest, hostPlatform(), commands);
         const unknown = commands.filter(command => !known.some(tool => tool.command === command));
@@ -259,7 +259,7 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
         log.info('jeton du registre déplacé de settings.json vers le stockage sécurisé de VS Code');
     }
     async function launch(depth = 0): Promise<void> {
-        if (!controller.canRun(vscode.workspace.isTrusted)) { await vscode.window.showWarningMessage('Target, source valide, preparation et autorisation requises avant l audit.'); return; }
+        if (!controller.canRun(vscode.workspace.isTrusted)) { await vscode.window.showWarningMessage('Target, source valide, préparation et autorisation requises avant l\'audit.'); return; }
         await supervisor.track(depth ? 'nouvel audit' : 'audit', () => launchNow(depth));
     }
     async function launchNow(depth: number): Promise<void> {
@@ -269,13 +269,13 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
             await ensureMachineConsent();
             await supervisor.start();
             const state = controller.begin(vscode.workspace.isTrusted); update();
-            tree.message = 'Nouvelle preparation avant audit.';
+            tree.message = 'Nouvelle préparation avant audit.';
             log.child({ runId: state.runId }).info('audit demandé', { target: state.target, source, depth });
             stopFeed = await followDaemonLog();
             await purgeSessions(1, [state.runId]);
             const patterns = vscode.workspace.getConfiguration('compliance').get<string[]>('reportRedactionPatterns', []);
             for (const pattern of patterns) { new RegExp(pattern); }
-            const directory = await audit(source, state, async () => grantedPermissions(), update, controller.abort!.signal, patterns.length ? patterns.map(pattern => `(?:${pattern})`).join('|') : undefined, undefined, log);
+            const directory = await audit(source, state, () => Promise.resolve(grantedPermissions()), update, controller.abort!.signal, patterns.length ? patterns.map(pattern => `(?:${pattern})`).join('|') : undefined, undefined, log);
             tree.message = `${state.status} ; session : ${directory}`; log.child({ runId: state.runId }).info(tree.message);
             if (depth === 0) { rerun = await provisionFromReport(directory); }
             if (!rerun && state.reportPath) {
@@ -283,7 +283,7 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
                 try { await reports.openSession(reference); }
                 catch (error) {
                     try { await reports.open(path.join(directory, 'compliance-report.json'), reference, false); }
-                    catch (fallback) { tree.message = `Rapport non ouvert : ${errorMessage(fallback)} ; dossier de session conserve.`; log.warn(errorMessage(error)); await showError(tree.message); }
+                    catch (fallback) { tree.message = `Rapport non ouvert : ${errorMessage(fallback)} ; dossier de session conservé.`; log.warn(errorMessage(error)); await showError(tree.message); }
                 }
             }
         } catch (error) { controller.audit?.fail(errorMessage(error)); tree.message = errorMessage(error); await showError('Audit interrompu', error); }
@@ -361,9 +361,9 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
             } catch (error) { await showError('Sorties non ouvertes', error); }
         }),
         vscode.commands.registerCommand('compliance.selectTarget', async () => {
-            if (controller.busy) { await vscode.window.showInformationMessage('Une session est deja active.'); return; }
+            if (controller.busy) { await vscode.window.showInformationMessage('Une session est déjà active.'); return; }
             if (!vscode.workspace.isTrusted) { await vscode.window.showWarningMessage('Approuver le workspace avant de preparer une Target.'); return; }
-            const selection = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, openLabel: 'Selectionner la Target' });
+            const selection = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, openLabel: 'Sélectionner la Target' });
             if (!selection?.length) { return; }
             if (selection[0].scheme !== 'file') { await vscode.window.showErrorMessage('Choisir un dossier local.'); return; }
             try {

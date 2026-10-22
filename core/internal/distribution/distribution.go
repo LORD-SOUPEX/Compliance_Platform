@@ -93,16 +93,6 @@ func ResolveRegistryURL(optURL, manifestURL string) string {
 	return DefaultRegistryBaseURL
 }
 
-func (tool ToolEntry) archiveName() string {
-	if tool.Archive != "" {
-		return tool.Archive
-	}
-	if tool.ArchiveURL != "" {
-		return filepath.Base(strings.Split(tool.ArchiveURL, "?")[0])
-	}
-	return ""
-}
-
 func (tool ToolEntry) resolveURL(registryBase string) string {
 	if tool.ArchiveURL != "" {
 		return tool.ArchiveURL
@@ -525,7 +515,7 @@ func (r *Resolver) ResolveTool(ctx context.Context, toolName string) (*ResolvedT
 	})
 	if err != nil {
 		if r.opts.OfflineOnly {
-			return nil, fmt.Errorf("%w pour %s: %v", ErrToolUnavailableOffline, toolName, err)
+			return nil, fmt.Errorf("%w pour %s: %w", ErrToolUnavailableOffline, toolName, err)
 		}
 		return nil, fmt.Errorf("échec de la synchronisation à la demande pour %s: %w", toolName, err)
 	}

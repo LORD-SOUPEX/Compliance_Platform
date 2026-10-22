@@ -14,6 +14,8 @@ export function escaped(value: unknown, limit = 50000): string {
 }
 export function sectionId(id: string): string { return `section-${createHash('sha256').update(id).digest('hex')}`; }
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
+/** Scalar JSON value as text; objects and absent values give ''. */
+const scalar = (value: unknown): string => typeof value === 'string' ? value : typeof value === 'number' || typeof value === 'boolean' ? String(value) : '';
 const reasonText = (value: unknown) => fields(value) ? `${text(value.code)} : ${text(value.message)}` : text(value);
 
 export function reportHtml(document: LoadedReport, css: string, cspSource: string, nonce: string, iconSrc: string): string {
@@ -21,8 +23,8 @@ export function reportHtml(document: LoadedReport, css: string, cspSource: strin
     const coverage = fields(report.coverage) ? report.coverage : {};
     const discovery = fields(report.discovery) ? report.discovery : {};
     const technologies = array(discovery.technologies).filter(fields).map(item => ({
-        technology: String(item.technology || ''),
-        status: String(item.status || ''),
+        technology: scalar(item.technology),
+        status: scalar(item.status),
         evidence: array(item.evidence).map(value => text(value))
     }));
     const model = buildReportModel({
@@ -50,7 +52,7 @@ export function reportHtml(document: LoadedReport, css: string, cspSource: strin
     const inlineFindings = findings.length <= 400;
     const findingCount = new Map<string, number>();
     for (const finding of findings) {
-        const id = String(finding.control_id || '').replace(/\\/g, '/');
+        const id = scalar(finding.control_id).replace(/\\/g, '/');
         findingCount.set(id, (findingCount.get(id) || 0) + 1);
     }
     const executedRows = executedMarkup(model.executed, findingCount, findings, !!document.directory, inlineFindings);
@@ -98,7 +100,7 @@ export function reportHtml(document: LoadedReport, css: string, cspSource: strin
 }
 
 function skippedFinding(finding: Fields): boolean {
-    const file = (findingLocation(finding)?.file || String(finding.file || '')).replace(/\\/g, '/').toLowerCase();
+    const file = (findingLocation(finding)?.file || scalar(finding.file)).replace(/\\/g, '/').toLowerCase();
     return ['/testdata/', '/fixtures/', '/__snapshots__/', '/node_modules/', '/vendor/', '/dist/', '/build/'].some(part => `/${file}/`.includes(part));
 }
 
@@ -148,12 +150,12 @@ export function visibleFindings(report: Fields): Fields[] {
 export async function revealFinding(target: string, finding: Fields): Promise<vscode.TextEditor> {
     const location = findingLocation(finding);
     if (!location) { throw new Error('Localisation fiable ou confiance absente.'); }
-    const relative = controlRelativeFile(String(finding.root || ''), location.file);
+    const relative = controlRelativeFile(scalar(finding.root), location.file);
     const file = await targetFile(target, relative);
     const opened = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
     const editor = await vscode.window.showTextDocument(opened);
     if (location.line !== undefined) {
-        if (location.line > opened.lineCount || (location.column !== undefined && location.column - 1 > opened.lineAt(location.line - 1).text.length)) { throw new Error('Position du finding devenue incoherente avec le fichier ; aucune position inventee.'); }
+        if (location.line > opened.lineCount || (location.column !== undefined && location.column - 1 > opened.lineAt(location.line - 1).text.length)) { throw new Error('Position du finding devenue incohérente avec le fichier ; aucune position inventée.'); }
         const position = new vscode.Position(location.line - 1, (location.column || 1) - 1);
         editor.selection = new vscode.Selection(position, position);
         editor.revealRange(new vscode.Range(position, position));
@@ -164,9 +166,9 @@ export async function revealFinding(target: string, finding: Fields): Promise<vs
 function findingIndexes(controlId: string, findings: Fields[]): Map<string, number[]> {
     const files = new Map<string, number[]>();
     findings.forEach((finding, index) => {
-        if (skippedFinding(finding) || !sameControl(String(finding.control_id || ''), controlId)) { return; }
+        if (skippedFinding(finding) || !sameControl(scalar(finding.control_id), controlId)) { return; }
         const located = findingLocation(finding);
-        const file = located ? controlRelativeFile(String(finding.root || ''), located.file) : '(sans fichier)';
+        const file = located ? controlRelativeFile(scalar(finding.root), located.file) : '(sans fichier)';
         const bucket = files.get(file);
         if (bucket) { bucket.push(index); }
         else { files.set(file, [index]); }
@@ -178,8 +180,8 @@ function findingTable(findings: Fields[], indexes: number[]): string {
     const rows = indexes.map(index => {
         const finding = findings[index];
         const location = findingLocation(finding);
-        const rule = String(finding.name || finding.rule_id || '');
-        const message = String(finding.message || array(finding.diagnostics).map(reasonText).join('; '));
+        const rule = scalar(finding.name) || scalar(finding.rule_id);
+        const message = scalar(finding.message) || array(finding.diagnostics).map(reasonText).join('; ');
         const open = location ? `<button type="button" data-action="finding" data-finding-index="${index}">Ouvrir à la ligne</button>` : '';
         return `<tr><td>${escaped(location?.line ?? '')}</td><td>${escaped(rule)}</td><td>${escaped(message, 500)}</td><td>${open}</td></tr>`;
     }).join('');
@@ -315,7 +317,7 @@ function layoutControl(control: ReportControl): LayoutControl {
         name: control.name,
         technology: control.technology,
         root: control.root,
-        resultStatus: String(control.result?.status || ''),
+        resultStatus: scalar(control.result?.status),
         reasonCode: control.reason?.code || (fields(diagnostic) && typeof diagnostic.code === 'string' ? diagnostic.code : ''),
         reasonMessage: control.reason?.message || (fields(diagnostic) && typeof diagnostic.message === 'string' ? diagnostic.message : ''),
         durationMs: typeof control.result?.duration_ms === 'number' ? control.result.duration_ms : undefined,
@@ -347,7 +349,7 @@ export class ReportPanel implements vscode.Disposable {
     }
     async openSession(reference?: ReportReference, focus?: string, historical = false): Promise<void> {
         const selected = reference || this.last;
-        if (!selected) { throw new Error('Aucun rapport explicitement rattache a une session connue.'); }
+        if (!selected) { throw new Error('Aucun rapport explicitement rattaché à une session connue.'); }
         const session = await readSession(this.source, selected);
         await this.open(path.join(session.directory, 'compliance-report.json'), selected, historical || !reference, focus);
         this.last = selected;
@@ -412,7 +414,7 @@ export class ReportPanel implements vscode.Disposable {
     private async handle(value: unknown): Promise<void> {
         const message = reportMessage(value);
         const document = this.document;
-        if (!document) { throw new Error('Rapport ferme.'); }
+        if (!document) { throw new Error('Rapport fermé.'); }
         if (message.action === 'ready') {
             if (this.pendingFocus) { await this.panel?.webview.postMessage({ type: 'focus', id: sectionId(this.pendingFocus) }); this.pendingFocus = undefined; }
             return;
@@ -434,13 +436,13 @@ export class ReportPanel implements vscode.Disposable {
                 else if (message.action === 'raw') { await this.raw(); }
                 else { await this.openFolder(); }
             } catch (error) {
-                throw new Error(`${command} : ${error instanceof Error ? error.message : String(error)}`);
+                throw new Error(`${command} : ${error instanceof Error ? error.message : String(error)}`, { cause: error });
             }
             return;
         }
         if (message.action === 'output') {
             const control = document.controls.find(item => item.id === message.controlId);
-            if (!control?.result) { throw new Error('Controle inconnu ou sans sortie.'); }
+            if (!control?.result) { throw new Error('Contrôle inconnu ou sans sortie.'); }
             await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ content: controlOutputText(document.runId, control.id, control.result), language: 'plaintext' })); return;
         }
         if (message.action === 'files') {
@@ -462,7 +464,7 @@ export class ReportPanel implements vscode.Disposable {
             if (hasMachineConsent(this.context.globalState.get<MachineConsent>(machineConsentKey))) {
                 this.navigationApproved = true;
             } else {
-                const approval = await vscode.window.showWarningMessage(`Rapport historique : autoriser la navigation dans cette Target ?\n${document.target}\nAucun controle ne sera execute.`, { modal: true }, 'Autoriser la navigation');
+                const approval = await vscode.window.showWarningMessage(`Rapport historique : autoriser la navigation dans cette Target ?\n${document.target}\nAucun contrôle ne sera exécuté.`, { modal: true }, 'Autoriser la navigation');
                 if (approval !== 'Autoriser la navigation') { return; }
                 this.navigationApproved = true;
             }

@@ -3,6 +3,7 @@
 package osutil
 
 import (
+	"errors"
 	"os"
 	"syscall"
 	"unsafe"
@@ -33,7 +34,7 @@ func tryLock(file *os.File, exclusive bool) (bool, error) {
 	if r1 != 0 {
 		return true, nil
 	}
-	if err == errorLockViolation || err == errorIOPending {
+	if errors.Is(err, errorLockViolation) || errors.Is(err, errorIOPending) {
 		return false, nil
 	}
 	return false, err

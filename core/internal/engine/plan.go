@@ -43,6 +43,8 @@ type PlannedControl struct {
 	Reason              string                     `json:"reason"`
 	Files               []string                   `json:"files"`
 	ExcludeRoots        []string                   `json:"exclude_roots,omitempty"`
+	// MergedRoots lists every root folded into a repository-wide control (eslint, tsc, gitleaks).
+	MergedRoots []string `json:"-"`
 }
 
 // PlanOptions configures plan generation.
@@ -216,7 +218,7 @@ func BuildCompliancePlan(
 						}
 					}
 
-					applicability := "applicable"
+					var applicability string
 					reason := ""
 					if tech.Status == "absent" {
 						applicability = "technology_absent"
@@ -396,7 +398,7 @@ func BuildCompliancePlan(
 					}
 
 					if (command == "eslint" || command == "tsc") && applicability != "technology_absent" && applicability != "ambiguous" && applicability != "platform_unsupported" && applicability != "permission_denied" && applicability != "user_disabled" {
-						localBin := nodeToolBin(cleanRepo, command)
+						localBin := nodeToolBinFor(cleanRepo, root, command)
 						switch {
 						case localBin == "":
 							applicability = "tool_unavailable"
@@ -739,14 +741,18 @@ func collapseRepoWideTools(controls []*PlannedControl) []*PlannedControl {
 		key := ctrl.Technology + "\x00" + ctrl.Capability + "\x00" + command
 		if pos, ok := index[key]; ok {
 			current := kept[pos]
+			roots := unionStrings(current.MergedRoots, []string{ctrl.Root})
 			if preferRoot(ctrl.Root, current.Root) {
 				ctrl.Files = unionStrings(ctrl.Files, current.Files)
+				ctrl.MergedRoots = roots
 				kept[pos] = ctrl
 			} else {
 				current.Files = unionStrings(current.Files, ctrl.Files)
+				current.MergedRoots = roots
 			}
 			continue
 		}
+		ctrl.MergedRoots = []string{ctrl.Root}
 		index[key] = len(kept)
 		kept = append(kept, ctrl)
 	}
@@ -765,11 +771,37 @@ func listed(values []string, want string) bool {
 	return false
 }
 
-func nodeToolBin(repo, command string) string {
-	if local := repositoryNodeBin(repo, command); local != "" {
-		return local
+// nodeToolBinFor looks for node_modules/.bin from the control root up to the
+// repository root, as npm does: a package in a sub-folder (monorepo, extension
+// beside a Go core) carries its own node_modules. The managed bundle comes last.
+func nodeToolBinFor(repo, root, command string) string {
+	for _, dir := range ancestorsWithin(repo, root) {
+		if local := repositoryNodeBin(dir, command); local != "" {
+			return local
+		}
 	}
 	return managedNodeBin(command)
+}
+
+// ancestorsWithin lists repo/root, then each parent up to repo itself.
+func ancestorsWithin(repo, root string) []string {
+	base := filepath.Clean(repo)
+	dir := filepath.Clean(filepath.Join(base, filepath.FromSlash(root)))
+	if rel, err := filepath.Rel(base, dir); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return []string{base}
+	}
+	var dirs []string
+	for {
+		dirs = append(dirs, dir)
+		if dir == base {
+			return dirs
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return append(dirs, base)
+		}
+		dir = parent
+	}
 }
 
 func repositoryNodeBin(repo, command string) string {

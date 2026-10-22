@@ -110,3 +110,130 @@ func TestLogFileBaseIsPortable(t *testing.T) {
 		}
 	}
 }
+
+// A Node package in a sub-folder carries its own node_modules and ESLint config
+// (this repository: vscode-extension/ beside core/). Both must be found there.
+func TestNodeToolsAndConfigAreFoundInTheControlRoot(t *testing.T) {
+	t.Setenv("COMPLIANCE_NODE_TOOLS", filepath.Join(t.TempDir(), "node"))
+	repo := t.TempDir()
+	web := filepath.Join(repo, "web")
+	if err := os.MkdirAll(web, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"package.json":      `{"name":"web"}`,
+		"index.js":          "export const value = 1\n",
+		"eslint.config.mjs": "export default []\n",
+	} {
+		if err := os.WriteFile(filepath.Join(web, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFakeESLint(t, web)
+	catalog, err := embedded.ResolveAsset("control-catalog.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, err := RunCompliance(context.Background(), ComplianceOptions{RepoRoot: repo, CatalogPath: catalog, SourceAdapter: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *report.ExecutionResult
+	for i := range rep.ExecutionResults {
+		if strings.HasPrefix(rep.ExecutionResults[i].ControlId, "javascript/linting/eslint/") {
+			found = &rep.ExecutionResults[i]
+		}
+	}
+	if found == nil || found.Status != "success" || len(found.Invocations) == 0 {
+		t.Fatalf("eslint in web/ = %+v", found)
+	}
+	for _, arg := range found.Invocations[0].Args {
+		if arg == "--no-config-lookup" {
+			t.Fatal("the config in web/ was ignored and the fallback used")
+		}
+	}
+	if raw := found.Invocations[0].RawCommandLine; raw != nil && strings.Contains(*raw, "--no-config-lookup") {
+		t.Fatal("the config in web/ was ignored and the fallback used")
+	}
+}
+
+func TestAncestorsWithinStopsAtTheRepository(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "repo")
+	got := ancestorsWithin(repo, "a/b")
+	want := []string{filepath.Join(repo, "a", "b"), filepath.Join(repo, "a"), repo}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("ancestors = %v, want %v", got, want)
+	}
+	if escaped := ancestorsWithin(repo, "../outside"); len(escaped) != 1 || escaped[0] != repo {
+		t.Fatalf("escaping root = %v", escaped)
+	}
+}
+
+func TestBuiltInSecretsAreAlwaysMasked(t *testing.T) {
+	redactor, err := NewRedactor(nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := redactor.Redact("token=ghp_abcdefghijklmnopqrstuvwxyz0123 key=AKIAABCDEFGHIJKLMNOP -----BEGIN RSA PRIVATE KEY-----")
+	if strings.Contains(out, "ghp_abcdef") || strings.Contains(out, "AKIAABCD") || strings.Contains(out, "BEGIN RSA PRIVATE KEY") {
+		t.Fatalf("secret left in output: %s", out)
+	}
+	custom, err := NewRedactor([]string{"internal-[0-9]+"}, "")
+	if err != nil || strings.Contains(custom.Redact("host internal-42 ghp_abcdefghijklmnopqrstuvwxyz0123"), "internal-42") {
+		t.Fatalf("user pattern not applied with the built-in ones: %v", err)
+	}
+}
+
+// ESLint is one repository-wide control: it must receive every JavaScript root,
+// not only the one the merged control is named after.
+func TestRepositoryWideESLintLintsEveryRoot(t *testing.T) {
+	tools := t.TempDir()
+	writeFakeESLint(t, tools)
+	t.Setenv("COMPLIANCE_NODE_TOOLS", tools)
+	repo := t.TempDir()
+	for _, root := range []string{"apps/web", "legacy/old"} {
+		dir := filepath.Join(repo, filepath.FromSlash(root))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for name, body := range map[string]string{"package.json": `{"name":"x"}`, "index.js": "var a = 1\n"} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	catalog, err := embedded.ResolveAsset("control-catalog.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep, err := RunCompliance(context.Background(), ComplianceOptions{RepoRoot: repo, CatalogPath: catalog, SourceAdapter: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var command string
+	for _, result := range rep.ExecutionResults {
+		if !strings.HasPrefix(result.ControlId, "javascript/linting/eslint/") {
+			continue
+		}
+		if len(result.Invocations) != 2 {
+			t.Fatalf("one ESLint run per root expected, got %d", len(result.Invocations))
+		}
+		for _, inv := range result.Invocations {
+			command += " cwd=" + inv.Cwd + " " + strings.Join(inv.Args, " ")
+			if inv.RawCommandLine != nil {
+				command += " " + *inv.RawCommandLine
+			}
+		}
+	}
+	normalized := strings.ReplaceAll(command, `\`, "/")
+	// The engine works on the canonical path (macOS: /var is /private/var).
+	if resolved, err := filepath.EvalSymlinks(repo); err == nil {
+		repo = resolved
+	}
+	for _, root := range []string{"apps/web", "legacy/old"} {
+		// Each run happens inside its root: ESLint ignores files outside its working folder.
+		if !strings.Contains(normalized, "/"+root) || !strings.Contains(normalized, "cwd="+filepath.ToSlash(filepath.Join(repo, filepath.FromSlash(root)))) {
+			t.Fatalf("eslint did not run in %s: %s", root, command)
+		}
+	}
+}

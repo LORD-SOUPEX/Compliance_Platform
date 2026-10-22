@@ -9,21 +9,30 @@ cd core
 gofmt -l .
 go vet ./...
 go test -count=1 ./...
+golangci-lint run ./...
 cd ../vscode-extension
-npx tsc --noEmit
+npm run lint
+npm run test:unit
 npm test
 npm run test:webview
 ```
 
-Puis, avec le binaire construit :
+`npm run lint` applique ESLint (`eslint.config.mjs`, règles typées strictes) à l'extension. `npm run test:unit` compile puis lance les tests `node:test` de `src/test/unit` (analyseur SSE, journal, client du démon), sans VS Code ni binaire. `golangci-lint` lit `core/.golangci.yml`.
+
+Les fichiers Go sont en fin de ligne LF sur tous les OS (`.gitattributes`), ce que `gofmt` exige.
+
+## Démo multi-technologies
+
+Le dossier local `devsecops-compliance-benchmark`, cloné à côté de ce dépôt, couvre toutes les technologies du catalogue. Pour l'auditer avec tous les outils du registre sans toucher au dossier `~/.compliance/tools` du poste :
 
 ```bash
-compliance selftest
+export COMPLIANCE_TOOLS_DIR="$PWD/.tools/registry"
+.tools/bin/compliance runtime sync -manifest .config/runtime-manifest.json -sig .config/runtime-manifest.json.sig
+.tools/bin/compliance run -repo ../devsecops-compliance-benchmark -allow-code -allow-network -report benchmark.json
+python scripts/check_benchmark.py benchmark.json --min-executed 25
 ```
 
-Go utilisé par les scripts de l'extension : `.tools/go/bin/go`. Python : `py -3` sur Windows.
-
-`npm test` compile le TypeScript, compare la version du moteur à `package.json`, relance une partie des tests Go, vérifie le VSIX et exécute `compliance selftest`. `npm run package` produit `dist/compliance-pipelines-<version>.vsix`.
+Le vérificateur exige les 13 technologies, aucune erreur d'exécution, une anomalie localisée pour chaque contrôle en échec et un processus enregistré pour chaque contrôle exécuté.
 
 ## Registre `tools-v1`
 
@@ -57,7 +66,8 @@ Le détail des paquets et de l'ordre de résolution est dans [architecture](arch
 
 ```bash
 cd vscode-extension
-npm run reinstall -- dist/compliance-pipelines-2.1.3.vsix
+npm run package
+npm run reinstall -- dist/compliance-pipelines-<version>.vsix
 ```
 
 La commande arrête le démon, retire l'extension précédente et installe le VSIX. Les sessions restent dans le dossier utilisateur.

@@ -117,6 +117,15 @@ func ToolEnviron(command string) []string {
 	return env
 }
 
+// TrivyCacheDir is the cache Trivy receives (TRIVY_CACHE_DIR).
+func TrivyCacheDir() string { return trivyCacheDir() }
+
+// TrivyDBPresent reports whether the vulnerability database was downloaded once.
+func TrivyDBPresent() bool {
+	info, err := os.Stat(filepath.Join(trivyCacheDir(), "db", "trivy.db"))
+	return err == nil && info.Size() > 0
+}
+
 func trivyCacheDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {

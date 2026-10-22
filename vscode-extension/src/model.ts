@@ -84,8 +84,8 @@ export function containsPath(parent: string, candidate: string): boolean {
 
 export function controlOutputText(runId: string, controlId: string, value: unknown): string {
     if (!isRecord(value) || value.control_id !== controlId || !['success', 'fail', 'error', 'skipped'].includes(String(value.status)) ||
-        typeof value.stdout !== 'string' || typeof value.stderr !== 'string' || typeof value.duration_ms !== 'number') { throw new Error('Sorties invalides ou d un autre controle.'); }
-    return `Session : ${runId}\nControle : ${controlId}\nStatut canonique : ${value.status}\nDuree : ${value.duration_ms} ms\n\nSTDOUT\n${value.stdout}\n\nSTDERR\n${value.stderr}\n\nDIAGNOSTICS\n${JSON.stringify(value.diagnostics, null, 2)}`;
+        typeof value.stdout !== 'string' || typeof value.stderr !== 'string' || typeof value.duration_ms !== 'number') { throw new Error('Sorties invalides ou d\'un autre contrôle.'); }
+    return `Session : ${runId}\nControle : ${controlId}\nStatut canonique : ${String(value.status)}\nDuree : ${value.duration_ms} ms\n\nSTDOUT\n${value.stdout}\n\nSTDERR\n${value.stderr}\n\nDIAGNOSTICS\n${JSON.stringify(value.diagnostics, null, 2)}`;
 }
 
 export function isSameDirectory(a: string, b: string): boolean {
@@ -114,7 +114,7 @@ export function parsePreparation(text: string, target: string, allowPermissions 
         !isRecord(report.execution_plan.permissions) || typeof report.execution_plan.permissions.network !== 'boolean' ||
         typeof report.execution_plan.permissions.code_execution !== 'boolean' ||
         (!allowPermissions && (report.execution_plan.permissions.network || report.execution_plan.permissions.code_execution)) || !Array.isArray(report.execution_plan.controls)) {
-        throw new Error('Le backend ne fournit pas un plan v1 sans execution pour cette Target.');
+        throw new Error('Le backend ne fournit pas un plan v1 sans exécution pour cette Target.');
     }
     const technologies = new Set<string>();
     for (const technology of report.discovery.technologies) {
@@ -130,12 +130,13 @@ export function parsePreparation(text: string, target: string, allowPermissions 
     for (const control of report.execution_plan.controls) {
         const id = isRecord(control) && typeof control.id === 'string' && control.id ? control.id : '(sans identifiant)';
         const root = isRecord(control) && typeof control.root === 'string' ? control.root : '';
-        const reject = (why: string): never => { throw new Error(`Controle du plan invalide ou hors Target : ${id} (racine « ${root} ») : ${why}.`); };
-        if (!isRecord(control) || !['id', 'name', 'technology', 'capability', 'root', 'applicability', 'reason'].every(field => typeof control[field] === 'string')) { reject('champ texte manquant'); }
-        if (ids.has(id)) { reject('identifiant duplique'); }
-        if (!technologies.has(String(control.technology))) { reject(`technologie « ${String(control.technology)} » absente de l inventaire`); }
-        if (typeof control.execution_order !== 'number' || !Number.isInteger(control.execution_order) || control.execution_order < 1) { reject('ordre d execution invalide'); }
-        if (!applicability.has(String(control.applicability))) { reject(`applicabilite « ${String(control.applicability)} » non reconnue`); }
+        const reject = (why: string): never => { throw new Error(`Contrôle du plan invalide ou hors Target : ${id} (racine « ${root} ») : ${why}.`); };
+        if (!isRecord(control)) { throw new Error(`Contrôle du plan invalide ou hors Target : ${id} (racine « ${root} ») : objet attendu.`); }
+        if (!['id', 'name', 'technology', 'capability', 'root', 'applicability', 'reason'].every(field => typeof control[field] === 'string')) { reject('champ texte manquant'); }
+        if (ids.has(id)) { reject('identifiant dupliqué'); }
+        if (!technologies.has(String(control.technology))) { reject(`technologie « ${String(control.technology)} » absente de l'inventaire`); }
+        if (typeof control.execution_order !== 'number' || !Number.isInteger(control.execution_order) || control.execution_order < 1) { reject('ordre d\'exécution invalide'); }
+        if (!applicability.has(String(control.applicability))) { reject(`applicabilité « ${String(control.applicability)} » non reconnue`); }
         if (path.isAbsolute(root)) { reject('racine absolue'); }
         const resolved = path.resolve(target, root);
         if (!containsPath(target, resolved)) { reject(`chemin resolu hors Target (${resolved})`); }
@@ -167,7 +168,7 @@ export function projectPlan(report: PreparationReport): PlanNode[] {
             status: blocked ? 'Blocked' : undefined,
             reason: blocked ? {
                 code: report.discovery.scan_complete ? 'ambiguous' : 'incomplete_scan',
-                message: report.discovery.scan_complete ? technology.ambiguities.join('; ') || 'Technologie ambigue selon Discovery.' : 'Discovery incomplet ; aucune execution possible.'
+                message: report.discovery.scan_complete ? technology.ambiguities.join('; ') || 'Technologie ambigue selon Discovery.' : 'Discovery incomplet ; aucune exécution possible.'
             } : undefined,
             detail: technology.evidence.join('\n'),
             children: roots.map(root => ({
@@ -183,7 +184,7 @@ export function projectPlan(report: PreparationReport): PlanNode[] {
                         status,
                         reason: status === 'Pending' ? undefined : {
                             code: report.discovery.scan_complete ? control.reason_code || control.applicability : 'incomplete_scan',
-                            message: report.discovery.scan_complete ? control.reason || 'Controle non executable selon le plan backend.' : 'Discovery incomplet ; aucun controle lance.'
+                            message: report.discovery.scan_complete ? control.reason || 'Contrôle non executable selon le plan backend.' : 'Discovery incomplet ; aucun contrôle lance.'
                         },
                         detail: control.id,
                         children: []

@@ -68,6 +68,10 @@ func parseToolFindings(command, stdout, repo string) []report.LocatedLeak {
 		leaks = parseTrivy(stdout, repo)
 	case "terraform", "tofu":
 		leaks = parseFmtFiles(stdout, repo)
+	case "terragrunt":
+		leaks = parseTerragruntFmt(stdout, repo)
+	case "Invoke-ScriptAnalyzer":
+		leaks = parsePSScriptAnalyzer(stdout, repo)
 	case "ruff":
 		leaks = parseRuff(stdout, repo)
 	case "pylint":
@@ -352,6 +356,60 @@ func parseTrivy(stdout, repo string) []report.LocatedLeak {
 	return leaks
 }
 
+// parseTerragruntFmt reads "File '<path>' needs formatting" from terragrunt hcl fmt --check.
+func parseTerragruntFmt(output, repo string) []report.LocatedLeak {
+	pattern := regexp.MustCompile(`File '([^']+)' needs formatting`)
+	var leaks []report.LocatedLeak
+	seen := map[string]bool{}
+	for _, match := range pattern.FindAllStringSubmatch(output, -1) {
+		file := relativeToRepo(repo, match[1])
+		if seen[file] {
+			continue
+		}
+		seen[file] = true
+		leaks = append(leaks, report.LocatedLeak{
+			File: file, Line: 1, Column: 1, RuleID: "hclfmt", Description: "Le formatage du fichier diffère de terragrunt hcl fmt.", Severity: "low",
+		})
+	}
+	return leaks
+}
+
+// parsePSScriptAnalyzer reads the JSON lines written by the PSScriptAnalyzer wrapper.
+func parsePSScriptAnalyzer(stdout, repo string) []report.LocatedLeak {
+	var leaks []report.LocatedLeak
+	for _, line := range strings.Split(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var row struct {
+			File     string      `json:"file"`
+			Line     interface{} `json:"line"`
+			Rule     string      `json:"rule"`
+			Severity string      `json:"severity"`
+			Message  string      `json:"message"`
+		}
+		if json.Unmarshal([]byte(line), &row) != nil || row.File == "" {
+			continue
+		}
+		number := jsonInt(row.Line)
+		if number < 1 {
+			number = 1
+		}
+		severity := "low"
+		switch strings.ToLower(row.Severity) {
+		case "error", "parseerror":
+			severity = "high"
+		case "warning":
+			severity = "medium"
+		}
+		leaks = append(leaks, report.LocatedLeak{
+			File: relativeToRepo(repo, row.File), Line: number, Column: 1, RuleID: row.Rule, Description: row.Message, Severity: severity,
+		})
+	}
+	return leaks
+}
+
 func parseFmtFiles(stdout, repo string) []report.LocatedLeak {
 	var leaks []report.LocatedLeak
 	seen := map[string]bool{}
@@ -360,7 +418,8 @@ func parseFmtFiles(stdout, repo string) []report.LocatedLeak {
 		if line == "" || strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "@@") || strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") {
 			continue
 		}
-		if !strings.Contains(strings.ToLower(line), ".tf") {
+		lower := strings.ToLower(line)
+		if !strings.HasSuffix(lower, ".tf") && !strings.HasSuffix(lower, ".tofu") && !strings.HasSuffix(lower, ".tfvars") && !strings.HasSuffix(lower, ".hcl") {
 			continue
 		}
 		file := relativeToRepo(repo, line)
@@ -836,20 +895,27 @@ func hadolintSeverity(level string) string {
 	}
 }
 
+type eslintFile struct {
+	FilePath string `json:"filePath"`
+	Messages []struct {
+		RuleID   string `json:"ruleId"`
+		Message  string `json:"message"`
+		Line     int    `json:"line"`
+		Column   int    `json:"column"`
+		Severity int    `json:"severity"`
+	} `json:"messages"`
+}
+
+// parseESLint reads one JSON array per ESLint run: a repository-wide control
+// runs ESLint once per root and the outputs follow each other.
 func parseESLint(stdout, repo string) []report.LocatedLeak {
-	var files []struct {
-		FilePath string `json:"filePath"`
-		Messages []struct {
-			RuleID   string `json:"ruleId"`
-			Message  string `json:"message"`
-			Line     int    `json:"line"`
-			Column   int    `json:"column"`
-			Severity int    `json:"severity"`
-		} `json:"messages"`
-	}
-	if json.Unmarshal([]byte(strings.TrimSpace(stdout)), &files) != nil {
-		return nil
-	}
+	var files []eslintFile
+	decodeJSONDocuments(stdout, func(raw json.RawMessage) {
+		var batch []eslintFile
+		if json.Unmarshal(raw, &batch) == nil {
+			files = append(files, batch...)
+		}
+	})
 	var leaks []report.LocatedLeak
 	for _, file := range files {
 		for _, message := range file.Messages {

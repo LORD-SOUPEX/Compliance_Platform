@@ -64,7 +64,8 @@ func NewRedactor(patterns []string, replacement string) (*Redactor, error) {
 	if replacement == "" {
 		replacement = "[REDACTED]"
 	}
-	compiled := make([]*regexp.Regexp, 0, len(patterns))
+	// Built-in secrets (forge tokens, AWS keys, private keys) are always masked, then the user patterns.
+	compiled := append(make([]*regexp.Regexp, 0, len(defaultRedactionPatterns)+len(patterns)), defaultRedactionPatterns...)
 	for _, pat := range patterns {
 		if strings.TrimSpace(pat) == "" {
 			continue
@@ -105,6 +106,8 @@ type Invocation struct {
 	Env             []string             `json:"-"`
 	Prefound        []report.LocatedLeak `json:"-"`
 	Sources         []string             `json:"-"`
+	// Dir overrides the working folder of this call (one ESLint run per merged root).
+	Dir string `json:"-"`
 }
 
 // BuildInvocation constructs the executable and arguments for a planned control.
@@ -143,6 +146,7 @@ func BuildInvocation(
 	var arguments []string
 	var cleanup []string
 	var gitleaksReport string
+	var extraEnv []string
 
 	switch command {
 	case "ruff":
@@ -309,31 +313,26 @@ func BuildInvocation(
 		}
 
 	case "eslint":
-		eslintArgs := []string{"-f", "json"}
-		var extraEnv []string
-		if !eslintConfigured(repoRoot) {
-			fallback, env, ferr := writeESLintFallback(executable, repoRoot)
-			if ferr != nil {
-				return nil, ferr
+		// ESLint ignores files outside its working folder (its base path), so a
+		// repository-wide control runs ESLint once per merged root, in that root.
+		var calls []Invocation
+		for _, dir := range mergedRootPaths(ctrl, root, repoRoot) {
+			call, eslintCleanup, callErr := eslintCall(executable, dir, repoRoot)
+			if callErr != nil {
+				for _, path := range cleanup {
+					_ = os.Remove(path)
+				}
+				return nil, callErr
 			}
-			cleanup = append(cleanup, fallback)
-			extraEnv = env
-			eslintArgs = append([]string{"--no-config-lookup", "--no-error-on-unmatched-pattern", "-c", fallback}, eslintArgs...)
+			cleanup = append(cleanup, eslintCleanup...)
+			call.Dir = dir
+			call.ContinueOnError = true
+			calls = append(calls, call)
 		}
-		eslintArgs = append(eslintArgs, root)
-		if inv, ok := nodeBinScript(executable, filepath.Join("..", "eslint", "bin", "eslint.js"), eslintArgs); ok {
-			inv.Cleanup = cleanup
-			inv.Env = extraEnv
-			return &inv, nil
-		}
-		if strings.EqualFold(filepath.Ext(executable), ".cmd") || strings.EqualFold(filepath.Ext(executable), ".bat") {
-			inv := windowsCmdScript(executable, eslintArgs)
-			inv.Cleanup = cleanup
-			inv.Env = extraEnv
-			return &inv, nil
-		}
-		arguments = eslintArgs
-		return &Invocation{Executable: executable, Arguments: arguments, Cleanup: cleanup, Env: extraEnv}, nil
+		first := calls[0]
+		first.Followups = calls[1:]
+		first.Cleanup = cleanup
+		return &first, nil
 
 	case "gitleaks":
 		reportPath, configPath, sideErr := writeGitleaksSidecars()
@@ -344,7 +343,8 @@ func BuildInvocation(
 		gitleaksReport = reportPath
 		arguments = []string{
 			"detect", "--no-git", "--no-color", "--no-banner", "--redact",
-			"--source", root,
+			// Secrets are searched in the whole repository, whatever root carries the control.
+			"--source", repoRoot,
 			"--config", configPath,
 			"--report-format", "json", "--report-path", reportPath,
 		}
@@ -354,12 +354,15 @@ func BuildInvocation(
 		if len(projects) == 0 {
 			return nil, errors.New("aucun tsconfig.json pour la vérification de types")
 		}
+		// Every project is checked: a type error in one must not hide the next ones.
 		first := tscInvocation(executable, projects[0])
 		var followups []Invocation
 		for _, project := range projects[1:] {
-			followups = append(followups, tscInvocation(executable, project))
+			next := tscInvocation(executable, project)
+			next.ContinueOnError = true
+			followups = append(followups, next)
 		}
-		return &Invocation{Executable: first.Executable, Arguments: first.Arguments, Followups: followups, RawCommandLine: first.RawCommandLine}, nil
+		return &Invocation{Executable: first.Executable, Arguments: first.Arguments, Followups: followups, RawCommandLine: first.RawCommandLine, ContinueOnError: true}, nil
 
 	case "rumdl":
 		arguments = []string{"check", "--respect-gitignore=true", "--exclude", discovery.ToolExcludeGlobs()}
@@ -423,6 +426,16 @@ func BuildInvocation(
 			arguments = append(arguments, "--skip-dirs", filepath.Join(canonicalOr(repoRoot), filepath.FromSlash(normalizePlanRoot(nested))))
 		}
 		arguments = append(arguments, root)
+		// The control runs with the network permission. Without a local database the
+		// vuln scanner stops in FATAL on the first run: let this call download it.
+		if !osutil.TrivyDBPresent() {
+			for _, scanner := range scanners {
+				if scanner == "vuln" {
+					extraEnv = append(extraEnv, "TRIVY_SKIP_DB_UPDATE=false")
+					break
+				}
+			}
+		}
 
 	case "Invoke-ScriptAnalyzer":
 		if len(filesInRoot) == 0 {
@@ -433,7 +446,7 @@ func BuildInvocation(
 		escapedExec := strings.ReplaceAll(executable, "'", "''")
 		settingsArg := powershellSettingsArg(ctrl, platformRoot)
 		psCommand := fmt.Sprintf(
-			"Set-StrictMode -Version Latest; $ErrorActionPreference = 'Stop'; if ('%s' -ne '' -and (Test-Path '%s' -PathType Leaf)) { Import-Module -Name '%s' -Force -ErrorAction SilentlyContinue }; $findings = @(); foreach ($file in ('%s' | ConvertFrom-Json)) { $tokens = $null; $parseErrors = $null; [Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$parseErrors) | Out-Null; if ($parseErrors.Count -gt 0) { foreach ($pe in $parseErrors) { $findings += [pscustomobject]@{ ScriptName = [IO.Path]::GetFileName($file); Line = $pe.Extent.StartLineNumber; RuleName = 'PowerShellSyntax'; Severity = 'Error'; Message = $pe.Message } } } elseif (Get-Command Invoke-ScriptAnalyzer -ErrorAction SilentlyContinue) { $findings += @(Invoke-ScriptAnalyzer -Path $file -Severity @('Error', 'Warning')%s -ErrorAction SilentlyContinue) } }; foreach ($f in $findings) { [pscustomobject]@{ file = $f.ScriptName; line = $f.Line; rule = $f.RuleName; severity = [string]$f.Severity; message = $f.Message } | ConvertTo-Json -Compress }; if (@($findings | Where-Object { $_.Severity -in @('Error', 'Warning') }).Count -gt 0) { exit 1 }; exit 0",
+			"Set-StrictMode -Version Latest; $ErrorActionPreference = 'Stop'; if ('%s' -ne '' -and (Test-Path '%s' -PathType Leaf)) { Import-Module -Name '%s' -Force -ErrorAction SilentlyContinue }; $findings = @(); foreach ($file in ('%s' | ConvertFrom-Json)) { $tokens = $null; $parseErrors = $null; [Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$parseErrors) | Out-Null; if ($parseErrors.Count -gt 0) { foreach ($pe in $parseErrors) { $findings += [pscustomobject]@{ ScriptPath = $file; Line = $pe.Extent.StartLineNumber; RuleName = 'PowerShellSyntax'; Severity = 'Error'; Message = $pe.Message } } } elseif (Get-Command Invoke-ScriptAnalyzer -ErrorAction SilentlyContinue) { $findings += @(Invoke-ScriptAnalyzer -Path $file -Severity @('Error', 'Warning')%s -ErrorAction SilentlyContinue) } }; foreach ($f in $findings) { [pscustomobject]@{ file = $f.ScriptPath; line = $f.Line; rule = $f.RuleName; severity = [string]$f.Severity; message = $f.Message } | ConvertTo-Json -Compress }; if (@($findings | Where-Object { $_.Severity -in @('Error', 'Warning') }).Count -gt 0) { exit 1 }; exit 0",
 			escapedExec, escapedExec, escapedExec, escapedFilesJSON, settingsArg,
 		)
 		arguments = []string{
@@ -453,7 +466,34 @@ func BuildInvocation(
 		Followups:      nil,
 		Cleanup:        cleanup,
 		GitleaksReport: gitleaksReport,
+		Env:            extraEnv,
 	}, nil
+}
+
+// toolCrashed tells a tool that stopped on its own error from a tool that
+// reported findings: both exit non-zero, only the second is a compliance failure.
+func toolCrashed(command, stderr string, leaks int) bool {
+	if leaks > 0 {
+		return false
+	}
+	switch command {
+	case "trivy":
+		return strings.Contains(stderr, "FATAL")
+	case "terragrunt":
+		return !strings.Contains(stderr, "needs formatting") && strings.Contains(stderr, "ERROR")
+	default:
+		return false
+	}
+}
+
+// lastLine returns the last non-empty line of a tool output, for a diagnostic.
+func lastLine(text string) string {
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	line := strings.TrimSpace(lines[len(lines)-1])
+	if len(line) > 300 {
+		line = line[:300]
+	}
+	return line
 }
 
 func pytestCollectedNothing(command string, exitCode, leaks int) bool {
@@ -1022,6 +1062,59 @@ func withoutColor(env []string) []string {
 	return append(kept, "NO_COLOR=1", "CLICOLOR=0")
 }
 
+// eslintCall builds one ESLint run over dir: the repository config found from
+// dir upward when there is one, the minimal fallback config otherwise.
+func eslintCall(executable, dir, repoRoot string) (Invocation, []string, error) {
+	eslintArgs := []string{"-f", "json"}
+	var extraEnv, cleanup []string
+	configured := false
+	for _, candidate := range ancestorsWithin(repoRoot, relativeToRepo(repoRoot, dir)) {
+		if eslintConfigured(candidate) {
+			configured = true
+			break
+		}
+	}
+	if !configured {
+		fallback, env, err := writeESLintFallback(executable, repoRoot)
+		if err != nil {
+			return Invocation{}, nil, err
+		}
+		cleanup = append(cleanup, fallback)
+		extraEnv = env
+		eslintArgs = append([]string{"--no-config-lookup", "--no-error-on-unmatched-pattern", "-c", fallback}, eslintArgs...)
+	}
+	eslintArgs = append(eslintArgs, dir)
+	if inv, ok := nodeBinScript(executable, filepath.Join("..", "eslint", "bin", "eslint.js"), eslintArgs); ok {
+		inv.Env = extraEnv
+		return inv, cleanup, nil
+	}
+	if strings.EqualFold(filepath.Ext(executable), ".cmd") || strings.EqualFold(filepath.Ext(executable), ".bat") {
+		inv := windowsCmdScript(executable, eslintArgs)
+		inv.Env = extraEnv
+		return inv, cleanup, nil
+	}
+	return Invocation{Executable: executable, Arguments: eslintArgs, Env: extraEnv}, cleanup, nil
+}
+
+// mergedRootPaths returns the folders of a repository-wide control, the control
+// root first. A control that was not merged keeps its own root.
+func mergedRootPaths(ctrl *PlannedControl, root, repoRoot string) []string {
+	paths := []string{root}
+	seen := map[string]bool{filepath.Clean(root): true}
+	for _, merged := range ctrl.MergedRoots {
+		path := filepath.Clean(filepath.Join(repoRoot, filepath.FromSlash(merged)))
+		if seen[path] {
+			continue
+		}
+		if info, err := os.Stat(path); err != nil || !info.IsDir() {
+			continue
+		}
+		seen[path] = true
+		paths = append(paths, path)
+	}
+	return paths
+}
+
 func tscInvocation(executable, project string) Invocation {
 	arguments := []string{"--noEmit", "--pretty", "false", "--project", project}
 	if inv, ok := nodeBinScript(executable, filepath.Join("..", "typescript", "bin", "tsc"), arguments); ok {
@@ -1498,7 +1591,18 @@ func ExecuteCompliancePlan(
 					Critical: res.Critical,
 				})
 			} else {
-				inv, invErr := BuildInvocation(ctrl, execRoot, opts.PlatformRoot, plan.Repository)
+				// workDir is where the tool runs; execRoot stays the root findings are anchored to.
+				workDir := execRoot
+				var tofu *tofuStage
+				if ctrl.Technology == "opentofu" && ctrl.Tool != nil && (ctrl.Tool.Command == "tflint" || ctrl.Tool.Command == "checkov") {
+					if staged, stageErr := stageOpenTofu(execRoot); stageErr == nil && staged != nil {
+						tofu = staged
+						workDir = staged.Dir
+						defer staged.cleanup()
+						logger.Debug("opentofu_staged", "control_id", ctrl.ID, "dir", staged.Dir, "files", len(staged.renames))
+					}
+				}
+				inv, invErr := BuildInvocation(ctrl, workDir, opts.PlatformRoot, plan.Repository)
 				if inv != nil {
 					defer func() {
 						for _, path := range inv.Cleanup {
@@ -1570,6 +1674,10 @@ func ExecuteCompliancePlan(
 						var procErr error
 						for index, call := range calls {
 							exe, args := call.Executable, call.Arguments
+							callDir := workDir
+							if call.Dir != "" {
+								callDir = call.Dir
+							}
 							if call.RawCommandLine == "" {
 								exe, args = osutil.ScriptCommand(call.Executable, call.Arguments)
 							}
@@ -1584,7 +1692,7 @@ func ExecuteCompliancePlan(
 							record := report.Invocation{
 								Executable: filepath.ToSlash(exe),
 								Args:       redactedArgs(args, opts.Redactor),
-								Cwd:        filepath.ToSlash(execRoot),
+								Cwd:        filepath.ToSlash(callDir),
 								TimeoutMs:  effectiveTimeout.Milliseconds(),
 								StartedAt:  time.Now().UTC().Format(time.RFC3339Nano),
 							}
@@ -1606,7 +1714,7 @@ func ExecuteCompliancePlan(
 								Executable:       exe,
 								Args:             args,
 								CommandLine:      call.RawCommandLine,
-								WorkingDirectory: execRoot,
+								WorkingDirectory: callDir,
 								Env:              env,
 								Limits: osutil.ProcessLimits{
 									Timeout:        effectiveTimeout,
@@ -1686,8 +1794,8 @@ func ExecuteCompliancePlan(
 						} else {
 							exitCode := procRes.ExitCode
 							res.ExitCode = &exitCode
-							stdout := stripANSI(procRes.Stdout)
-							stderr := stripANSI(procRes.Stderr)
+							stdout := tofu.restore(stripANSI(procRes.Stdout))
+							stderr := tofu.restore(stripANSI(procRes.Stderr))
 							if opts.Redactor != nil {
 								stdout = opts.Redactor.Redact(stdout)
 								stderr = opts.Redactor.Redact(stderr)
@@ -1703,7 +1811,7 @@ func ExecuteCompliancePlan(
 							} else if ctrl.Tool != nil {
 								parsed := stdout
 								switch ctrl.Tool.Command {
-								case "pip-audit", "yamllint", "bandit":
+								case "pip-audit", "yamllint", "bandit", "terragrunt":
 									parsed = stdout + "\n" + stderr
 								}
 								res.Leaks = append(res.Leaks, parseToolFindings(ctrl.Tool.Command, parsed, plan.Repository)...)
@@ -1737,6 +1845,15 @@ func ExecuteCompliancePlan(
 									Message:  "Arbre du controle termine apres annulation.",
 									Critical: false,
 								})
+							} else if ctrl.Tool != nil && exitCode != 0 && toolCrashed(ctrl.Tool.Command, stderr, len(res.Leaks)) {
+								// The tool failed before analysing anything: not a compliance verdict.
+								res.Status = "error"
+								res.Critical = ctrl.Required
+								res.Diagnostics = append(res.Diagnostics, report.Diagnostic{
+									Code:     "tool_failed",
+									Message:  fmt.Sprintf("%s s'est arrêté sur une erreur (code %d) sans analyser la racine : %s", ctrl.Tool.Command, exitCode, lastLine(stderr)),
+									Critical: res.Critical,
+								})
 							} else if procRes.TimedOut {
 								res.Status = "error"
 								res.Critical = ctrl.Required
@@ -1747,6 +1864,14 @@ func ExecuteCompliancePlan(
 								})
 							} else if exitCode == 0 && len(res.Leaks) == 0 {
 								res.Status = "success"
+								if ctrl.Tool != nil && ctrl.Tool.Command == "checkov" && checkovAnalysedNothing(stdout) {
+									// A success over zero resources is not coverage: say it.
+									res.Diagnostics = append(res.Diagnostics, report.Diagnostic{
+										Code:     "nothing_analyzed",
+										Message:  "Checkov n'a analysé aucune ressource dans cette racine : aucun fichier reconnu par le framework.",
+										Critical: false,
+									})
+								}
 							} else if ctrl.Tool != nil && pytestCollectedNothing(ctrl.Tool.Command, exitCode, len(res.Leaks)) {
 								res.Status = "success"
 								res.Diagnostics = append(res.Diagnostics, report.Diagnostic{

@@ -39,13 +39,15 @@
     "test:webview": "node ./scripts/run-webview-test.js",
     "vscode:uninstall": "node ./scripts/uninstall.js",
     "reinstall": "node ./scripts/reinstall.js",
-    "package": "node -e \"const { spawnSync } = require('child_process'); const py = process.platform === 'win32' ? (spawnSync('where.exe', ['py']).status === 0 ? 'py' : 'python') : 'python3'; const res = spawnSync(py, ['package_vsix.py'], { stdio: 'inherit' }); process.exit(res.status || 0);\""
+    "package": "node -e \"const { spawnSync } = require('child_process'); const py = process.platform === 'win32' ? (spawnSync('where.exe', ['py']).status === 0 ? 'py' : 'python') : 'python3'; const res = spawnSync(py, ['package_vsix.py'], { stdio: 'inherit' }); process.exit(res.status || 0);\"",
+    "lint": "eslint src",
+    "test:unit": "tsc -p tsconfig.json && node --test \".extension-build/src/test/unit/*.test.js\""
   },
   "main": "./.extension-build/src/extension.js",
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "La preparation des outils exige un workspace approuve."
+      "description": "La préparation des outils exige un workspace approuvé."
     },
     "virtualWorkspaces": false
   },
@@ -156,7 +158,7 @@
     "viewsWelcome": [
       {
         "view": "compliance.pipelines",
-        "contents": "[Selectionner une Target](command:compliance.selectTarget)"
+        "contents": "[Sélectionner une Target](command:compliance.selectTarget)"
       }
     ],
     "menus": {
@@ -241,7 +243,9 @@
         },
         "compliance.disabledTechnologies": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "scope": "application",
           "description": "Technologies ignorées, par exemple markdown.",
@@ -249,7 +253,9 @@
         },
         "compliance.disabledControls": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "scope": "application",
           "description": "Identifiants de contrôles ignorés.",
@@ -274,9 +280,12 @@
     }
   },
   "devDependencies": {
+    "@eslint/js": "10.0.1",
     "@types/node": "22.15.30",
     "@types/vscode": "1.81.0",
     "@vscode/test-electron": "2.5.2",
-    "typescript": "5.9.3"
+    "eslint": "10.13.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.0"
   }
 }

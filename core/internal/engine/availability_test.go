@@ -17,7 +17,7 @@ func TestProbeFailureIsNotInstallable(t *testing.T) {
 		t.Fatalf("checkov probe = %s %s %s", applicability, code, reason)
 	}
 
-	applicability, code, reason = refineUnavailableTool(
+	_, code, reason = refineUnavailableTool(
 		"tool_unavailable", "tool_unavailable", "",
 		"trivy", "windows-x64",
 		&matrix.CandidateToolState{Status: "runtime_error", Command: "trivy", Reason: "Qualification d'execution impossible: exit status 1 (stdout: aucune sortie ; stderr: aucune sortie ; binaire: C:/trivy.exe)"},

@@ -35,7 +35,9 @@ Le moteur reçoit un dossier local. Il ne demande ni compte de forge ni réseau 
 ## Résolution des outils
 
 1. `eslint` et `tsc` : `node_modules/.bin` de la cible, sinon `~/.compliance/tools/node`.
-2. Les autres outils : `.tools/bin` du dépôt de développement, puis `~/.compliance/tools/{bin,python,node,powershell-modules}`, puis `PATH`.
+2. Les autres outils : `.tools/bin` du dépôt de développement, puis `~/.compliance/tools/{bin,python,node,powershell-modules}`, puis `PATH`. `COMPLIANCE_TOOLS_DIR` remplace `~/.compliance/tools` (tests isolés sur le poste).
+3. ESLint, `tsc` et Gitleaks forment un seul contrôle par technologie. ESLint tourne une fois dans chaque racine réunie ; `tsc` vérifie chaque `tsconfig.json` ; Gitleaks parcourt le dépôt entier.
+4. OpenTofu : TFLint et Checkov lisent une copie temporaire de la racine où chaque `.tofu` devient `.tf` ; les anomalies citent les fichiers `.tofu`.
 
 Les outils Python du registre passent par `python -m`, pas par un shebang figé. Checkov est qualifié par un import court (`python -c`), pas par le CLI, avec un délai de 60 secondes et un interpréteur isolé (`PYTHONNOUSERSITE`, `PYTHONPATH` vide). Trivy est qualifié avec un cache local et sans vérification de version en ligne. Un échec ou un délai de sonde est `probe_failed` : le rapport le montre et ne propose pas de le réinstaller. Seul un binaire absent du disque reste « installable depuis le manifeste ». Sur Windows, `ansible` et `ansible-lint` sont incompatibles avant cette recherche : `yamllint` couvre les playbooks. Une longue liste de fichiers est découpée sous 24 000 caractères. L'extraction d'une archive utilise les chemins étendus Windows quand le chemin dépasse 248 caractères.
 

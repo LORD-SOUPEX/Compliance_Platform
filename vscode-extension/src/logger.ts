@@ -58,7 +58,7 @@ function formatValue(value: unknown): string {
     if (value instanceof Error) { return displayArg(value.message); }
     if (typeof value === 'string') { return displayArg(value); }
     if (typeof value === 'number' || typeof value === 'boolean') { return String(value); }
-    try { return JSON.stringify(value); } catch { return String(value); }
+    try { return JSON.stringify(value) ?? 'null'; } catch { return '[valeur non sérialisable]'; }
 }
 
 export function formatFields(fields?: LogFields): string {

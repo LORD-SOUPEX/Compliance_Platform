@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -530,4 +531,45 @@ func containsArg(arguments []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestESLintFindingsFromSeveralRuns(t *testing.T) {
+	stdout := `[{"filePath":"/repo/apps/a.js","messages":[]}]` + "\n" +
+		`[{"filePath":"/repo/legacy/b.js","messages":[{"ruleId":"eqeqeq","message":"Expected '==='","line":3,"column":7,"severity":1}]}]` + "\n" +
+		`[{"filePath":"/repo/legacy/c.ts","messages":[{"ruleId":null,"message":"Parsing error","line":0,"column":0,"severity":2}]}]`
+	leaks := parseESLint(stdout, "/repo")
+	if len(leaks) != 2 || leaks[0].RuleID != "eqeqeq" || leaks[0].Line != 3 || leaks[1].RuleID != "eslint" || leaks[1].Severity != "medium" {
+		t.Fatalf("leaks = %+v", leaks)
+	}
+}
+
+func TestFormatAndPowerShellParsers(t *testing.T) {
+	fmtLeaks := parseFmtFiles("main.tofu\n--- old/main.tofu\n+++ new/main.tofu\n-a\n+b\nvars.tfvars\nREADME.md\n", "")
+	if len(fmtLeaks) != 2 || fmtLeaks[0].File != "main.tofu" || fmtLeaks[1].File != "vars.tfvars" {
+		t.Fatalf("fmt = %+v", fmtLeaks)
+	}
+	// Absolute paths differ per OS (C:\ on Windows): build them from a real folder.
+	repo := t.TempDir()
+	hcl := filepath.Join(repo, "live", "terragrunt.hcl")
+	tg := parseTerragruntFmt("13:29:23 ERROR  File '"+hcl+"' needs formatting\n13:29:23 ERROR  File '"+hcl+"' needs formatting\n", repo)
+	if len(tg) != 1 || tg[0].File != "live/terragrunt.hcl" || tg[0].RuleID != "hclfmt" {
+		t.Fatalf("terragrunt = %+v", tg)
+	}
+	row := func(file, line, severity string) string {
+		raw, _ := json.Marshal(map[string]interface{}{"file": filepath.Join(repo, filepath.FromSlash(file)), "line": json.RawMessage(line), "rule": "R", "severity": severity, "message": "m"})
+		return string(raw)
+	}
+	ps := parsePSScriptAnalyzer("noise\n"+row("scripts/a.ps1", "12", "Warning")+"\n"+row("scripts/b.ps1", `"3"`, "Error")+"\n", repo)
+	if len(ps) != 2 || ps[0].File != "scripts/a.ps1" || ps[0].Line != 12 || ps[0].Severity != "medium" || ps[1].Line != 3 || ps[1].Severity != "high" {
+		t.Fatalf("psscriptanalyzer = %+v", ps)
+	}
+}
+
+func TestToolCrashIsNotAComplianceFailure(t *testing.T) {
+	if !toolCrashed("trivy", "FATAL Fatal error run error: init error: DB error", 0) {
+		t.Fatal("trivy FATAL not seen as a crash")
+	}
+	if toolCrashed("trivy", "FATAL whatever", 2) || toolCrashed("terragrunt", "ERROR File 'x' needs formatting", 0) || toolCrashed("ruff", "FATAL", 0) {
+		t.Fatal("findings or another tool taken for a crash")
+	}
 }

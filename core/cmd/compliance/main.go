@@ -554,7 +554,15 @@ func runPipeline(args []string) {
 	}
 
 	ctx := context.Background()
+	// Same contract as the daemon: no installation replaces a tool while this run probes or executes it.
+	osutil.RefreshPath("")
+	unlock, err := distribution.LockTools(ctx, "", false, "compliance run")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+		os.Exit(2)
+	}
 	rep, err := engine.RunCompliance(ctx, opts)
+	unlock()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ERROR] Échec de la session de conformité: %v\n", err)
 		os.Exit(2)
@@ -632,60 +640,10 @@ func defaultCacheDir() string {
 	return osutil.DefaultToolCacheDir()
 }
 
-func defaultCABundle() string {
-	candidate := filepath.Join(".tools", "cache", "windows-root-ca.pem")
-	if _, err := os.Stat(candidate); err == nil {
-		abs, _ := filepath.Abs(candidate)
-		return abs
-	}
-	return ""
-}
-
 type ToolInvocation struct {
 	Executable string
 	Args       []string
 	Env        []string
-}
-
-func resolveTool(name, override string) ToolInvocation {
-	if override != "" {
-		if _, err := os.Stat(override); err == nil {
-			abs, _ := filepath.Abs(override)
-			return ToolInvocation{Executable: abs}
-		}
-		return ToolInvocation{Executable: override}
-	}
-
-	plat := distribution.DetectPlatform()
-	cached := filepath.Join(defaultCacheDir(), "bin", plat, name)
-	if runtime.GOOS == "windows" {
-		cached += ".exe"
-	}
-	if _, err := os.Stat(cached); err == nil {
-		return ToolInvocation{Executable: cached}
-	}
-
-	pyCandidate := filepath.Join(".tools", "python", "Scripts", name+".exe")
-	if runtime.GOOS != "windows" {
-		pyCandidate = filepath.Join(".tools", "python", "bin", name)
-	}
-	if _, err := os.Stat(pyCandidate); err == nil {
-		abs, _ := filepath.Abs(pyCandidate)
-		return ToolInvocation{Executable: abs}
-	}
-	if runtime.GOOS == "windows" {
-		pyCmdCandidate := filepath.Join(".tools", "python", "Scripts", name+".cmd")
-		if _, err := os.Stat(pyCmdCandidate); err == nil {
-			abs, _ := filepath.Abs(pyCmdCandidate)
-			return ToolInvocation{Executable: abs}
-		}
-	}
-
-	if p := osutil.LookupExecutable(name); p != "" {
-		return ToolInvocation{Executable: p}
-	}
-
-	return ToolInvocation{}
 }
 
 func isBoolFlag(arg string) bool {
