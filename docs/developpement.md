@@ -1,6 +1,6 @@
 # Développement
 
-Version courante : 2.2.0. Le fonctionnement du moteur, du registre et des compteurs est dans [architecture](architecture.md).
+Version courante : 2.2.1. Le fonctionnement du moteur, du registre et des compteurs est dans [architecture](architecture.md).
 
 ## Validation
 

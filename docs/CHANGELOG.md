@@ -1,6 +1,6 @@
 # Changelog
 
-## Non publié
+## 2.2.1
 
 - **Installation des outils** : un bundle (Python, Node) est extrait une seule fois. Son archive est notée dans le dossier du bundle (`.archive-sha256`), et les autres outils du même bundle le réutilisent sans téléchargement ni extraction. Un premier audit installait 5 outils Python en 35 s chacun ; c'est désormais 35 s pour tout le bundle.
 - **Journal** : un contrôle annoncé « exécution en cours » puis non exécuté (outil ou chaîne absente, par exemple `go` pour golangci-lint) a maintenant sa ligne « non exécuté » avec la raison.
