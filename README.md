@@ -118,7 +118,7 @@ Compliance_Platform/
 │   │   └── localSettings.ts            # Réglages de portée application
 │   ├── eslint.config.mjs               # ESLint strict de l'extension
 │   ├── package_vsix.py                 # Packaging OPC universel et cross-compilation
-│   ├── package.json                    # Manifeste d'extension VS Code (v2.1.3)
+│   ├── package.json                    # Manifeste d'extension VS Code (v2.2.0)
 │   └── tsconfig.json
 ├── .config/                            # Contrats de configuration partagés
 │   ├── control-catalog.json            # Catalogue des contrôles (voir le tableau ci-dessus)

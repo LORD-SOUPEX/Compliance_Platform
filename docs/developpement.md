@@ -1,6 +1,6 @@
 # Développement
 
-Version courante : 2.1.3. Le fonctionnement du moteur, du registre et des compteurs est dans [architecture](architecture.md).
+Version courante : 2.2.0. Le fonctionnement du moteur, du registre et des compteurs est dans [architecture](architecture.md).
 
 ## Validation
 
@@ -84,4 +84,4 @@ La signature est facultative. L'installation des outils et `npm run package` con
 compliance runtime sign -manifest .config/runtime-manifest.json -key-file <clé-hex> -out .config/runtime-manifest.json.sig
 ```
 
-La clé est une seed Ed25519 de 32 octets ou une clé privée de 64 octets, en hexadécimal. Elle n'est pas dans le dépôt. La copie embarquée est `core/internal/embedded/assets/runtime-manifest.json.sig`.
+La clé est une seed Ed25519 de 32 octets ou une clé privée de 64 octets, en hexadécimal. Elle n'est pas dans le dépôt. `scripts/build_and_publish_tools.py` signe avec la seed brute de 32 octets `.tools/cache/distribution_ed25519.key` (ignorée par Git). Cette clé, créée pour la 2.2.0, correspond à `DefaultPhase0PublicKeyHex` dans `core/internal/distribution/distribution.go` : en conserver une copie hors du poste, car sa perte impose une nouvelle rotation. La copie embarquée est `core/internal/embedded/assets/runtime-manifest.json.sig`.

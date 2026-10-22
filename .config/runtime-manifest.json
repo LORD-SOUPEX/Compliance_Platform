@@ -1,6 +1,6 @@
 {
   "schema_version": 3,
-  "manifest_version": "2.1.0",
+  "manifest_version": "2.2.0",
   "registry_base_url": "https://github.com/LORD-SOUPEX/Compliance_Platform/releases/download/tools-v1",
   "platforms": {
     "windows-x64": {
@@ -227,7 +227,7 @@
           "version": "22.14.0",
           "install": "bundle",
           "archive": "windows-x64-node-tools-22.14.0.zip",
-          "archive_sha256": "4678e4215b4a0d0fc6eb1aa2bb292eb1b2fdf3e72162e3fc0af04cfdf2f56238",
+          "archive_sha256": "25f593b43b1d0b29e69c194fa18369eba63b309bc0b1599784c91cc3682cd665",
           "binary_in_archive": "node/node.exe",
           "binary_sha256": "",
           "version_args": [
@@ -240,7 +240,7 @@
           "install": "bundle",
           "bundle": "node",
           "archive": "windows-x64-node-tools-22.14.0.zip",
-          "archive_sha256": "4678e4215b4a0d0fc6eb1aa2bb292eb1b2fdf3e72162e3fc0af04cfdf2f56238",
+          "archive_sha256": "25f593b43b1d0b29e69c194fa18369eba63b309bc0b1599784c91cc3682cd665",
           "binary_in_archive": "node/node_modules/.bin/eslint.cmd",
           "binary_sha256": "",
           "version_args": [
@@ -253,7 +253,7 @@
           "install": "bundle",
           "bundle": "node",
           "archive": "windows-x64-node-tools-22.14.0.zip",
-          "archive_sha256": "4678e4215b4a0d0fc6eb1aa2bb292eb1b2fdf3e72162e3fc0af04cfdf2f56238",
+          "archive_sha256": "25f593b43b1d0b29e69c194fa18369eba63b309bc0b1599784c91cc3682cd665",
           "binary_in_archive": "node/node_modules/.bin/tsc.cmd",
           "binary_sha256": "",
           "version_args": [
@@ -281,6 +281,92 @@
           "binary_in_archive": "powershell-modules/PSScriptAnalyzer/PSScriptAnalyzer.psd1",
           "binary_sha256": "",
           "version_args": []
+        },
+        "biome": {
+          "name": "biome",
+          "version": "2.6.2",
+          "install": "archive",
+          "archive": "windows-x64-biome-2.6.2.zip",
+          "archive_sha256": "d29b3612bbfd3d9cc553fc38954d6316aa619828f5c30979e700379caa7f0b18",
+          "binary_in_archive": "biome.exe",
+          "binary_sha256": "283639d771d82502b7498e87cee2e703f84aa040144b04ea1bcfc0ab942a9184",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "osv-scanner": {
+          "name": "osv-scanner",
+          "version": "2.7.0",
+          "install": "archive",
+          "archive": "windows-x64-osv-scanner-2.7.0.zip",
+          "archive_sha256": "45b7c6ebbda037805db66c3c38af0851e018e02c3834c88c49a539a383875d34",
+          "binary_in_archive": "osv-scanner.exe",
+          "binary_sha256": "9964ed64ec9a387391eb4cc006ad5c531154821aef29b793e02c448de4686438",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "golangci-lint": {
+          "name": "golangci-lint",
+          "version": "2.15.0",
+          "install": "archive",
+          "archive": "windows-x64-golangci-lint-2.15.0.zip",
+          "archive_sha256": "6812f07e5e32a92dad54f578017e3d122a6312ce4625a68082f540d2d2227087",
+          "binary_in_archive": "golangci-lint.exe",
+          "binary_sha256": "5ec86137f1f3b9f68d948adc3644c689c4d805b449c4257b75efdc9fe03085b2",
+          "version_args": [
+            "version"
+          ]
+        },
+        "shfmt": {
+          "name": "shfmt",
+          "version": "3.14.1",
+          "install": "archive",
+          "archive": "windows-x64-shfmt-3.14.1.zip",
+          "archive_sha256": "70bac7bc50fd50ed17aff0d541584b724d62be86ca37ff07f716e492a7171b29",
+          "binary_in_archive": "shfmt.exe",
+          "binary_sha256": "13629ce28442ca80b6b5a819f7574ab39e1c28c6e26734ca816c9714e04851df",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "kubeconform": {
+          "name": "kubeconform",
+          "version": "0.8.0",
+          "install": "archive",
+          "archive": "windows-x64-kubeconform-0.8.0.zip",
+          "archive_sha256": "4561b2b4767c884627260cfef43347ba650819f83c25e5f3df97cb1f95975f74",
+          "binary_in_archive": "kubeconform.exe",
+          "binary_sha256": "642bf8ea0d614a8c75d2bd012eb6042a90589ff846c69f04863afa446b30f2c1",
+          "version_args": [
+            "-v"
+          ]
+        },
+        "stylelint": {
+          "name": "stylelint",
+          "version": "17.16.0",
+          "install": "bundle",
+          "bundle": "node",
+          "archive": "windows-x64-node-tools-22.14.0.zip",
+          "archive_sha256": "25f593b43b1d0b29e69c194fa18369eba63b309bc0b1599784c91cc3682cd665",
+          "binary_in_archive": "node/node_modules/.bin/stylelint.cmd",
+          "binary_sha256": "",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "htmlhint": {
+          "name": "htmlhint",
+          "version": "1.9.2",
+          "install": "bundle",
+          "bundle": "node",
+          "archive": "windows-x64-node-tools-22.14.0.zip",
+          "archive_sha256": "25f593b43b1d0b29e69c194fa18369eba63b309bc0b1599784c91cc3682cd665",
+          "binary_in_archive": "node/node_modules/.bin/htmlhint.cmd",
+          "binary_sha256": "",
+          "version_args": [
+            "--version"
+          ]
         }
       }
     },
@@ -414,6 +500,130 @@
           "archive": "linux-x64-python-3.11.9.tar.gz",
           "archive_sha256": "78b1c16a9fd032997ba92a60f46a64f795cd18ff335659dfdf6096df277b24d5",
           "binary_in_archive": "python/bin/python3",
+          "binary_sha256": "",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "biome": {
+          "name": "biome",
+          "version": "2.6.2",
+          "install": "archive",
+          "archive": "linux-x64-biome-2.6.2.tar.gz",
+          "archive_sha256": "dcc5818422e6f9f64bb564b77c1043b803c6bfecf6042d622dc20b272a17c493",
+          "binary_in_archive": "biome",
+          "binary_sha256": "ebb3d0e80cbee503c4c19a70891dd7589e22e801412630a0cad402b19ca78c93",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "osv-scanner": {
+          "name": "osv-scanner",
+          "version": "2.7.0",
+          "install": "archive",
+          "archive": "linux-x64-osv-scanner-2.7.0.tar.gz",
+          "archive_sha256": "404cd0353316c7e85ad8b8fc55845eaa5320b044154aa8174190f2e053995680",
+          "binary_in_archive": "osv-scanner",
+          "binary_sha256": "160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "golangci-lint": {
+          "name": "golangci-lint",
+          "version": "2.15.0",
+          "install": "archive",
+          "archive": "linux-x64-golangci-lint-2.15.0.tar.gz",
+          "archive_sha256": "f1119a05ea39588330dbfa18783c99135dad35f0ad0bb9c6bc675bdae733932e",
+          "binary_in_archive": "golangci-lint",
+          "binary_sha256": "d9af4564c05beb2f5e130119aec45e5e89d28e5017d558d3ca382659f2427894",
+          "version_args": [
+            "version"
+          ]
+        },
+        "shfmt": {
+          "name": "shfmt",
+          "version": "3.14.1",
+          "install": "archive",
+          "archive": "linux-x64-shfmt-3.14.1.tar.gz",
+          "archive_sha256": "a4fa3b5257af07abad1dd833e8d1b678055c38b65f0cb4dce02596ee4f2535ba",
+          "binary_in_archive": "shfmt",
+          "binary_sha256": "76e77641faa025814b77f153b29796b8e6fa2fca03e0c76a691608b86c7ea7bf",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "kubeconform": {
+          "name": "kubeconform",
+          "version": "0.8.0",
+          "install": "archive",
+          "archive": "linux-x64-kubeconform-0.8.0.tar.gz",
+          "archive_sha256": "7a4666eaad0f0e50f29fb943629232ac2cb6d47b5dadfedec09c876e53dac77e",
+          "binary_in_archive": "kubeconform",
+          "binary_sha256": "457722b36e98d7bdbc91525e594951ef5d7ea3a29da2d13b9b28a2fb8a5097b7",
+          "version_args": [
+            "-v"
+          ]
+        },
+        "node": {
+          "name": "node",
+          "version": "22.14.0",
+          "install": "bundle",
+          "archive": "linux-x64-node-tools-22.14.0.tar.gz",
+          "archive_sha256": "d1a258e34e57d155323911f5c298ed8ac5f66b891d22940cfb631dadfb41aede",
+          "binary_in_archive": "node/bin/node",
+          "binary_sha256": "",
+          "version_args": [
+            "-v"
+          ]
+        },
+        "eslint": {
+          "name": "eslint",
+          "version": "9.21.0",
+          "install": "bundle",
+          "bundle": "node",
+          "archive": "linux-x64-node-tools-22.14.0.tar.gz",
+          "archive_sha256": "d1a258e34e57d155323911f5c298ed8ac5f66b891d22940cfb631dadfb41aede",
+          "binary_in_archive": "node/node_modules/.bin/eslint",
+          "binary_sha256": "",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "tsc": {
+          "name": "tsc",
+          "version": "5.7.3",
+          "install": "bundle",
+          "bundle": "node",
+          "archive": "linux-x64-node-tools-22.14.0.tar.gz",
+          "archive_sha256": "d1a258e34e57d155323911f5c298ed8ac5f66b891d22940cfb631dadfb41aede",
+          "binary_in_archive": "node/node_modules/.bin/tsc",
+          "binary_sha256": "",
+          "version_args": [
+            "-v"
+          ]
+        },
+        "stylelint": {
+          "name": "stylelint",
+          "version": "17.16.0",
+          "install": "bundle",
+          "bundle": "node",
+          "archive": "linux-x64-node-tools-22.14.0.tar.gz",
+          "archive_sha256": "d1a258e34e57d155323911f5c298ed8ac5f66b891d22940cfb631dadfb41aede",
+          "binary_in_archive": "node/node_modules/.bin/stylelint",
+          "binary_sha256": "",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "htmlhint": {
+          "name": "htmlhint",
+          "version": "1.9.2",
+          "install": "bundle",
+          "bundle": "node",
+          "archive": "linux-x64-node-tools-22.14.0.tar.gz",
+          "archive_sha256": "d1a258e34e57d155323911f5c298ed8ac5f66b891d22940cfb631dadfb41aede",
+          "binary_in_archive": "node/node_modules/.bin/htmlhint",
           "binary_sha256": "",
           "version_args": [
             "--version"
@@ -555,6 +765,130 @@
           "version_args": [
             "--version"
           ]
+        },
+        "biome": {
+          "name": "biome",
+          "version": "2.6.2",
+          "install": "archive",
+          "archive": "linux-arm64-biome-2.6.2.tar.gz",
+          "archive_sha256": "06d4891ace9130d7a695739dbc5cc6b8152ad673da1adc17d5416418ffb92c39",
+          "binary_in_archive": "biome",
+          "binary_sha256": "5d697fea8f0cbb7364f995f16c219174b302ac5b68c868f2e87cb71dda9d1c4d",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "osv-scanner": {
+          "name": "osv-scanner",
+          "version": "2.7.0",
+          "install": "archive",
+          "archive": "linux-arm64-osv-scanner-2.7.0.tar.gz",
+          "archive_sha256": "2423961b83ef9ecea838dba2cdb3e4407b2fcd284b7b8e2d38d2c248ef12ca73",
+          "binary_in_archive": "osv-scanner",
+          "binary_sha256": "4061ef4c021ed3c47f203b818f337e351336cc5cd67c0274fc36bd1dfc728dd7",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "golangci-lint": {
+          "name": "golangci-lint",
+          "version": "2.15.0",
+          "install": "archive",
+          "archive": "linux-arm64-golangci-lint-2.15.0.tar.gz",
+          "archive_sha256": "c4fc38228e93def50669fe14c254bc111b6354aeae0abc378240485b7688e9e3",
+          "binary_in_archive": "golangci-lint",
+          "binary_sha256": "14680d7674eb1fed0405446670e15dcffb74e979ef0dcd41f998c088fd6babfb",
+          "version_args": [
+            "version"
+          ]
+        },
+        "shfmt": {
+          "name": "shfmt",
+          "version": "3.14.1",
+          "install": "archive",
+          "archive": "linux-arm64-shfmt-3.14.1.tar.gz",
+          "archive_sha256": "82cf368ecf0ce2e4ab298e47e34340fe3b8b61d842938f64460847c7b65c5b1f",
+          "binary_in_archive": "shfmt",
+          "binary_sha256": "5f2db09dae91fca848f7adbdd014632e921a383863a2ad7e0450ad3aba0c6489",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "kubeconform": {
+          "name": "kubeconform",
+          "version": "0.8.0",
+          "install": "archive",
+          "archive": "linux-arm64-kubeconform-0.8.0.tar.gz",
+          "archive_sha256": "96588a44d06a7715620b0de405ec14aafb33b75aa3fb2c355f35f0d784151313",
+          "binary_in_archive": "kubeconform",
+          "binary_sha256": "7e77b104b3ae696389f91971c60fd58c72f1f3dc218f139df67a1b070959c012",
+          "version_args": [
+            "-v"
+          ]
+        },
+        "node": {
+          "name": "node",
+          "version": "22.14.0",
+          "install": "bundle",
+          "archive": "linux-arm64-node-tools-22.14.0.tar.gz",
+          "archive_sha256": "ab910a8c3774e53069021ff27c529a3c6778cd9ad789481c7c420cd0393a7ac0",
+          "binary_in_archive": "node/bin/node",
+          "binary_sha256": "",
+          "version_args": [
+            "-v"
+          ]
+        },
+        "eslint": {
+          "name": "eslint",
+          "version": "9.21.0",
+          "install": "bundle",
+          "bundle": "node",
+          "archive": "linux-arm64-node-tools-22.14.0.tar.gz",
+          "archive_sha256": "ab910a8c3774e53069021ff27c529a3c6778cd9ad789481c7c420cd0393a7ac0",
+          "binary_in_archive": "node/node_modules/.bin/eslint",
+          "binary_sha256": "",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "tsc": {
+          "name": "tsc",
+          "version": "5.7.3",
+          "install": "bundle",
+          "bundle": "node",
+          "archive": "linux-arm64-node-tools-22.14.0.tar.gz",
+          "archive_sha256": "ab910a8c3774e53069021ff27c529a3c6778cd9ad789481c7c420cd0393a7ac0",
+          "binary_in_archive": "node/node_modules/.bin/tsc",
+          "binary_sha256": "",
+          "version_args": [
+            "-v"
+          ]
+        },
+        "stylelint": {
+          "name": "stylelint",
+          "version": "17.16.0",
+          "install": "bundle",
+          "bundle": "node",
+          "archive": "linux-arm64-node-tools-22.14.0.tar.gz",
+          "archive_sha256": "ab910a8c3774e53069021ff27c529a3c6778cd9ad789481c7c420cd0393a7ac0",
+          "binary_in_archive": "node/node_modules/.bin/stylelint",
+          "binary_sha256": "",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "htmlhint": {
+          "name": "htmlhint",
+          "version": "1.9.2",
+          "install": "bundle",
+          "bundle": "node",
+          "archive": "linux-arm64-node-tools-22.14.0.tar.gz",
+          "archive_sha256": "ab910a8c3774e53069021ff27c529a3c6778cd9ad789481c7c420cd0393a7ac0",
+          "binary_in_archive": "node/node_modules/.bin/htmlhint",
+          "binary_sha256": "",
+          "version_args": [
+            "--version"
+          ]
         }
       }
     },
@@ -692,6 +1026,130 @@
           "version_args": [
             "--version"
           ]
+        },
+        "biome": {
+          "name": "biome",
+          "version": "2.6.2",
+          "install": "archive",
+          "archive": "macos-x64-biome-2.6.2.tar.gz",
+          "archive_sha256": "ce35383e8bedf573d4ad311d70ea564bd687f301851d9a0fa397c11f09a1119f",
+          "binary_in_archive": "biome",
+          "binary_sha256": "9bba9be8c50bf2a58bc6de8023b599e57613588800bd843273e9ccaa4deba52c",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "osv-scanner": {
+          "name": "osv-scanner",
+          "version": "2.7.0",
+          "install": "archive",
+          "archive": "macos-x64-osv-scanner-2.7.0.tar.gz",
+          "archive_sha256": "23e5f1543bace99213b6438b5ca66e8977758bda416260c012c36c12a0c1b81e",
+          "binary_in_archive": "osv-scanner",
+          "binary_sha256": "e82c5df7ab0a42dff29a1cd0660711447b56b4c0483ff66ad8634df10fd81a45",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "golangci-lint": {
+          "name": "golangci-lint",
+          "version": "2.15.0",
+          "install": "archive",
+          "archive": "macos-x64-golangci-lint-2.15.0.tar.gz",
+          "archive_sha256": "184065fa27b1c525cc0a202902b597e4ccb450c9677fa16825ecc63dff641248",
+          "binary_in_archive": "golangci-lint",
+          "binary_sha256": "e04962742507a5f37a4002a7a8b2b549f6864f17807eb5d534d947f6311a051f",
+          "version_args": [
+            "version"
+          ]
+        },
+        "shfmt": {
+          "name": "shfmt",
+          "version": "3.14.1",
+          "install": "archive",
+          "archive": "macos-x64-shfmt-3.14.1.tar.gz",
+          "archive_sha256": "57ce74d3ce923a1d4d9425da6e42233f987c164452beb681ed36be1792a7cc34",
+          "binary_in_archive": "shfmt",
+          "binary_sha256": "d33eee0da0f92835b3562e9767a05cee7e4eaeef47daa03bfd09da17b4b590a6",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "kubeconform": {
+          "name": "kubeconform",
+          "version": "0.8.0",
+          "install": "archive",
+          "archive": "macos-x64-kubeconform-0.8.0.tar.gz",
+          "archive_sha256": "7d7772c670653bb027bc762cc22c6b4cd461d787988a031aec78ae572e4054b8",
+          "binary_in_archive": "kubeconform",
+          "binary_sha256": "2138fc51a0b15efe827f49c1ded8eb63da049d59864ae74a9384715f9ab6f94d",
+          "version_args": [
+            "-v"
+          ]
+        },
+        "node": {
+          "name": "node",
+          "version": "22.14.0",
+          "install": "bundle",
+          "archive": "macos-x64-node-tools-22.14.0.tar.gz",
+          "archive_sha256": "0b04164f192b9e0b459e12ee8732ff03799fd2276d432473f38de35317c8da2d",
+          "binary_in_archive": "node/bin/node",
+          "binary_sha256": "",
+          "version_args": [
+            "-v"
+          ]
+        },
+        "eslint": {
+          "name": "eslint",
+          "version": "9.21.0",
+          "install": "bundle",
+          "bundle": "node",
+          "archive": "macos-x64-node-tools-22.14.0.tar.gz",
+          "archive_sha256": "0b04164f192b9e0b459e12ee8732ff03799fd2276d432473f38de35317c8da2d",
+          "binary_in_archive": "node/node_modules/.bin/eslint",
+          "binary_sha256": "",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "tsc": {
+          "name": "tsc",
+          "version": "5.7.3",
+          "install": "bundle",
+          "bundle": "node",
+          "archive": "macos-x64-node-tools-22.14.0.tar.gz",
+          "archive_sha256": "0b04164f192b9e0b459e12ee8732ff03799fd2276d432473f38de35317c8da2d",
+          "binary_in_archive": "node/node_modules/.bin/tsc",
+          "binary_sha256": "",
+          "version_args": [
+            "-v"
+          ]
+        },
+        "stylelint": {
+          "name": "stylelint",
+          "version": "17.16.0",
+          "install": "bundle",
+          "bundle": "node",
+          "archive": "macos-x64-node-tools-22.14.0.tar.gz",
+          "archive_sha256": "0b04164f192b9e0b459e12ee8732ff03799fd2276d432473f38de35317c8da2d",
+          "binary_in_archive": "node/node_modules/.bin/stylelint",
+          "binary_sha256": "",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "htmlhint": {
+          "name": "htmlhint",
+          "version": "1.9.2",
+          "install": "bundle",
+          "bundle": "node",
+          "archive": "macos-x64-node-tools-22.14.0.tar.gz",
+          "archive_sha256": "0b04164f192b9e0b459e12ee8732ff03799fd2276d432473f38de35317c8da2d",
+          "binary_in_archive": "node/node_modules/.bin/htmlhint",
+          "binary_sha256": "",
+          "version_args": [
+            "--version"
+          ]
         }
       }
     },
@@ -825,6 +1283,130 @@
           "archive": "macos-arm64-python-3.11.9.tar.gz",
           "archive_sha256": "7af7058f7c268b4d87ed7e08c2c7844ef8460863b3e679db3afdce8bb1eedfae",
           "binary_in_archive": "python/bin/python3",
+          "binary_sha256": "",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "biome": {
+          "name": "biome",
+          "version": "2.6.2",
+          "install": "archive",
+          "archive": "macos-arm64-biome-2.6.2.tar.gz",
+          "archive_sha256": "0e8389373e3d08f96234d952a6ec5842d1df8c0951422efe31061b7805e7f30c",
+          "binary_in_archive": "biome",
+          "binary_sha256": "be66b76dcb930b1e365bd36c4f5d8557c2dda70b31567f8bd15509e487753a69",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "osv-scanner": {
+          "name": "osv-scanner",
+          "version": "2.7.0",
+          "install": "archive",
+          "archive": "macos-arm64-osv-scanner-2.7.0.tar.gz",
+          "archive_sha256": "ec1fbf9593e6a1bab49eea96a2429fd732f1ca4c20d9d0dcbbe6c613ca690d69",
+          "binary_in_archive": "osv-scanner",
+          "binary_sha256": "d4926ef8da134332543be276dff157e4c170f99ad91fc48e89448a8816bdf70b",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "golangci-lint": {
+          "name": "golangci-lint",
+          "version": "2.15.0",
+          "install": "archive",
+          "archive": "macos-arm64-golangci-lint-2.15.0.tar.gz",
+          "archive_sha256": "27d8b7cdb6b7e4d894495c372d2131a90bbf94553ce5d4461c0da89167692eab",
+          "binary_in_archive": "golangci-lint",
+          "binary_sha256": "71b89744ef6dd92dad9026b70489d1ad660da79ef90dfb5aabe995d916bec8a9",
+          "version_args": [
+            "version"
+          ]
+        },
+        "shfmt": {
+          "name": "shfmt",
+          "version": "3.14.1",
+          "install": "archive",
+          "archive": "macos-arm64-shfmt-3.14.1.tar.gz",
+          "archive_sha256": "0ba9ee4fd161324f81cbf8d22d05674df122da4688258f88ec1ca51196b16e7e",
+          "binary_in_archive": "shfmt",
+          "binary_sha256": "b7c872db63553ccffc7253aba3ed7d4885a27d83f1ba567b1138c6315a5847e5",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "kubeconform": {
+          "name": "kubeconform",
+          "version": "0.8.0",
+          "install": "archive",
+          "archive": "macos-arm64-kubeconform-0.8.0.tar.gz",
+          "archive_sha256": "25ad8083285aa7369c158768bda2547d0eca158350a889e9d2e6a8d05aee5453",
+          "binary_in_archive": "kubeconform",
+          "binary_sha256": "858ceb584915c256262090195eda2579299149050c5c6a9788d0985076832313",
+          "version_args": [
+            "-v"
+          ]
+        },
+        "node": {
+          "name": "node",
+          "version": "22.14.0",
+          "install": "bundle",
+          "archive": "macos-arm64-node-tools-22.14.0.tar.gz",
+          "archive_sha256": "41db62c3bf7836f25174a81f3ad5b220a894fba19efe5b81c0bd55306bc1db31",
+          "binary_in_archive": "node/bin/node",
+          "binary_sha256": "",
+          "version_args": [
+            "-v"
+          ]
+        },
+        "eslint": {
+          "name": "eslint",
+          "version": "9.21.0",
+          "install": "bundle",
+          "bundle": "node",
+          "archive": "macos-arm64-node-tools-22.14.0.tar.gz",
+          "archive_sha256": "41db62c3bf7836f25174a81f3ad5b220a894fba19efe5b81c0bd55306bc1db31",
+          "binary_in_archive": "node/node_modules/.bin/eslint",
+          "binary_sha256": "",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "tsc": {
+          "name": "tsc",
+          "version": "5.7.3",
+          "install": "bundle",
+          "bundle": "node",
+          "archive": "macos-arm64-node-tools-22.14.0.tar.gz",
+          "archive_sha256": "41db62c3bf7836f25174a81f3ad5b220a894fba19efe5b81c0bd55306bc1db31",
+          "binary_in_archive": "node/node_modules/.bin/tsc",
+          "binary_sha256": "",
+          "version_args": [
+            "-v"
+          ]
+        },
+        "stylelint": {
+          "name": "stylelint",
+          "version": "17.16.0",
+          "install": "bundle",
+          "bundle": "node",
+          "archive": "macos-arm64-node-tools-22.14.0.tar.gz",
+          "archive_sha256": "41db62c3bf7836f25174a81f3ad5b220a894fba19efe5b81c0bd55306bc1db31",
+          "binary_in_archive": "node/node_modules/.bin/stylelint",
+          "binary_sha256": "",
+          "version_args": [
+            "--version"
+          ]
+        },
+        "htmlhint": {
+          "name": "htmlhint",
+          "version": "1.9.2",
+          "install": "bundle",
+          "bundle": "node",
+          "archive": "macos-arm64-node-tools-22.14.0.tar.gz",
+          "archive_sha256": "41db62c3bf7836f25174a81f3ad5b220a894fba19efe5b81c0bd55306bc1db31",
+          "binary_in_archive": "node/node_modules/.bin/htmlhint",
           "binary_sha256": "",
           "version_args": [
             "--version"

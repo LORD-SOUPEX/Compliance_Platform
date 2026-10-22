@@ -44,7 +44,7 @@ var (
 
 // DefaultPhase0PublicKey is a dedicated Ed25519 public key for platform distribution.
 // (Hex-encoded 32 bytes)
-const DefaultPhase0PublicKeyHex = "c59fd4e179c55a3dd2110785d9ae7a9b4adafc1e54ca3dcde54e2f3c3458645f"
+const DefaultPhase0PublicKeyHex = "b11f312e063afce59dcd0435e874dadcecf24bdb98e16975f858a8421bd2af79"
 
 // ToolEntry describes a tool artifact within the runtime manifest.
 type ToolEntry struct {

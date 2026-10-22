@@ -1,7 +1,8 @@
 # Changelog
 
-## Non publié
+## 2.2.0
 
+- **Nouvelle clé de signature du registre** : le manifeste des outils est signé par une nouvelle clé Ed25519, dont la clé publique est intégrée au moteur 2.2.0. Avec une version 2.1.x, la signature du nouveau manifeste de `tools-v1` n'est pas reconnue : l'installation continue (chaque archive reste contrôlée par SHA-256) avec un avertissement, qui disparaît avec la 2.2.0.
 - **Journal du démon** : `~/.compliance/logs/daemon.log` en JSON, avec rotation, et `daemon-console.log` pour stdout et stderr du processus. Chaque phase du démarrage est horodatée. Les sondes d'outils sont tracées avec le résultat du cache. Le flux `GET /api/v1/logs/stream` relaie le journal à l'extension.
 - **Commandes exécutées** : chaque processus d'un contrôle est décrit dans `invocations[]` (exécutable, arguments, `cwd`, variables ajoutées ou retirées, timeout, code retour, durée, octets lus) et annoncé par l'évènement `control_invocation`. Les secrets sont masqués.
 - **Sorties complètes** : stdout et stderr de chaque processus sont écrits séparément dans le dossier `logs` de la session, au-delà de la limite de capture du rapport.

@@ -1,6 +1,6 @@
 # Architecture
 
-Version courante : 2.1.3. Le nombre de contrôles est celui de `.config/control-catalog.json`, repris dans le tableau `catalog-controls` des README. Le guide d'usage est le [README](../README.md). La construction, la signature et le VSIX sont dans [développement](developpement.md).
+Version courante : 2.2.0. Le nombre de contrôles est celui de `.config/control-catalog.json`, repris dans le tableau `catalog-controls` des README. Le guide d'usage est le [README](../README.md). La construction, la signature et le VSIX sont dans [développement](developpement.md).
 
 ## Parcours
 

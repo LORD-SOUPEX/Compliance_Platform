@@ -768,7 +768,7 @@ def publish_github_release(tag: str, assets: list[Path], repo_slug: str = REPO_S
             "Compliance Platform Tools Registry v1",
             "--notes",
             (
-                "Self-hosted relocatable tools registry for Compliance Platform v2.1.0. "
+                "Self-hosted relocatable tools registry for Compliance Platform v2.2.0. "
                 "runtime-manifest.json and control-catalog.json are release assets."
             ),
         ]
@@ -1213,7 +1213,7 @@ def main():
 
     manifest = {
         "schema_version": 3,
-        "manifest_version": "2.1.0",
+        "manifest_version": "2.2.0",
         "registry_base_url": registry_base_url,
         "platforms": manifest_platforms,
     }
