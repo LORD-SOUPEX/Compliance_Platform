@@ -3,16 +3,21 @@ package selftest
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"compliance/internal/embedded"
+	"compliance/internal/logging"
+	"compliance/internal/osutil"
 	"compliance/internal/server"
 )
 
@@ -489,6 +494,104 @@ func Run(platformRoot string) (bool, []TestStep) {
 			time.Sleep(100 * time.Millisecond)
 		}
 		return fmt.Errorf("le verrou n'a pas été libéré à l'arrêt: %w", lastErr)
+	})
+
+	// Steps 21-24 check, on this OS, the primitives the first-start stability relies on.
+	recordStep("Verrou des outils : lectures partagées, écriture exclusive", func() error {
+		lockPath := filepath.Join(stateDir, "tools", ".install.lock")
+		ctx := context.Background()
+		first, err := osutil.LockFile(ctx, lockPath, false, nil)
+		if err != nil {
+			return err
+		}
+		second, err := osutil.LockFile(ctx, lockPath, false, nil)
+		if err != nil {
+			first()
+			return fmt.Errorf("deux audits doivent partager le verrou: %w", err)
+		}
+		short, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+		defer cancel()
+		if _, err := osutil.LockFile(short, lockPath, true, nil); !errors.Is(err, osutil.ErrLockTimeout) {
+			first()
+			second()
+			return fmt.Errorf("une installation a pris le verrou pendant un audit: %v", err)
+		}
+		first()
+		second()
+		writer, err := osutil.LockFile(ctx, lockPath, true, nil)
+		if err != nil {
+			return fmt.Errorf("installation bloquée après les audits: %w", err)
+		}
+		writer()
+		return nil
+	})
+
+	recordStep("PATH vivant : nouveau dossier ajouté une seule fois", func() error {
+		previous := os.Getenv("PATH")
+		defer os.Setenv("PATH", previous)
+		fresh := filepath.Join(stateDir, "path-bin")
+		if err := os.MkdirAll(fresh, 0700); err != nil {
+			return err
+		}
+		added := osutil.RefreshPath(fresh)
+		if !strings.Contains(os.Getenv("PATH"), fresh) || len(added) == 0 {
+			return fmt.Errorf("dossier non ajouté au PATH: %v", added)
+		}
+		if again := osutil.RefreshPath(fresh); len(again) != 0 {
+			return fmt.Errorf("dossier ajouté deux fois: %v", again)
+		}
+		return nil
+	})
+
+	recordStep("Journal du démon : rotation après fermeture du fichier", func() error {
+		journal := filepath.Join(stateDir, "logs-selftest", logging.FileName)
+		file, err := logging.OpenRotating(journal, 64, 2)
+		if err != nil {
+			return err
+		}
+		for i := 0; i < 6; i++ {
+			if _, err := file.Write([]byte(strings.Repeat("x", 40) + "\n")); err != nil {
+				_ = file.Close()
+				return err
+			}
+		}
+		if err := file.Close(); err != nil {
+			return err
+		}
+		if _, err := os.Stat(journal + ".1"); err != nil {
+			return fmt.Errorf("rotation absente: %w", err)
+		}
+		return nil
+	})
+
+	recordStep("Capture complète des sorties sur disque", func() error {
+		exe, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		sinkPath := filepath.Join(stateDir, "capture.stdout.log")
+		sink, err := osutil.CreateCappedFile(sinkPath, 1<<20)
+		if err != nil {
+			return err
+		}
+		res, err := osutil.RunBounded(context.Background(), osutil.CommandSpec{
+			Executable: exe,
+			Args:       []string{"version"},
+			Limits:     osutil.ProcessLimits{Timeout: 20 * time.Second, MaxOutputBytes: 4},
+			StdoutSink: sink,
+		})
+		_ = sink.Close()
+		if err != nil {
+			return err
+		}
+		full, err := os.ReadFile(sinkPath)
+		if err != nil {
+			return err
+		}
+		if !res.OutputTruncated || len(res.Stdout) != 4 || !strings.Contains(string(full), "compliance") || int64(len(full)) != res.StdoutBytes {
+			return fmt.Errorf("capture incohérente: tronquée=%v mémoire=%d disque=%d lus=%d", res.OutputTruncated, len(res.Stdout), len(full), res.StdoutBytes)
+		}
+		return nil
 	})
 
 	return overallPass, steps

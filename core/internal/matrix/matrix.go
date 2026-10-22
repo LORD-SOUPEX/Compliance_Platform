@@ -147,6 +147,58 @@ type DefaultCandidateResolver struct {
 	cache        sync.Map
 }
 
+// negativeProbeTTL bounds how long a failed probe is trusted. A first probe that
+// failed while an antivirus scanned a fresh binary is retried a minute later
+// instead of staying wrong for the daemon's whole lifetime.
+const negativeProbeTTL = 60 * time.Second
+
+type cachedProbe struct {
+	state      CandidateToolState
+	size       int64
+	modTime    time.Time
+	generation string
+	storedAt   time.Time
+}
+
+// cached returns a probe result only while the executable is the same file
+// (size, mtime), no installation happened since (tools generation), and, for a
+// failure, the result is younger than negativeProbeTTL.
+func (r *DefaultCandidateResolver) cached(key, exe string) (CandidateToolState, bool) {
+	value, ok := r.cache.Load(key)
+	if !ok {
+		return CandidateToolState{}, false
+	}
+	entry := value.(cachedProbe)
+	info, err := os.Stat(exe)
+	stale := err != nil || info.Size() != entry.size || !info.ModTime().Equal(entry.modTime) ||
+		distribution.ToolsGeneration(r.cacheDir()) != entry.generation ||
+		(entry.state.Status != "available" && time.Since(entry.storedAt) > negativeProbeTTL)
+	if stale {
+		r.cache.Delete(key)
+		return CandidateToolState{}, false
+	}
+	return entry.state, true
+}
+
+func (r *DefaultCandidateResolver) remember(key, exe string, st CandidateToolState) {
+	entry := cachedProbe{state: st, generation: distribution.ToolsGeneration(r.cacheDir()), storedAt: time.Now()}
+	if info, err := os.Stat(exe); err == nil {
+		entry.size, entry.modTime = info.Size(), info.ModTime()
+	}
+	r.cache.Store(key, entry)
+}
+
+// Invalidate forgets every probe result.
+func (r *DefaultCandidateResolver) Invalidate() int {
+	count := 0
+	r.cache.Range(func(key, _ interface{}) bool {
+		r.cache.Delete(key)
+		count++
+		return true
+	})
+	return count
+}
+
 func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platform PlatformInfo, repoRoot string) CandidateToolState {
 	// 1. Incompatible tools on Windows
 	if platform.OS == "windows" && (command == "ansible" || command == "ansible-lint" || command == "molecule") {
@@ -175,8 +227,7 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 	probeCommand := func(exePath string, isVenv bool) CandidateToolState {
 		norm := filepath.ToSlash(exePath)
 		cacheKey := norm + ":" + command
-		if val, ok := r.cache.Load(cacheKey); ok {
-			st := val.(CandidateToolState)
+		if st, ok := r.cached(cacheKey, exePath); ok {
 			st.Name = name
 			st.Command = command
 			slog.Debug("tool_probe", "command", command, "path", norm, "cache", "hit", "status", st.Status)
@@ -212,7 +263,7 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 			}
 			cached := !transientProbeError(ctx, err)
 			if cached {
-				r.cache.Store(cacheKey, st)
+				r.remember(cacheKey, exePath, st)
 			}
 			slog.Warn("tool_probe", "command", command, "path", norm, "cache", "miss", "status", st.Status,
 				"cached", cached, "duration_ms", time.Since(started).Milliseconds(), "reason", st.Reason)
@@ -244,7 +295,7 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 			Platform:       platform.ID,
 			Reason:         reason,
 		}
-		r.cache.Store(cacheKey, st)
+		r.remember(cacheKey, exePath, st)
 		slog.Debug("tool_probe", "command", command, "path", norm, "cache", "miss", "status", st.Status,
 			"version", st.Version, "duration_ms", time.Since(started).Milliseconds())
 		return st
@@ -253,8 +304,7 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 	probePythonTool := func(pyExe string) CandidateToolState {
 		norm := filepath.ToSlash(pyExe)
 		cacheKey := norm + ":" + command
-		if val, ok := r.cache.Load(cacheKey); ok {
-			st := val.(CandidateToolState)
+		if st, ok := r.cached(cacheKey, pyExe); ok {
 			st.Name = name
 			st.Command = command
 			slog.Debug("tool_probe", "command", command, "path", norm, "cache", "hit", "status", st.Status)
@@ -291,7 +341,7 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 			}
 			cached := !transientProbeError(ctx, err)
 			if cached {
-				r.cache.Store(cacheKey, st)
+				r.remember(cacheKey, pyExe, st)
 			}
 			slog.Warn("tool_probe", "command", command, "path", norm, "cache", "miss", "status", st.Status,
 				"cached", cached, "duration_ms", time.Since(started).Milliseconds(), "reason", st.Reason)
@@ -319,7 +369,7 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 			Platform:       platform.ID,
 			Reason:         reason,
 		}
-		r.cache.Store(cacheKey, st)
+		r.remember(cacheKey, pyExe, st)
 		slog.Debug("tool_probe", "command", command, "path", norm, "cache", "miss", "status", st.Status,
 			"version", st.Version, "duration_ms", time.Since(started).Milliseconds())
 		return st

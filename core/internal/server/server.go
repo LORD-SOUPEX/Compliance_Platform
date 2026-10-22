@@ -66,11 +66,16 @@ type DaemonState struct {
 
 // HealthResponse represents response from GET /api/v1/health.
 type HealthResponse struct {
-	Status    string `json:"status"`
-	Version   string `json:"version"`
-	PID       int    `json:"pid"`
-	Port      int    `json:"port"`
-	StartedAt string `json:"started_at"`
+	Status         string        `json:"status"`
+	Version        string        `json:"version"`
+	PID            int           `json:"pid"`
+	Port           int           `json:"port"`
+	StartedAt      string        `json:"started_at"`
+	Phase          string        `json:"phase"`
+	Registry       *RegistryInfo `json:"registry,omitempty"`
+	ToolsUpgrading []string      `json:"tools_upgrading"`
+	Clients        int           `json:"clients"`
+	ActiveRuns     int           `json:"active_runs"`
 }
 
 // DiscoveryRequest represents request to POST /api/v1/discovery.
@@ -88,6 +93,7 @@ type DiscoveryResponse struct {
 // PlanRequest represents request to POST /api/v1/plans.
 type PlanRequest struct {
 	TargetPath           string   `json:"target_path"`
+	Path                 string   `json:"path,omitempty"` // client PATH, merged into the daemon PATH
 	AllowNetwork         bool     `json:"allow_network"`
 	AllowCodeExecution   bool     `json:"allow_code_execution"`
 	IncludeApplyDestroy  bool     `json:"include_apply_destroy"`
@@ -98,6 +104,7 @@ type PlanRequest struct {
 // CreateRunRequest represents request to POST /api/v1/runs.
 type CreateRunRequest struct {
 	TargetPath           string   `json:"target_path"`
+	Path                 string   `json:"path,omitempty"` // client PATH, merged into the daemon PATH
 	RunID                string   `json:"run_id,omitempty"`
 	OutputDir            string   `json:"output_dir,omitempty"`
 	PlanOnly             bool     `json:"plan_only"`
@@ -571,7 +578,7 @@ func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req Create
 	opts := engine.ComplianceOptions{
 		RepoRoot:             req.TargetPath,
 		PlatformRoot:         sm.platformRoot,
-		CatalogPath:          sm.catalogPath,
+		CatalogPath:          sm.CatalogPath(),
 		AllowNetwork:         req.AllowNetwork,
 		AllowCodeExecution:   req.AllowCodeExecution,
 		DisabledTechnologies: req.DisabledTechnologies,
@@ -670,7 +677,12 @@ func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req Create
 		},
 	}
 
-	rep, err := engine.RunCompliance(ctx, opts)
+	var rep *report.Report
+	unlock, err := prepareToolUse(ctx, req.Path, "audit "+s.ID, log)
+	if err == nil {
+		rep, err = engine.RunCompliance(ctx, opts)
+		unlock()
+	}
 
 	s.mu.Lock()
 	now := time.Now().UTC()
@@ -945,6 +957,36 @@ func (sm *SessionManager) CleanupStaleSessions() {
 }
 
 // CancelAll cleanly cancels all active sessions.
+// SetCatalogPath switches the catalog used by the next runs.
+func (sm *SessionManager) SetCatalogPath(path string) {
+	sm.mu.Lock()
+	sm.catalogPath = path
+	sm.mu.Unlock()
+}
+
+// CatalogPath is the catalog used by the next plan or run.
+func (sm *SessionManager) CatalogPath() string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.catalogPath
+}
+
+// ActiveRuns counts sessions still preparing, running or cancelling.
+func (sm *SessionManager) ActiveRuns() int {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	count := 0
+	for _, sess := range sm.sessions {
+		sess.mu.RLock()
+		state := sess.State
+		sess.mu.RUnlock()
+		if state == "preparing" || state == "running" || state == "cancelling" {
+			count++
+		}
+	}
+	return count
+}
+
 func (sm *SessionManager) CancelAll() {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -966,6 +1008,7 @@ type DaemonServer struct {
 	statePath  string
 	mu         sync.Mutex
 	closed     bool
+	rt         *runtimeState
 }
 
 // StartDaemon initializes and starts the compliance daemon on a dynamic loopback port.
@@ -1025,6 +1068,7 @@ func StartDaemon(cfg DaemonConfig) (*DaemonServer, error) {
 		tokenPath: tokenPath,
 		lockPath:  lockPath,
 		statePath: statePath,
+		rt:        newRuntimeState(),
 	}
 
 	state := DaemonState{
@@ -1047,7 +1091,7 @@ func StartDaemon(cfg DaemonConfig) (*DaemonServer, error) {
 	srv.registerRoutes(mux)
 
 	srv.httpServer = &http.Server{
-		Handler:      security.Middleware(mux),
+		Handler:      security.Middleware(srv.trackActivity(mux)),
 		ReadTimeout:  120 * time.Second,
 		WriteTimeout: 0,
 	}
@@ -1106,8 +1150,22 @@ func (s *DaemonServer) Close(ctx context.Context) error {
 	ReleaseLock(s.lockPath)
 	_ = os.Remove(s.tokenPath)
 	_ = os.Remove(s.statePath)
+	s.rt.doneOnce.Do(func() { close(s.rt.done) })
 
 	return firstErr
+}
+
+// trackActivity dates every request for the idle shutdown. Health probes are not
+// activity: a stale client polling /health must not keep an unused daemon alive.
+func (s *DaemonServer) trackActivity(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/health" {
+			s.rt.mu.Lock()
+			s.rt.lastActivity = time.Now()
+			s.rt.mu.Unlock()
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *DaemonServer) registerRoutes(mux *http.ServeMux) {
@@ -1123,6 +1181,10 @@ func (s *DaemonServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/reports/validate", s.handleValidateReport)
 	mux.HandleFunc("POST /api/v1/shutdown", s.handleShutdown)
 	mux.HandleFunc("GET /api/v1/logs/stream", s.handleLogStream)
+	mux.HandleFunc("GET /api/v1/registry", s.handleRegistry)
+	mux.HandleFunc("POST /api/v1/tools/invalidate", s.handleInvalidateTools)
+	mux.HandleFunc("POST /api/v1/clients", s.handleClientRegister)
+	mux.HandleFunc("DELETE /api/v1/clients/{id}", s.handleClientUnregister)
 }
 
 func (s *DaemonServer) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -1133,6 +1195,7 @@ func (s *DaemonServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		Port:      s.Port(),
 		StartedAt: s.startedAt.Format(time.RFC3339),
 	}
+	s.healthDetails(&resp)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1210,10 +1273,18 @@ func (s *DaemonServer) handlePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.rt.begin()
+	defer s.rt.end()
+	unlock, err := prepareToolUse(r.Context(), req.Path, "plan", slog.Default())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	defer unlock()
 	opts := engine.ComplianceOptions{
 		RepoRoot:             canonicalTarget,
 		PlatformRoot:         s.cfg.PlatformRoot,
-		CatalogPath:          s.cfg.CatalogPath,
+		CatalogPath:          s.sessions.CatalogPath(),
 		AllowNetwork:         req.AllowNetwork,
 		AllowCodeExecution:   req.AllowCodeExecution,
 		DisabledTechnologies: req.DisabledTechnologies,

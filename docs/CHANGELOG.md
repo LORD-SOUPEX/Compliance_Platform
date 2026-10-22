@@ -10,6 +10,14 @@
 - **Jeton du registre** : stocké dans le stockage sécurisé de VS Code (**ICP: Définir le jeton du registre d'outils**). Un `compliance.registryToken` présent dans `settings.json` y est déplacé puis effacé.
 - **Installation des outils** : l'extension lit le manifeste actif (cache du registre) comme le moteur. La sortie de `compliance runtime sync` est relayée dans le canal.
 - **ICP: Ouvrir les sorties du contrôle** affiche de nouveau stdout, stderr et diagnostics du contrôle choisi.
+- **Premier démarrage sans rechargement** : le démon écoute avant de consulter le registre distant (vérifié en arrière-plan, catalogue basculé à chaud). L'extension démarre le moteur dès l'activation sans bloquer, réessaie un démarrage raté, attend la fin réelle d'un démon d'une autre version avant de lancer le nouveau, et accorde 60 secondes à un premier lancement analysé par l'antivirus.
+- **Verrou du démon sous Windows** : `LockFileEx`, libéré par le système à la mort du processus. Un PID réattribué ne bloque plus le démarrage.
+- **Outils** : un verrou inter-processus (`~/.compliance/tools/.install.lock`) est partagé par les plans et audits et exclusif pour les installations et mises à jour, y compris entre le démon, `compliance runtime sync` et plusieurs fenêtres. Les bundles Python, Node et PowerShell sont extraits à côté puis basculés par renommage : aucun audit ne voit un bundle à moitié extrait.
+- **Cache des sondes** : un résultat est oublié quand l'exécutable change, après toute installation (`~/.compliance/tools/.generation`), ou au bout de 60 secondes pour un échec. `POST /api/v1/tools/invalidate` le vide.
+- **PATH vivant** : chaque plan et audit ajoute au PATH du démon les dossiers du PATH de la fenêtre et, sous Windows, du PATH du registre. Un outil installé après le démarrage de VS Code est trouvé sans redémarrage.
+- **Plusieurs fenêtres** : fermer ou recharger une fenêtre n'arrête plus le démon des autres. Chaque fenêtre s'enregistre (`/api/v1/clients`) ; le démon s'arrête seul 30 minutes après le départ de la dernière (`COMPLIANCE_DAEMON_IDLE_MINUTES`, 0 désactive). Un démon lancé à la main ne s'arrête jamais seul.
+- **Barre d'état** : état du moteur (démarrage, prêt, mise à jour d'outils, indisponible), activité en cours, progression par outil pendant une installation.
+- **Selftest** : 24 étapes, avec le verrou des outils, le PATH vivant, la rotation du journal et la capture complète des sorties.
 
 ## 2.1.3
 

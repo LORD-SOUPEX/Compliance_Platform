@@ -18,7 +18,7 @@ Le moteur d'exécution autonome écrit en Go (`core/`) et son démon local HTTP/
   1. Pour `eslint`/`tsc` : `node_modules/.bin` de la Target en priorité, sinon bundle `~/.compliance/tools/node` téléchargé depuis le registre.
   2. Pour tous les autres outils : `.tools/bin` (dev local) ➔ `~/.compliance/tools/{bin,python,node,powershell-modules}` (registre installé) ➔ `PATH` système.
 - **Autonomie hors dépôt** : Le catalogue et les schémas sont embarqués dans le binaire (`//go:embed`) et dans le VSIX. `compliance selftest` fonctionne sans clone Git.
-- **Validation autonome intégrée (`compliance selftest`)** : Suite d'auto-test en 20 étapes vérifiant le cycle de vie du démon, la sécurité, l'exécution et l'annulation sur port éphémère.
+- **Validation autonome intégrée (`compliance selftest`)** : Suite d'auto-test en 24 étapes vérifiant le cycle de vie du démon, la sécurité, l'exécution, l'annulation, les verrous, le PATH, le journal et la capture des sorties sur port éphémère.
 - **Catalogue** : le tableau ci-dessous est la liste exécutable. Un test échoue s'il diverge de `.config/control-catalog.json`.
 
 ---
@@ -86,7 +86,7 @@ Compliance_Platform/
 │   │   ├── matrix/                     # Capability Matrix et sondes d'outils
 │   │   ├── osutil/                     # Confinement multi-OS (Job Objects / POSIX)
 │   │   ├── report/                     # Génération et validation du rapport v1
-│   │   ├── selftest/                   # Suite de validation autonome intégrée (20 étapes)
+│   │   ├── selftest/                   # Suite de validation autonome intégrée (24 étapes)
 │   │   └── server/                     # Démon local HTTP/SSE (127.0.0.1:0)
 │   └── go.mod
 ├── vscode-extension/                   # Extension VS Code officielle (TypeScript)
@@ -208,7 +208,7 @@ L'extension locale s'installe via le VSIX (`vscode-extension/dist/compliance-pip
 
 | Plateforme | Statut | Preuves de Qualification |
 | :--- | :--- | :--- |
-| **Windows x64** | **Qualified** | Selftest Go 20/20 PASS sur port éphémère, suite VS Code qualifiée, binaire natif inclus dans le VSIX. |
+| **Windows x64** | **Qualified** | Selftest Go 24/24 PASS sur port éphémère, suite VS Code qualifiée, binaire natif inclus dans le VSIX. |
 | **Windows ARM64** | Targeted | Binaire natif `compliance-windows-arm64.exe` cross-compilé et embarqué dans le VSIX universel. |
 | **Linux x64** | Targeted | Binaire natif `compliance-linux-amd64` cross-compilé et embarqué dans le VSIX universel. |
 | **Linux ARM64** | Targeted | Binaire natif `compliance-linux-arm64` cross-compilé et embarqué dans le VSIX universel. |

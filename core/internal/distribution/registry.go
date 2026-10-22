@@ -204,6 +204,8 @@ type UpgradeOptions struct {
 	CacheDir     string
 	RegistryURL  string
 	Token        string
+	// OnUpgrade reports an upgrade starting (true) and ending (false), for /health.
+	OnUpgrade func(tool string, active bool)
 }
 
 // UpgradeInstalledTools replaces an installed tool when the active manifest
@@ -254,6 +256,9 @@ func UpgradeInstalledTools(opts UpgradeOptions) []string {
 			continue
 		}
 		slog.Info("tool_upgrade_started", "tool", name, "from", known, "version", entry.Version)
+		if opts.OnUpgrade != nil {
+			opts.OnUpgrade(name, true)
+		}
 		_, syncErr := SyncRuntime(SyncOptions{
 			ManifestPath:  opts.ManifestPath,
 			SigPath:       opts.SigPath,
@@ -263,6 +268,9 @@ func UpgradeInstalledTools(opts UpgradeOptions) []string {
 			RegistryURL:   opts.RegistryURL,
 			RegistryToken: opts.Token,
 		})
+		if opts.OnUpgrade != nil {
+			opts.OnUpgrade(name, false)
+		}
 		if syncErr != nil {
 			slog.Warn("tool_upgrade_failed", "tool", name, "version", entry.Version, "err", syncErr)
 			continue

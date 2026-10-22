@@ -7,7 +7,7 @@
       "architecture": "x64",
       "status": "qualified",
       "evidence": [
-        "Selftest Go autonome valide (20/20 PASS sur port ephemere)",
+        "Selftest Go autonome valide (24/24 PASS sur port ephemere)",
         "Suite de tests unitaires Go validee (100% PASS)",
         "Extension VS Code validee sur demon local (34/34 PASS)",
         "Binaire natif compliance-windows-amd64.exe embarque dans le VSIX universel"

@@ -8,8 +8,10 @@ import { classifyProvisionError, hasMachineConsent, machineConsentKey, machineCo
 import { controlOutputText, paceNotice, PlanNode, projectPlan, VisualStatus } from './model';
 import { ReportPanel } from './reportPanel';
 import { daemonStreamLevel, errorMessage, Logger, relayDaemonEntry } from './logger';
+import { DaemonSupervisor } from './daemonSupervisor';
 
 const registryTokenKey = 'compliance.registryToken';
+let activeSupervisor: DaemonSupervisor | undefined;
 
 class PipelineTree implements vscode.TreeDataProvider<PlanNode> {
     private readonly changed = new vscode.EventEmitter<PlanNode | undefined>();
@@ -72,6 +74,8 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
     const log = new Logger(channel);
     setDaemonLogger(log);
     log.info('extension activée', { version: context.extension.packageJSON?.version, platform: `${process.platform}-${process.arch}`, vscode: vscode.version, source });
+    const supervisor = new DaemonSupervisor(source, log);
+    activeSupervisor = supervisor;
     const showError = async (message: string, error?: unknown) => {
         const text = error === undefined ? message : `${message}${message ? ' : ' : ''}${errorMessage(error)}`;
         log.error(text);
@@ -111,6 +115,10 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
     };
     async function refresh(): Promise<void> {
         if (controller.busy || !controller.target) { return; }
+        await supervisor.track('préparation', refreshNow);
+    }
+    async function refreshNow(): Promise<void> {
+        if (controller.busy || !controller.target) { return; }
         if (!vscode.workspace.isTrusted) { await vscode.window.showWarningMessage('Approuver le workspace avant de sonder les outils locaux.'); return; }
         controller.busy = true; controller.abort = new AbortController(); controller.preparation = undefined; controller.audit = undefined; controller.sourceValid = false;
         tree.status = 'Running';
@@ -121,6 +129,7 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
         await purgeSessions(1);
         const started = Date.now();
         try {
+            await supervisor.start();
             await validateSource(source);
             log.debug('source validée', { ms: Date.now() - started });
             const detected = Date.now();
@@ -178,8 +187,13 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
         const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
         return `${osName}-${arch}`;
     }
+    /** The manifest the running daemon selected, else the registry cache, else the copy in the VSIX. */
+    async function manifestInUse(): Promise<string> {
+        const fromDaemon = (await new DaemonClient().attach())?.registry?.manifest_path;
+        return fromDaemon && fsSync.existsSync(fromDaemon) ? fromDaemon : activeManifestPath(source);
+    }
     async function provisionTools(commands: string[], trigger: 'auto' | 'manual'): Promise<boolean> {
-        const manifestPath = activeManifestPath(source);
+        const manifestPath = await manifestInUse();
         const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
         log.debug('manifeste actif', { manifest: manifestPath, platform: hostPlatform(), requested: commands.join(',') });
         const known = selectManifestTools(manifest, hostPlatform(), commands);
@@ -199,7 +213,14 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
             const registryUrl = config.get<string>('registryUrl', '');
             const registryToken = await context.secrets.get(registryTokenKey) || '';
             log.info(`Installation silencieuse : ${known.map(tool => `${tool.command} ${tool.version}`).join(', ')}`, { registry: registryUrl || 'tools-v1' });
-            await client.syncTools(source, known.map(tool => tool.command), { registryUrl, registryToken, log });
+            const tools = known.map(tool => tool.command);
+            await supervisor.track('installation des outils', () => vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: 'Compliance : installation des outils'
+            }, progress => client.syncTools(source, tools, {
+                registryUrl, registryToken, log,
+                onTool: (tool, index, total) => progress.report({ message: `${tool} (${index + 1}/${total})`, increment: index === 0 ? 0 : 100 / total })
+            })));
             return true;
         } catch (error) {
             await showError(classifyProvisionError(errorMessage(error)).message);
@@ -239,10 +260,14 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
     }
     async function launch(depth = 0): Promise<void> {
         if (!controller.canRun(vscode.workspace.isTrusted)) { await vscode.window.showWarningMessage('Target, source valide, preparation et autorisation requises avant l audit.'); return; }
+        await supervisor.track(depth ? 'nouvel audit' : 'audit', () => launchNow(depth));
+    }
+    async function launchNow(depth: number): Promise<void> {
         let rerun = false;
         let stopFeed = () => {};
         try {
             await ensureMachineConsent();
+            await supervisor.start();
             const state = controller.begin(vscode.workspace.isTrusted); update();
             tree.message = 'Nouvelle preparation avant audit.';
             log.child({ runId: state.runId }).info('audit demandé', { target: state.target, source, depth });
@@ -268,9 +293,11 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
             await launch(depth + 1);
         }
     }
-    context.subscriptions.push(tree, channel, view, reports, { dispose: () => { controller.cancel(); clearInterval(ticker); void shutdownComplianceDaemon().catch(() => undefined); } },
+    // The daemon is shared by every window: closing this one only unregisters it (deactivate);
+    // the daemon stops itself once no window is left.
+    context.subscriptions.push(tree, channel, view, reports, supervisor, { dispose: () => { controller.cancel(); clearInterval(ticker); } },
         sourceWatcher, sourceWatcher.onDidChange(invalidate), sourceWatcher.onDidCreate(invalidate), sourceWatcher.onDidDelete(invalidate),
-        vscode.workspace.onDidGrantWorkspaceTrust(update),
+        vscode.workspace.onDidGrantWorkspaceTrust(() => { update(); void supervisor.start().catch(() => undefined); }),
         vscode.commands.registerCommand('compliance.showLogs', () => channel.show()),
         vscode.commands.registerCommand('compliance.showDaemonLog', async () => {
             const { journal, console: consoleLog } = daemonLogPaths();
@@ -290,6 +317,7 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
         }),
         vscode.commands.registerCommand('compliance.reset', async () => {
             await shutdownComplianceDaemon();
+            supervisor.markStopped();
             log.info('Démon arrêté. Les sessions et rapports sont conservés.');
             await vscode.window.showInformationMessage('Démon Compliance arrêté. Les rapports sont conservés.');
         }),
@@ -346,7 +374,15 @@ export function activate(context: vscode.ExtensionContext): { getNodes(): PlanNo
             } catch (error) { await showError('Target non préparée', error); }
         }));
     update();
+    // Warm the engine without blocking activation; failures show in the status bar and the channel.
+    if (vscode.workspace.isTrusted) { void supervisor.start().catch(() => undefined); }
     void migrateRegistryToken().catch(error => log.warn('migration du jeton du registre impossible', { error: errorMessage(error) }));
     void reports.restore().then(update, error => log.warn('dernière session non restaurée', { error: errorMessage(error) }));
     return { getNodes: () => tree.getChildren(), getReportHtml: () => reports.html() };
+}
+
+/** VS Code awaits this promise briefly on window close or reload. */
+export async function deactivate(): Promise<void> {
+    await activeSupervisor?.deactivate();
+    activeSupervisor = undefined;
 }

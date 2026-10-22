@@ -87,7 +87,7 @@ func installBundle(cacheDir, platform, key string, tool ToolEntry, client *http.
 	if tool.ArchiveSHA256 != "" && !strings.EqualFold(actualSHA, tool.ArchiveSHA256) {
 		return "", fmt.Errorf("%w pour %s (obtenu: %s, attendu: %s)", ErrArchiveHashMismatch, key, actualSHA, tool.ArchiveSHA256)
 	}
-	if err := extractTree(body, archiveURL, cacheDir); err != nil {
+	if err := installTree(body, archiveURL, cacheDir, tool.BinaryInArchive); err != nil {
 		return "", fmt.Errorf("extraction du bundle pour %s: %w", key, err)
 	}
 	dest := resolvedBundlePath(cacheDir, platform, key, tool)

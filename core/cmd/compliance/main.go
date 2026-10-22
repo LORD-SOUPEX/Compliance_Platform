@@ -123,23 +123,17 @@ func runDaemon(args []string) {
 	slog.Info("daemon_starting", "version", version, "pid", os.Getpid(), "os", runtime.GOOS, "arch", runtime.GOARCH,
 		"platform", distribution.DetectPlatform(), "state_dir", *stateDir, "platform_root", *platformRoot,
 		"path", logging.RedactText(os.Getenv("PATH")))
-	registryStarted := time.Now()
+	// Listen first: the network check of the registry (up to 3 s, more behind a
+	// slow proxy) runs once the daemon answers, so the first client never waits on it.
+	catalogForced := strings.TrimSpace(*catalogPath) != ""
 	selection := distribution.RefreshRegistry(context.Background(), distribution.RefreshOptions{
 		LocalRoot: *platformRoot,
-		Timeout:   3 * time.Second,
+		Offline:   true,
 	})
-	slog.Info("registry_selected", "source", selection.Source, "manifest", selection.ManifestPath, "catalog", selection.CatalogPath,
-		"registry_url", logging.RedactText(selection.RegistryURL), "duration_ms", time.Since(registryStarted).Milliseconds())
-	if strings.TrimSpace(*catalogPath) == "" && selection.Source != "local" && selection.CatalogPath != "" {
+	slog.Info("registry_selected", "source", selection.Source, "manifest", selection.ManifestPath, "catalog", selection.CatalogPath, "network", false)
+	if !catalogForced && selection.Source != "local" && selection.CatalogPath != "" {
 		*catalogPath = selection.CatalogPath
 	}
-	go distribution.UpgradeInstalledTools(distribution.UpgradeOptions{
-		ManifestPath: selection.ManifestPath,
-		BaselinePath: filepath.Join(*platformRoot, ".config", "runtime-manifest.json"),
-		SigPath:      selection.SigPath,
-		CacheDir:     defaultCacheDir(),
-		RegistryURL:  selection.RegistryURL,
-	})
 	resolvedCatalog, err := embedded.ResolveAsset("control-catalog.json", *catalogPath, filepath.Join(*platformRoot, ".config", "control-catalog.json"))
 	if err != nil {
 		slog.Error("catalog_missing", "err", err)
@@ -171,11 +165,17 @@ func runDaemon(args []string) {
 	slog.Info("daemon_ready", "url", srv.URL(), "catalog", *catalogPath, "duration_ms", time.Since(bootStarted).Milliseconds())
 	fmt.Printf("[INFO] Démon compliance démarré sur %s (PID %d)\n", srv.URL(), os.Getpid())
 	fmt.Printf("[INFO] Jeton Bearer généré et protégé avec succès\n")
+	srv.SetRegistry(registryInfo(selection, true))
+	go refreshRegistryInBackground(srv, *platformRoot, catalogForced)
+	srv.WatchIdle(server.IdleTimeout())
 
-	// Intercept termination signals
+	// Intercept termination signals; /shutdown and the idle watch close Done().
 	sigCh := make(chan os.Signal, 1)
 	osutil.NotifyTermination(sigCh)
-	<-sigCh
+	select {
+	case <-sigCh:
+	case <-srv.Done():
+	}
 
 	fmt.Println("\n[INFO] Arrêt du démon compliance en cours...")
 	slog.Info("daemon_stopping")
@@ -186,6 +186,42 @@ func runDaemon(args []string) {
 	slog.Info("daemon_stopped")
 	closeLog()
 	os.Exit(0)
+}
+
+func registryInfo(selection distribution.RegistrySelection, refreshing bool) server.RegistryInfo {
+	return server.RegistryInfo{
+		Source:       selection.Source,
+		ManifestPath: selection.ManifestPath,
+		CatalogPath:  selection.CatalogPath,
+		SigPath:      selection.SigPath,
+		RegistryURL:  logging.RedactText(selection.RegistryURL),
+		Refreshing:   refreshing,
+	}
+}
+
+// refreshRegistryInBackground checks the remote registry, switches the catalog
+// when a newer one was cached, then upgrades installed tools under the
+// exclusive tools lock (audits in progress finish first).
+func refreshRegistryInBackground(srv *server.DaemonServer, platformRoot string, catalogForced bool) {
+	started := time.Now()
+	selection := distribution.RefreshRegistry(context.Background(), distribution.RefreshOptions{
+		LocalRoot: platformRoot,
+		Timeout:   3 * time.Second,
+	})
+	slog.Info("registry_selected", "source", selection.Source, "manifest", selection.ManifestPath, "catalog", selection.CatalogPath,
+		"registry_url", logging.RedactText(selection.RegistryURL), "network", true, "duration_ms", time.Since(started).Milliseconds())
+	srv.SetRegistry(registryInfo(selection, false))
+	if !catalogForced && selection.Source == "remote" {
+		srv.SetCatalogPath(selection.CatalogPath)
+	}
+	distribution.UpgradeInstalledTools(distribution.UpgradeOptions{
+		ManifestPath: selection.ManifestPath,
+		BaselinePath: filepath.Join(platformRoot, ".config", "runtime-manifest.json"),
+		SigPath:      selection.SigPath,
+		CacheDir:     defaultCacheDir(),
+		RegistryURL:  selection.RegistryURL,
+		OnUpgrade:    srv.SetToolUpgrading,
+	})
 }
 
 // setupDaemonLog writes the JSON journal to <state-dir>/logs/daemon.log.

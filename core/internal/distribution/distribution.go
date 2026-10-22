@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -286,6 +287,7 @@ func SyncRuntime(opts SyncOptions) (*SyncResult, error) {
 	if strings.TrimSpace(opts.SigPath) != "" {
 		if sigBytes, sigErr := fetchBytes(opts.SigPath, client, opts.RegistryToken); sigErr == nil {
 			if vErr := VerifyManifest(manifestBytes, string(sigBytes), opts.PublicKey); vErr != nil {
+				slog.Warn("manifest_signature_unverified", "err", vErr)
 				fmt.Fprintf(os.Stderr, "[WARN] Signature Ed25519 du manifeste non vérifiée: %v. Installation maintenue sans blocage.\n", vErr)
 			}
 		}
@@ -318,6 +320,12 @@ func SyncRuntime(opts SyncOptions) (*SyncResult, error) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	unlock, err := LockTools(context.Background(), opts.CacheDir, true, "installation "+opts.ToolName)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	cleanupInterrupted(opts.CacheDir)
 	var failures []string
 	requested := opts.ToolName == ""
 	for _, name := range names {
@@ -332,6 +340,9 @@ func SyncRuntime(opts SyncOptions) (*SyncResult, error) {
 		}
 		result.SyncedTools[name] = dest
 		rememberToolVersion(opts.CacheDir, name, plat.Tools[name].Version)
+	}
+	if len(result.SyncedTools) > 0 {
+		bumpToolsGeneration(opts.CacheDir)
 	}
 	if !requested {
 		return nil, fmt.Errorf("%w: %s", ErrToolNotInManifest, opts.ToolName)

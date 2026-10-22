@@ -30,7 +30,7 @@ Le moteur reçoit un dossier local. Il ne demande ni compte de forge ni réseau 
 | Démon | API locale, jeton, Host/Origin | `core/internal/server` |
 | Extension | Arbre, pilotage, rapport | `vscode-extension/src/` |
 | Rapport | JSON v1 | `.config/compliance-report.schema.json`, `core/internal/report` |
-| Selftest | 20 étapes, pas de processus orphelin | `compliance selftest` |
+| Selftest | 24 étapes : démon, sécurité, annulation, verrous, PATH, journal, capture | `compliance selftest` |
 
 ## Résolution des outils
 
@@ -80,6 +80,18 @@ Les trois OS suivent la même disposition, sous `~/.compliance` ou `COMPLIANCE_S
 | `execution_results[].invocations[]` | Exécutable, arguments, `cwd`, variables ajoutées ou retirées, timeout, durée, code retour, octets lus et chemins des flux. Les valeurs de variables sensibles (`*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*KEY*`…) et les identifiants dans les URL sont masqués. |
 
 Le canal **Compliance** de VS Code est un `LogOutputChannel` : le niveau se règle par « Developer: Set Log Level… ». Au niveau Info, il affiche le déroulé de l'audit et les avertissements du démon. Au niveau Debug, il ajoute la commande exacte de chaque outil, son dossier, ses variables et ses fichiers de sortie. Au niveau Trace, il reprend tout le journal du démon.
+
+## Démarrage et état du démon
+
+1. Le démon choisit le manifeste et le catalogue sans réseau (cache plus récent, sinon fichiers locaux), prend le verrou, écrit `daemon.json` et écoute.
+2. En arrière-plan : vérification du registre distant (3 s au plus), bascule à chaud du catalogue s'il est plus récent, puis mise à jour des outils installés sous le verrou exclusif des outils.
+3. `GET /api/v1/health` renvoie `phase`, `registry` (source, chemins, vérification en cours), `tools_upgrading`, `clients` et `active_runs`. `GET /api/v1/registry` renvoie le manifeste et le catalogue utilisés.
+
+Le verrou d'instance est un `flock` (Linux, macOS) ou un `LockFileEx` (Windows) sur `daemon.lock`, libéré par le système si le processus meurt. Un second démon sort avec le code 3 ; l'extension attend alors le premier au lieu de signaler une erreur.
+
+Chaque fenêtre VS Code s'enregistre par `POST /api/v1/clients` et renouvelle cet enregistrement toutes les minutes. Une fenêtre fermée se retire (`DELETE /api/v1/clients/{id}`). Le démon s'arrête seul quand plus aucune fenêtre n'est connue depuis 3 minutes, qu'aucun audit ne tourne et que la dernière requête date de plus de `COMPLIANCE_DAEMON_IDLE_MINUTES` (30 par défaut). Les sondes `/health` ne comptent pas comme activité.
+
+`~/.compliance/tools/.install.lock` sérialise l'accès aux outils : partagé pendant un plan ou un audit, exclusif pendant une installation. `.generation` change après chaque installation et invalide le cache des sondes de tous les démons.
 
 ## Sécurité du démon
 

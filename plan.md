@@ -309,11 +309,12 @@ Ajouter un outil touche aujourd'hui sept endroits : catalogue, discovery, `Build
 
 Ordre retenu : on **instrumente d'abord** (phase 1) pour confirmer H1 à H10, puis on stabilise (phase 2), on outille le dépôt (phase 3) et on élargit le catalogue (phase 4). La phase 0 regroupe des corrections sûres et indépendantes.
 
-> **Avancement au 2026-10-22** : phases 0 et 1 réalisées (non commitées). Écarts assumés :
+> **Avancement au 2026-10-22** : phases 0 et 1 commitées (`3a82435`), phase 2 réalisée. Écarts assumés :
 > - `restore()` reste lancé à l'activation. Il partage désormais le démarrage du démon avec les commandes, et ses erreurs sont journalisées.
 > - L'évènement `control_output` (sorties en direct) est reporté : les flux complets sont sur disque et la commande est annoncée par `control_invocation`.
 > - Le fichier `<contrôle>.log` garde son format pour rester compatible avec les rapports existants. La commande exécutée est dans `invocations[]`, pas en en-tête.
-> - Le code de sortie 3 (« déjà lancé ») est en place côté démon et client. Le verrou `LockFileEx` reste en phase 2.
+> - Phase 2 : l'installation reste faite par `compliance runtime sync` (processus séparé) et non par une route du démon. Le verrou inter-processus des outils, l'extraction en staging et le compteur `.generation` apportent l'exclusion et l'invalidation visées. Le PATH effectif est journalisé (`path_refreshed`) plutôt qu'inscrit dans le rapport.
+> - Phase 2 : `restore()` n'attend pas le superviseur ; il partage le démarrage du démon.
 
 ### Phase 0 — Corrections immédiates (faible risque)
 

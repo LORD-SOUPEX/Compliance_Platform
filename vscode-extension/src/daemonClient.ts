@@ -3,7 +3,7 @@ import * as fsSync from 'node:fs';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { execFile, execFileSync, spawn, ChildProcess } from 'node:child_process';
+import { execFile, spawn, ChildProcess } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
     containsPath,
@@ -100,7 +100,39 @@ export interface DaemonHealth {
     pid: number;
     port: number;
     started_at: string;
+    phase?: string;
+    registry?: DaemonRegistry;
+    tools_upgrading?: string[];
+    clients?: number;
+    active_runs?: number;
 }
+
+/** Manifest and catalog the daemon actually uses (GET /api/v1/registry). */
+export interface DaemonRegistry {
+    source: string;
+    manifest_path: string;
+    catalog_path: string;
+    sig_path: string;
+    registry_url: string;
+    refreshing: boolean;
+}
+
+/** Waits until pid is gone (process.kill(pid, 0) works the same on Windows, Linux and macOS). */
+export async function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        try { process.kill(pid, 0); } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ESRCH') { return true; }
+            if ((error as NodeJS.ErrnoException).code === 'EPERM') { /* alive, other user */ }
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    return false;
+}
+
+/** Spawn deadline. The daemon now listens before any network access; a long
+ * budget only matters on a first start scanned by an antivirus. */
+export const daemonStartTimeoutMs = 60000;
 
 export interface CreateRunOptions {
     runId?: string;
@@ -209,6 +241,8 @@ export class DaemonClient {
                 }
                 daemonLog.warn('démon d\'une autre version : remplacement', { running: health.version, expected: expectedEngineVersion(), pid: health.pid });
                 await this.shutdown();
+                // The old daemon holds the lock until it is really gone: spawning earlier made the new one exit at once.
+                if (!(await waitForExit(health.pid, 5000))) { daemonLog.warn('ancien démon encore présent après 5 s', { pid: health.pid }); }
             }
         } catch (error) {
             daemonLog.debug('aucun démon joignable : lancement', { reason: errorMessage(error) });
@@ -242,7 +276,8 @@ export class DaemonClient {
         this.daemonProcess.unref();
         daemonLog.debug('démon lancé', { pid: this.daemonProcess.pid });
 
-        const deadline = Date.now() + 15000;
+        const deadline = Date.now() + daemonStartTimeoutMs;
+        let announced = false;
         while (Date.now() < deadline) {
             if (spawnError || earlyExit) {
                 throw await describeWithJournal(describeDaemonLaunchFailure(spawnError, earlyExit), journals);
@@ -251,6 +286,10 @@ export class DaemonClient {
                 // Another window started the daemon first: wait for its daemon.json instead of failing.
                 daemonLog.debug('verrou détenu par un autre démon : attente de son état');
                 otherInstance = false;
+            }
+            if (!announced && Date.now() > deadline - daemonStartTimeoutMs + 5000) {
+                announced = true;
+                daemonLog.info('démarrage du démon plus long que prévu (analyse antivirus d\'un premier lancement ?)', { journal: journals.journal });
             }
             await new Promise(r => setTimeout(r, 200));
             try {
@@ -302,7 +341,7 @@ export class DaemonClient {
             try {
                 await fs.access(candidate);
                 const binaryPath = path.resolve(candidate);
-                prepareComplianceBinary(binaryPath);
+                await prepareComplianceBinary(binaryPath);
                 return binaryPath;
             } catch {
                 // Not found, check next
@@ -357,7 +396,8 @@ export class DaemonClient {
             spawnEnv.COMPLIANCE_REGISTRY_TOKEN = options.registryToken;
         }
         const log = options?.log || daemonLog;
-        for (const tool of tools) {
+        for (const [index, tool] of tools.entries()) {
+            options?.onTool?.(tool, index, tools.length);
             const args = ['runtime', 'sync', '-manifest', manifest, '-sig', signature, '-tool', tool, ...extraArgs];
             const started = Date.now();
             log.command(`installation de ${tool}`, staged.binary, args, staged.cwd);
@@ -384,9 +424,43 @@ export class DaemonClient {
                 failed.push(`${tool} (${detail})`);
             }
         }
+        if (installed.length) {
+            // The daemon also watches the tools generation; this makes the next plan probe again at once.
+            await this.ensureDaemon(platformRoot).then(() => this.invalidateTools())
+                .catch(error => log.debug('cache des sondes non invalidé', { error: errorMessage(error) }));
+        }
         if (failed.length) {
             throw new Error(`${installed.length} outil(s) installé(s), ${failed.length} échec : ${failed.join(' ; ')}`);
         }
+    }
+
+    /** Connects to a running daemon without ever starting one. */
+    public async attach(): Promise<DaemonHealth | undefined> {
+        try {
+            const state = JSON.parse(await fs.readFile(path.join(this.stateDir!, 'daemon.json'), 'utf8')) as DaemonState;
+            this.port = state.port;
+            this.token = (await fs.readFile(state.token_path, 'utf8')).trim();
+            const health = await this.getHealth();
+            return health.status === 'ok' ? health : undefined;
+        } catch { return undefined; }
+    }
+
+    /** Registers or refreshes this VS Code window; the daemon stops itself once no window is left. */
+    public async registerClient(clientId: string, label: string): Promise<void> {
+        await this.request('POST', '/api/v1/clients', { client_id: clientId, pid: process.pid, label }, 5000);
+    }
+
+    public async unregisterClient(clientId: string): Promise<void> {
+        await this.request('DELETE', `/api/v1/clients/${encodeURIComponent(clientId)}`, undefined, 1500);
+    }
+
+    public async getRegistry(): Promise<DaemonRegistry> {
+        return this.request<DaemonRegistry>('GET', '/api/v1/registry', undefined, 5000);
+    }
+
+    /** Forgets every cached tool probe (after an installation). */
+    public async invalidateTools(): Promise<void> {
+        await this.request('POST', '/api/v1/tools/invalidate', undefined, 5000);
     }
 
     public async getHealth(): Promise<DaemonHealth> {
@@ -401,6 +475,7 @@ export class DaemonClient {
     public async getPlan(targetPath: string, options: { allowNetwork?: boolean; allowCodeExecution?: boolean; includeApplyDestroy?: boolean } = {}, signal?: AbortSignal): Promise<PreparationReport> {
         return this.request<PreparationReport>('POST', '/api/v1/plans', {
             target_path: targetPath,
+            path: process.env.PATH || '',
             allow_network: options.allowNetwork ?? false,
             allow_code_execution: options.allowCodeExecution ?? false,
             include_apply_destroy: options.includeApplyDestroy ?? false
@@ -410,6 +485,7 @@ export class DaemonClient {
     public async createRun(targetPath: string, options: CreateRunOptions = {}): Promise<RunCreationResult> {
         return this.request<RunCreationResult>('POST', '/api/v1/runs', {
             target_path: targetPath,
+            path: process.env.PATH || '',
             run_id: options.runId,
             output_dir: options.outputDir,
             plan_only: !!options.planOnly,
@@ -589,7 +665,7 @@ export class DaemonClient {
     }
 }
 
-export interface SyncOptions { registryUrl?: string; registryToken?: string; log?: Logger }
+export interface SyncOptions { registryUrl?: string; registryToken?: string; log?: Logger; onTool?: (tool: string, index: number, total: number) => void }
 
 /** Splits a child stream into lines across chunk boundaries (LF or CRLF). */
 function relayLines(stream: NodeJS.ReadableStream | null | undefined, onLine: (line: string) => void): void {
@@ -659,7 +735,7 @@ async function stageDaemonRuntime(source: string, platformRoot: string): Promise
         current = from.size === to.size && from.mtimeMs <= to.mtimeMs;
     } catch { current = false; }
     if (!current) { await fs.copyFile(source, dest); }
-    prepareComplianceBinary(dest);
+    await prepareComplianceBinary(dest);
     await copyConfig(configDirectory(platformRoot), path.join(dir, '.config'));
     return { binary: dest, platformRoot: dir, cwd };
 }
@@ -922,16 +998,14 @@ export async function stateRoot(source: string): Promise<string> {
     return directory;
 }
 
-function prepareComplianceBinary(binaryPath: string): void {
+/** POSIX execute bit and macOS quarantine removal, without blocking the extension host. */
+async function prepareComplianceBinary(binaryPath: string): Promise<void> {
     if (process.platform !== 'win32') {
-        fsSync.chmodSync(binaryPath, 0o755);
+        await fs.chmod(binaryPath, 0o755);
     }
     if (process.platform === 'darwin') {
-        try {
-            execFileSync('xattr', ['-d', 'com.apple.quarantine', binaryPath], { stdio: 'ignore' });
-        } catch {
-            // Attribute absent, or xattr unavailable. Gatekeeper is reported at spawn time.
-        }
+        // Attribute absent, or xattr unavailable: Gatekeeper is reported at spawn time.
+        await new Promise<void>(resolve => execFile('xattr', ['-d', 'com.apple.quarantine', binaryPath], () => resolve()));
     }
 }
 
