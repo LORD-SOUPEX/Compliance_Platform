@@ -4,7 +4,9 @@ import { daemonStreamLevel, formatInvocation, Logger, masked, redact, redactArgs
 
 function capture(): { lines: string[]; logger: Logger } {
     const lines: string[] = [];
-    const sink = (level: string) => (message: string) => { lines.push(`${level} ${message}`); };
+    const sink = (level: string) => (message: string) => {
+        lines.push(`${level} ${message}`);
+    };
     return { lines, logger: new Logger({ trace: sink('trace'), debug: sink('debug'), info: sink('info'), warn: sink('warn'), error: sink('error') }) };
 }
 
@@ -15,7 +17,13 @@ test('redact masks key=value secrets, Bearer headers and URL credentials', () =>
 });
 
 test('redactArgs masks the value of a sensitive flag in both forms', () => {
-    assert.deepEqual(redactArgs(['-registry-token', 'abc', '--password=x', '-tool', 'ruff']), ['-registry-token', masked, `--password=${masked}`, '-tool', 'ruff']);
+    assert.deepEqual(redactArgs(['-registry-token', 'abc', '--password=x', '-tool', 'ruff']), [
+        '-registry-token',
+        masked,
+        `--password=${masked}`,
+        '-tool',
+        'ruff'
+    ]);
 });
 
 test('child loggers prefix run and control, and never print secrets', () => {
@@ -38,7 +46,16 @@ test('daemon records are shifted one level down and keep their correlation', () 
 });
 
 test('formatInvocation quotes arguments and lists the environment delta', () => {
-    const text = formatInvocation({ executable: 'C:/tools/trivy.exe', args: ['config', 'my dir'], cwd: 'E:/t', env_added: { NO_COLOR: '1' }, env_removed: ['TRIVY_CONFIG'], timeout_ms: 300000, stdout_path: 'logs/a.stdout.log', stderr_path: 'logs/a.stderr.log' });
+    const text = formatInvocation({
+        executable: 'C:/tools/trivy.exe',
+        args: ['config', 'my dir'],
+        cwd: 'E:/t',
+        env_added: { NO_COLOR: '1' },
+        env_removed: ['TRIVY_CONFIG'],
+        timeout_ms: 300000,
+        stdout_path: 'logs/a.stdout.log',
+        stderr_path: 'logs/a.stderr.log'
+    });
     assert.ok(text.startsWith('exec C:/tools/trivy.exe config "my dir"'), text);
     assert.ok(text.includes('env-   : TRIVY_CONFIG'));
     assert.ok(text.includes('timeout: 300 s'));

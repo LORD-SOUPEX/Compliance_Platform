@@ -24,7 +24,7 @@ Elle détecte les technologies d'un dossier cible, exécute les contrôles du ca
 
 ## Pour qui
 
-Développeurs et évaluateurs qui veulent un contrôle local sur un projet Terraform, conteneur, Python, JavaScript, TypeScript, Markdown ou un mélange de ces piles, sans installer une chaîne CI.
+Développeurs et évaluateurs qui veulent un contrôle local sur un projet Terraform, OpenTofu, conteneur, Kubernetes, Python, Go, JavaScript, TypeScript, CSS, HTML, Markdown ou un mélange de ces piles, sans installer une chaîne CI.
 
 ## Comment c'est fait
 
@@ -72,6 +72,14 @@ ESLint et `tsc` sont résolus en priorité dans le `node_modules` de la cible si
 | yaml.lint.yamllint | yaml | yamllint |
 | shell.format.shfmt | shell | shfmt |
 | kubernetes.schema.kubeconform | kubernetes | kubeconform |
+| javascript.format.biome | javascript | biome |
+| typescript.format.biome | typescript | biome |
+| css.format.biome | css | biome |
+| css.lint.stylelint | css | stylelint |
+| html.lint.htmlhint | html | htmlhint |
+| dependencies.vulnerabilities.osv-scanner | dependencies | osv-scanner |
+| dependencies.vulnerabilities.trivy | dependencies | trivy |
+| go.lint.golangci-lint | go | golangci-lint |
 <!-- catalog-controls:end -->
 
 ## Démarrage
@@ -112,7 +120,7 @@ Une seule demande, mémorisée sur la machine (`compliance.machineConsent`) : t�
 
 L'installation du VSIX ne télécharge pas les outils d'audit. Après l'autorisation machine, un outil manquant du manifeste est téléchargé en HTTPS depuis le registre auto-hébergé `tools-v1` (`https://github.com/LORD-SOUPEX/Compliance_Platform/releases/tag/tools-v1`) sans nouvelle fenêtre. L'archive est extraite sous `~/.compliance/tools`, sans droits administrateur. Une signature absente ou différente est signalée par un avertissement journalisé sans bloquer l'installation. Une somme SHA-256 différente refuse l'outil. Une coupure réseau ou un proxy (`HTTP_PROXY` / `HTTPS_PROXY`) n'installe rien.
 
-Sur le registre `tools-v1`, les 10 outils natifs sont fournis pour les 5 plateformes cibles (`windows-x64`, `linux-x64`, `linux-arm64`, `macos-x64`, `macos-arm64`). Les bundles Python (`checkov`, `bandit`, `pylint`, `pytest`, `pip-audit`, `yamllint`), Node (`eslint`, `tsc`) et `PSScriptAnalyzer` sont publiés et qualifiés pour `windows-x64` (sur Linux et macOS, les bundles peuvent être construits sur un hôte POSIX avec `scripts/build_and_publish_tools.py` ou résolus via le PATH du système).
+Les 15 outils natifs (`ruff`, `gitleaks`, `tflint`, `trivy`, `terraform`, `tofu`, `hadolint`, `terragrunt`, `shellcheck`, `rumdl`, `shfmt`, `kubeconform`, `biome`, `osv-scanner`, `golangci-lint`) sont construits pour les 5 plateformes (`windows-x64`, `linux-x64`, `linux-arm64`, `macos-x64`, `macos-arm64`), de même que le bundle Node (Node 22, ESLint, TypeScript, Stylelint, HTMLHint). Le bundle Python (`checkov`, `bandit`, `pylint`, `pytest`, `pip-audit`, `yamllint`, plus `ansible-lint` hors Windows) se construit sur un hôte natif de chaque plateforme ; `PSScriptAnalyzer` est publié pour `windows-x64`. Windows sur ARM utilise les outils `windows-x64`. Un outil absent du registre reste résolu par le `PATH`.
 
 Les outils natifs sont extraits sous `~/.compliance/tools/bin/<plateforme>`. Les outils Python s'installent dans le bundle autonome `~/.compliance/tools/python` et s'exécutent via leur interpréteur relatif (`python -m <module>`). `Invoke-ScriptAnalyzer` s'installe depuis le registre dans `~/.compliance/tools/powershell-modules/PSScriptAnalyzer`. Les entreprises peuvent rediriger les téléchargements vers un miroir privé via le réglage `compliance.registryUrl` et un jeton optionnel enregistré par **ICP: Définir le jeton du registre d'outils**. Le jeton reste dans le stockage sécurisé de VS Code et passe au moteur par la variable d'environnement `COMPLIANCE_REGISTRY_TOKEN`, jamais en argument. Un ancien `compliance.registryToken` de `settings.json` y est déplacé au démarrage. Détail : `docs/architecture.md`.
 

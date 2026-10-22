@@ -15,7 +15,11 @@ async function serve(handler: http.RequestListener): Promise<{ client: DaemonCli
     client.setConnection((server.address() as AddressInfo).port, 'token');
     return {
         client,
-        close: () => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); })
+        close: () =>
+            new Promise<void>(resolve => {
+                server.closeAllConnections();
+                server.close(() => resolve());
+            })
     };
 }
 
@@ -23,7 +27,10 @@ function sse(res: http.ServerResponse, chunks: string[]): void {
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
     let index = 0;
     const next = () => {
-        if (index >= chunks.length) { res.end(); return; }
+        if (index >= chunks.length) {
+            res.end();
+            return;
+        }
         res.write(chunks[index++]);
         setTimeout(next, 5);
     };
@@ -31,32 +38,53 @@ function sse(res: http.ServerResponse, chunks: string[]): void {
 }
 
 test('session events split across packets are delivered, and the stream stops on a terminal event', async () => {
-    const { client, close } = await serve((_req, res) => sse(res, [
-        'id: 1\nevent: session_sta', 'rted\ndata: {"sequence":1}\n\n',
-        'id: 2\nevent: session_completed\ndata: {"sequence":2}\n\n',
-        'id: 3\nevent: never\ndata: {"sequence":3}\n\n'
-    ]));
+    const { client, close } = await serve((_req, res) =>
+        sse(res, [
+            'id: 1\nevent: session_sta',
+            'rted\ndata: {"sequence":1}\n\n',
+            'id: 2\nevent: session_completed\ndata: {"sequence":2}\n\n',
+            'id: 3\nevent: never\ndata: {"sequence":3}\n\n'
+        ])
+    );
     const seen: unknown[] = [];
     try {
-        await client.streamEvents('run', event => { seen.push(event); });
-        assert.deepEqual(seen, [{ sequence: 1, type: 'session_started', id: '1' }, { sequence: 2, type: 'session_completed', id: '2' }]);
-    } finally { await close(); }
+        await client.streamEvents('run', event => {
+            seen.push(event);
+        });
+        assert.deepEqual(seen, [
+            { sequence: 1, type: 'session_started', id: '1' },
+            { sequence: 2, type: 'session_completed', id: '2' }
+        ]);
+    } finally {
+        await close();
+    }
 });
 
 test('an exception raised by the event handler rejects the stream instead of escaping', async () => {
     const { client, close } = await serve((_req, res) => sse(res, ['data: {"type":"control_started"}\n\n', ': still open\n\n']));
     try {
-        await assert.rejects(client.streamEvents('run', () => { throw new Error('Controle du plan invalide'); }), /Controle du plan invalide/);
-    } finally { await close(); }
+        await assert.rejects(
+            client.streamEvents('run', () => {
+                throw new Error('Controle du plan invalide');
+            }),
+            /Controle du plan invalide/
+        );
+    } finally {
+        await close();
+    }
 });
 
 test('a daemon that never answers fails the request after its timeout', async () => {
-    const { client, close } = await serve(() => { /* never answers */ });
+    const { client, close } = await serve(() => {
+        /* never answers */
+    });
     try {
         const started = Date.now();
         await assert.rejects(client.getHealth(), /sans réponse du démon/);
         assert.ok(Date.now() - started < 10000);
-    } finally { await close(); }
+    } finally {
+        await close();
+    }
 });
 
 test('waitForExit sees a process end on every OS', async () => {

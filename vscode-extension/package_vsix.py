@@ -312,7 +312,9 @@ def compile_typescript(ext_dir: Path) -> None:
     tsc = ext_dir / "node_modules" / "typescript" / "lib" / "tsc.js"
     node = shutil.which("node")
     if not tsc.is_file() or not node:
-        raise RuntimeError("node ou typescript absent. Lancer npm install dans vscode-extension.")
+        raise RuntimeError(
+            "node ou typescript absent. Lancer npm install dans vscode-extension."
+        )
     print("[BUILD] Compilation TypeScript...")
     result = subprocess.run(  # nosec B603
         [node, str(tsc), "-p", "tsconfig.json"],
@@ -420,9 +422,7 @@ def package_vsix(target_platform=None):
     extension_files.append((icon_path, "extension/media/icon.png"))
     report_css = ext_dir / "media" / "report.css"
     if not report_css.is_file():
-        raise RuntimeError(
-            "Rapport webview incomplet : media/report.css absent."
-        )
+        raise RuntimeError("Rapport webview incomplet : media/report.css absent.")
     extension_files.append((report_css, "extension/media/report.css"))
 
     license_path = root / "LICENSE"

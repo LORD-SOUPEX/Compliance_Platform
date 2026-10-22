@@ -77,8 +77,12 @@ func init() {
 
 var allKnownTechnologies = []string{
 	"ansible",
+	"css",
+	"dependencies",
 	"docker",
+	"go",
 	"helm",
+	"html",
 	"javascript",
 	"kubernetes",
 	"markdown",
@@ -107,6 +111,14 @@ var jsMarkers = []string{
 var tsMarkers = []string{
 	"tsconfig.json",
 	"package.json",
+}
+
+// dependencyManifests are the lockfiles and manifests osv-scanner and Trivy read.
+var dependencyManifests = map[string]bool{
+	"package-lock.json": true, "npm-shrinkwrap.json": true, "yarn.lock": true, "pnpm-lock.yaml": true, "bun.lock": true,
+	"requirements.txt": true, "poetry.lock": true, "pipfile.lock": true, "uv.lock": true, "pdm.lock": true,
+	"go.mod": true, "cargo.lock": true, "composer.lock": true, "gemfile.lock": true,
+	"pom.xml": true, "gradle.lockfile": true, "packages.lock.json": true, "pubspec.lock": true, "mix.lock": true,
 }
 
 var (
@@ -505,6 +517,33 @@ func DiscoverAll(repoRoot string) (*DiscoveryResult, error) {
 				amb = "Le YAML contient des marqueurs de template Helm; la ressource rendue n'est pas confirmée."
 			}
 			accumulators["kubernetes"].addEvidence(f.relPath, relRoot, status, amb)
+		}
+	}
+
+	// 13a. CSS and HTML belong to the nearest package (package.json), else to their folder.
+	for _, f := range discoveredFiles {
+		switch f.ext {
+		case ".css", ".scss", ".less":
+			accumulators["css"].addEvidence(f.relPath, toRelRoot(absRepo, findNearestProjectRoot(f.dir, absRepo, jsMarkers)), "detected", "")
+		case ".html", ".htm":
+			accumulators["html"].addEvidence(f.relPath, toRelRoot(absRepo, findNearestProjectRoot(f.dir, absRepo, jsMarkers)), "detected", "")
+		}
+	}
+
+	// 13b. Go modules: one root per go.mod.
+	for _, f := range discoveredFiles {
+		if f.name == "go.mod" {
+			accumulators["go"].addMarker(f.relPath, toRelRoot(absRepo, f.dir), "detected", "")
+		} else if f.ext == ".go" {
+			accumulators["go"].addEvidence(f.relPath, toRelRoot(absRepo, findNearestProjectRoot(f.dir, absRepo, []string{"go.mod"})), "detected", "")
+		}
+	}
+
+	// 13c. Third-party dependencies: one root per folder holding a lockfile or a manifest.
+	for _, f := range discoveredFiles {
+		name := strings.ToLower(f.name)
+		if dependencyManifests[name] || (strings.HasPrefix(name, "requirements") && f.ext == ".txt") {
+			accumulators["dependencies"].addEvidence(f.relPath, toRelRoot(absRepo, f.dir), "detected", "")
 		}
 	}
 

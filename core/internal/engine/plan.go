@@ -397,7 +397,7 @@ func BuildCompliancePlan(
 						reason = "Ignoré par un réglage local de l'extension, pas par le dépôt."
 					}
 
-					if (command == "eslint" || command == "tsc") && applicability != "technology_absent" && applicability != "ambiguous" && applicability != "platform_unsupported" && applicability != "permission_denied" && applicability != "user_disabled" {
+					if osutil.NodeTool(command) && applicability != "technology_absent" && applicability != "ambiguous" && applicability != "platform_unsupported" && applicability != "permission_denied" && applicability != "user_disabled" {
 						localBin := nodeToolBinFor(cleanRepo, root, command)
 						switch {
 						case localBin == "":

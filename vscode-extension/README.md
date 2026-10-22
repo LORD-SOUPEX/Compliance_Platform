@@ -24,12 +24,12 @@ Elle reconnaît les technologies d'un dossier, lance les contrôles qui s'appliq
 
 ## Pour qui
 
-Développeurs et évaluateurs qui veulent contrôler un projet Terraform, conteneur, Python, JavaScript, TypeScript ou Markdown, sans chaîne CI.
+Développeurs et évaluateurs qui veulent contrôler un projet Terraform, OpenTofu, conteneur, Kubernetes, Python, Go, JavaScript, TypeScript, CSS, HTML ou Markdown, sans chaîne CI.
 
 ## Fonctionnalités clés
 
 - 100 % local : découverte, exécution et rapport restent sur la machine.
-- Démon Go lancé à la demande, arrêté avec l'extension.
+- Démon Go démarré avec l'extension sans la bloquer, partagé par les fenêtres VS Code, arrêté seul quand plus aucune fenêtre ne l'utilise.
 - Couverture des technologies détectées, pas de la taille du catalogue.
 - Le code audité n'est pas transmis. Une autorisation, mémorisée sur la machine, suffit pour télécharger les outils manquants et les exécuter.
 - Les linters et le catalogue de normes se mettent à jour depuis la release GitHub `tools-v1` sans réinstaller l'extension. Hors ligne, le dernier cache local reste utilisé.
@@ -38,13 +38,13 @@ Développeurs et évaluateurs qui veulent contrôler un projet Terraform, conten
 
 **IaC & Cloud** — Terraform, OpenTofu, Terragrunt, TFLint, Checkov
 
-**Conteneurs & orchestration** — Docker (Hadolint, Trivy) ; Kubernetes & Helm (Checkov, Trivy)
+**Conteneurs & orchestration** — Docker (Hadolint, Trivy) ; Kubernetes (Checkov, Trivy, kubeconform) ; Helm (Checkov, Trivy)
 
-**Configuration & scripts** — Ansible (ansible-lint, yamllint) ; Shell (ShellCheck) ; PowerShell (PSScriptAnalyzer)
+**Configuration & scripts** — Ansible (ansible-lint, yamllint) ; YAML (yamllint) ; Shell (ShellCheck, shfmt) ; PowerShell (PSScriptAnalyzer)
 
-**Code & documentation** — Python (Ruff, Pylint, Bandit, Pytest, pip-audit) ; JS / TS (ESLint, tsc) ; Markdown (rumdl)
+**Code & documentation** — Python (Ruff, Pylint, Bandit, Pytest, pip-audit) ; JS / TS (ESLint, tsc, Biome) ; CSS (Stylelint, Biome) ; HTML (HTMLHint) ; Go (golangci-lint) ; Markdown (rumdl)
 
-**Sécurité transverse** — Gitleaks, détection de secrets sans fuite en clair
+**Sécurité transverse** — Gitleaks sur tout le dépôt, détection de secrets sans fuite en clair ; vulnérabilités des dépendances (osv-scanner, Trivy)
 
 ## Démarrage rapide
 

@@ -5,7 +5,9 @@ export interface Inspected<T> {
 }
 
 export function applicationValue<T>(inspected: Inspected<T> | undefined, fallback: T): T {
-    if (inspected && inspected.globalValue !== undefined) { return inspected.globalValue; }
+    if (inspected && inspected.globalValue !== undefined) {
+        return inspected.globalValue;
+    }
     return fallback;
 }
 

@@ -9,7 +9,20 @@ import sys
 
 # Pictographs and the emoji presentation selector. Arrows and box-drawing
 # characters used in the documentation stay allowed.
-EMOJI = re.compile("[\U0001F000-\U0001FAFF☀-⛿⭐⭕️]")
+# Built from code points so that the source stays ASCII whatever formatter runs on it.
+EMOJI = re.compile(
+    "["
+    + chr(0x1F000)
+    + "-"
+    + chr(0x1FAFF)
+    + chr(0x2600)
+    + "-"
+    + chr(0x26FF)
+    + chr(0x2B50)
+    + chr(0x2B55)
+    + chr(0xFE0F)
+    + "]"
+)
 
 
 def scan(path):

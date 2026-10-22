@@ -18,6 +18,8 @@ export function residualExtensionDirectories(entries: string[], current: string)
 }
 
 export function shouldReplaceDaemon(runningVersion: string | undefined, expectedVersion: string, image: string): boolean {
-    if (!isOurDaemonImage(image) && image !== '') { return false; }
+    if (!isOurDaemonImage(image) && image !== '') {
+        return false;
+    }
     return !runningVersion || runningVersion !== expectedVersion;
 }

@@ -13,7 +13,10 @@ export default tseslint.config(
         rules: {
             // A promise nobody awaits loses its rejection: the first-start bugs came from there.
             // node:test reports the result of test() itself.
-            '@typescript-eslint/no-floating-promises': ['error', { allowForKnownSafeCalls: [{ from: 'package', name: ['test', 'describe', 'it'], package: 'node:test' }] }],
+            '@typescript-eslint/no-floating-promises': [
+                'error',
+                { allowForKnownSafeCalls: [{ from: 'package', name: ['test', 'describe', 'it'], package: 'node:test' }] }
+            ],
             '@typescript-eslint/no-misused-promises': ['error', { checksVoidReturn: { arguments: false } }],
             '@typescript-eslint/no-explicit-any': 'error',
             // An empty catch must say why (a comment counts).

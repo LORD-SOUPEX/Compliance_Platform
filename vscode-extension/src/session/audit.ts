@@ -14,18 +14,36 @@ import type { Fields } from '../report/loader';
 // 2. Gestion de l'état, de la préparation et du session controller
 // ---------------------------------------------------------------------------
 
-export interface Preparation { report: PreparationReport; directory: string; target: string }
-export interface Permissions { network: boolean; code_execution: boolean }
+export interface Preparation {
+    report: PreparationReport;
+    directory: string;
+    target: string;
+}
+export interface Permissions {
+    network: boolean;
+    code_execution: boolean;
+}
 export type AskPermissions = (preparation: Preparation) => Promise<Permissions>;
 
 export interface ProgressEvent {
-    schema_version: number; run_id: string; sequence: number; timestamp: string; type: string;
-    control_id?: string | null; technology?: string | null; root?: string | null; data: Record<string, unknown> | null;
+    schema_version: number;
+    run_id: string;
+    sequence: number;
+    timestamp: string;
+    type: string;
+    control_id?: string | null;
+    technology?: string | null;
+    root?: string | null;
+    data: Record<string, unknown> | null;
 }
 
 const statuses: VisualStatus[] = ['Pending', 'Running', 'Succeeded', 'Failed', 'Error', 'Warning', 'Skipped', 'Blocked', 'Not applicable'];
-function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
-function reason(value: unknown): value is Reason { return record(value) && typeof value.code === 'string' && value.code.length > 0 && typeof value.message === 'string' && value.message.length > 0; }
+function record(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function reason(value: unknown): value is Reason {
+    return record(value) && typeof value.code === 'string' && value.code.length > 0 && typeof value.message === 'string' && value.message.length > 0;
+}
 
 export class AuditState {
     sequence = 0;
@@ -36,42 +54,93 @@ export class AuditState {
     snapshot?: PreparationReport;
     readonly controls = new Map<string, PlanNode>();
     readonly results = new Map<string, Record<string, unknown>>();
-    constructor(readonly runId: string, readonly target: string) {}
+    constructor(
+        readonly runId: string,
+        readonly target: string
+    ) {}
     receive(value: unknown): void {
-        if (!record(value) || value.schema_version !== 1 || value.run_id !== this.runId ||
-            value.sequence !== this.sequence + 1 || typeof value.timestamp !== 'string' || !Number.isFinite(Date.parse(value.timestamp)) ||
-            typeof value.type !== 'string' || this.terminal) { throw new Error('Événement de session invalide, dupliqué ou hors sequence.'); }
+        if (
+            !record(value) ||
+            value.schema_version !== 1 ||
+            value.run_id !== this.runId ||
+            value.sequence !== this.sequence + 1 ||
+            typeof value.timestamp !== 'string' ||
+            !Number.isFinite(Date.parse(value.timestamp)) ||
+            typeof value.type !== 'string' ||
+            this.terminal
+        ) {
+            throw new Error('Événement de session invalide, dupliqué ou hors sequence.');
+        }
         const event = value as unknown as ProgressEvent;
         this.sequence = event.sequence;
-        if (event.sequence === 1 && event.type !== 'session_started') { throw new Error('Début de session absent.'); }
+        if (event.sequence === 1 && event.type !== 'session_started') {
+            throw new Error('Début de session absent.');
+        }
         const data = event.data || {};
         switch (event.type) {
-            case 'session_started': case 'preparation_started': case 'preparation_completed': case 'control_invocation': break;
+            case 'session_started':
+            case 'preparation_started':
+            case 'preparation_completed':
+            case 'control_invocation':
+                break;
             case 'plan_available': {
                 this.snapshot = parsePreparation(JSON.stringify(data), this.target, true);
-                if (this.snapshot.metadata.run_id !== this.runId) { throw new Error('Snapshot d\'une autre session.'); }
+                if (this.snapshot.metadata.run_id !== this.runId) {
+                    throw new Error("Snapshot d'une autre session.");
+                }
                 for (const technology of projectPlan(this.snapshot)) {
-                    for (const root of technology.children) { for (const control of root.children) { this.controls.set(control.id, control); } }
+                    for (const root of technology.children) {
+                        for (const control of root.children) {
+                            this.controls.set(control.id, control);
+                        }
+                    }
                 }
                 for (const control of this.snapshot.execution_plan.controls) {
-                    if (!this.controls.has(control.id)) { this.controls.set(control.id, { id: control.id, label: control.name, status: 'Not applicable', reason: { code: control.reason_code || control.applicability, message: control.reason || 'Technologie absente.' }, children: [] }); }
+                    if (!this.controls.has(control.id)) {
+                        this.controls.set(control.id, {
+                            id: control.id,
+                            label: control.name,
+                            status: 'Not applicable',
+                            reason: { code: control.reason_code || control.applicability, message: control.reason || 'Technologie absente.' },
+                            children: []
+                        });
+                    }
                 }
                 break;
             }
             case 'control_started': {
                 const control = this.controls.get(event.control_id || '');
-                if (!control || control.status !== 'Pending' || typeof data.execution_start !== 'string' || !Number.isFinite(Date.parse(data.execution_start))) { throw new Error('Début de contrôle invalide.'); }
-                control.status = 'Running'; control.execution_start = data.execution_start; control.reason = undefined;
+                if (
+                    !control ||
+                    control.status !== 'Pending' ||
+                    typeof data.execution_start !== 'string' ||
+                    !Number.isFinite(Date.parse(data.execution_start))
+                ) {
+                    throw new Error('Début de contrôle invalide.');
+                }
+                control.status = 'Running';
+                control.execution_start = data.execution_start;
+                control.reason = undefined;
                 break;
             }
             case 'control_completed': {
                 const control = this.controls.get(event.control_id || '');
-                if (!control || control.duration_ms !== undefined || !record(data.result) || data.result.control_id !== control.id ||
+                if (
+                    !control ||
+                    control.duration_ms !== undefined ||
+                    !record(data.result) ||
+                    data.result.control_id !== control.id ||
                     !['success', 'fail', 'error', 'skipped'].includes(String(data.result.status)) ||
-                    typeof data.result.duration_ms !== 'number' || data.result.duration_ms < 0 || !Number.isFinite(data.result.duration_ms) ||
-                    !statuses.includes(data.status as VisualStatus) || ['Pending', 'Running'].includes(String(data.status)) ||
+                    typeof data.result.duration_ms !== 'number' ||
+                    data.result.duration_ms < 0 ||
+                    !Number.isFinite(data.result.duration_ms) ||
+                    !statuses.includes(data.status as VisualStatus) ||
+                    ['Pending', 'Running'].includes(String(data.status)) ||
                     (['Warning', 'Skipped', 'Blocked', 'Not applicable'].includes(String(data.status)) && !reason(data.reason)) ||
-                    typeof data.output_path !== 'string') { throw new Error(`Fin de contrôle invalide : ${event.control_id}.`); }
+                    typeof data.output_path !== 'string'
+                ) {
+                    throw new Error(`Fin de contrôle invalide : ${event.control_id}.`);
+                }
                 control.status = data.status as VisualStatus;
                 control.duration_ms = data.result.duration_ms;
                 control.reason = reason(data.reason) ? data.reason : undefined;
@@ -80,52 +149,119 @@ export class AuditState {
                 break;
             }
             case 'report_available':
-                if (typeof data.report_path !== 'string') { throw new Error('Chemin de rapport absent.'); }
-                this.reportPath = data.report_path; break;
-            case 'session_cancelling': this.reason = { code: 'session_interrupted', message: 'Annulation en cours.' }; break;
+                if (typeof data.report_path !== 'string') {
+                    throw new Error('Chemin de rapport absent.');
+                }
+                this.reportPath = data.report_path;
+                break;
+            case 'session_cancelling':
+                this.reason = { code: 'session_interrupted', message: 'Annulation en cours.' };
+                break;
             case 'session_cancelled':
-                this.status = 'Skipped'; this.reason = reason(data.reason) ? data.reason : { code: 'session_interrupted', message: 'Session annulée.' }; this.terminal = true; break;
+                this.status = 'Skipped';
+                this.reason = reason(data.reason) ? data.reason : { code: 'session_interrupted', message: 'Session annulée.' };
+                this.terminal = true;
+                break;
             case 'session_failed':
-                this.status = 'Error'; this.reason = reason(data.reason) ? data.reason : { code: 'preparation_error', message: 'Session backend en erreur.' }; this.terminal = true; break;
+                this.status = 'Error';
+                this.reason = reason(data.reason) ? data.reason : { code: 'preparation_error', message: 'Session backend en erreur.' };
+                this.terminal = true;
+                break;
             case 'session_completed':
-                if (!this.snapshot || !this.reportPath || [...this.controls.values()].some(control => control.duration_ms === undefined)) { throw new Error('Session terminée sans résultats complets.'); }
-                this.status = data.verdict === 'FAIL' ? 'Failed' : data.verdict === 'PASS' && record(data.coverage) && data.coverage.complete === true ? 'Succeeded' : 'Warning';
+                if (!this.snapshot || !this.reportPath || [...this.controls.values()].some(control => control.duration_ms === undefined)) {
+                    throw new Error('Session terminée sans résultats complets.');
+                }
+                this.status =
+                    data.verdict === 'FAIL'
+                        ? 'Failed'
+                        : data.verdict === 'PASS' && record(data.coverage) && data.coverage.complete === true
+                          ? 'Succeeded'
+                          : 'Warning';
                 if (this.status === 'Warning') {
                     const reasons = Array.isArray(data.verdict_reasons) ? data.verdict_reasons.filter((item: unknown) => typeof item === 'string') : [];
-                    this.reason = { code: data.verdict == null ? 'not_evaluated' : 'coverage_incomplete', message: String(reasons[0] || (data.verdict == null ? 'Non évalué : couverture nulle, aucun contrôle exécuté.' : 'Audit terminé avec une couverture partielle.')) };
+                    this.reason = {
+                        code: data.verdict == null ? 'not_evaluated' : 'coverage_incomplete',
+                        message: String(
+                            reasons[0] ||
+                                (data.verdict == null
+                                    ? 'Non évalué : couverture nulle, aucun contrôle exécuté.'
+                                    : 'Audit terminé avec une couverture partielle.')
+                        )
+                    };
                 }
-                this.terminal = true; break;
-            default: this.reason = { code: 'unknown_event', message: `Événement non reconnu : ${event.type}` }; break;
+                this.terminal = true;
+                break;
+            default:
+                this.reason = { code: 'unknown_event', message: `Événement non reconnu : ${event.type}` };
+                break;
         }
     }
     fail(message: string): void {
-        this.terminal = true; this.status = 'Error'; this.reason = { code: 'session_interrupted', message };
+        this.terminal = true;
+        this.status = 'Error';
+        this.reason = { code: 'session_interrupted', message };
         for (const control of this.controls.values()) {
-            if (control.status === 'Running') { control.status = 'Error'; control.reason = this.reason; }
-            else if (control.status === 'Pending') { control.status = 'Blocked'; control.reason = this.reason; }
+            if (control.status === 'Running') {
+                control.status = 'Error';
+                control.reason = this.reason;
+            } else if (control.status === 'Pending') {
+                control.status = 'Blocked';
+                control.reason = this.reason;
+            }
         }
     }
     verifyReport(value: unknown): void {
-        if (!record(value) || value.schema_version !== 1 || !record(value.metadata) || value.metadata.run_id !== this.runId ||
-            !isSameDirectory(String(value.repository), this.target) || !Array.isArray(value.execution_results) || !record(value.coverage) || !record(value.summary) ||
-            !Array.isArray(value.findings) || !Array.isArray(value.diagnostics) || !Array.isArray(value.limitations) ||
-            !['completed', 'blocked', 'error'].includes(String(value.execution_status)) || !['PASS', 'FAIL', null].includes(value.verdict as string | null)) { throw new Error("Rapport final invalide ou d'une autre session."); }
+        if (
+            !record(value) ||
+            value.schema_version !== 1 ||
+            !record(value.metadata) ||
+            value.metadata.run_id !== this.runId ||
+            !isSameDirectory(String(value.repository), this.target) ||
+            !Array.isArray(value.execution_results) ||
+            !record(value.coverage) ||
+            !record(value.summary) ||
+            !Array.isArray(value.findings) ||
+            !Array.isArray(value.diagnostics) ||
+            !Array.isArray(value.limitations) ||
+            !['completed', 'blocked', 'error'].includes(String(value.execution_status)) ||
+            !['PASS', 'FAIL', null].includes(value.verdict as string | null)
+        ) {
+            throw new Error("Rapport final invalide ou d'une autre session.");
+        }
         const summary = value.summary as { success?: number; fail?: number; error?: number };
-        if (value.verdict === 'PASS' && (summary.success || 0) + (summary.fail || 0) + (summary.error || 0) === 0) { throw new Error('PASS sans contrôle exécuté.'); }
+        if (value.verdict === 'PASS' && (summary.success || 0) + (summary.fail || 0) + (summary.error || 0) === 0) {
+            throw new Error('PASS sans contrôle exécuté.');
+        }
         const ids = new Set<string>();
         for (const result of value.execution_results) {
-            if (!record(result) || typeof result.control_id !== 'string' || ids.has(result.control_id) ||
-                !['success', 'fail', 'error', 'skipped'].includes(String(result.status)) || typeof result.duration_ms !== 'number' || result.duration_ms < 0 ||
-                !Array.isArray(result.diagnostics)) { throw new Error('Résultats du rapport invalides ou dupliqués.'); }
+            if (
+                !record(result) ||
+                typeof result.control_id !== 'string' ||
+                ids.has(result.control_id) ||
+                !['success', 'fail', 'error', 'skipped'].includes(String(result.status)) ||
+                typeof result.duration_ms !== 'number' ||
+                result.duration_ms < 0 ||
+                !Array.isArray(result.diagnostics)
+            ) {
+                throw new Error('Résultats du rapport invalides ou dupliqués.');
+            }
             ids.add(result.control_id);
             const eventResult = this.results.get(result.control_id);
-            if (eventResult && (eventResult.status !== result.status || eventResult.duration_ms !== result.duration_ms)) { throw new Error('Résultat différent de son événement terminal.'); }
+            if (eventResult && (eventResult.status !== result.status || eventResult.duration_ms !== result.duration_ms)) {
+                throw new Error('Résultat différent de son événement terminal.');
+            }
         }
-        if (this.status !== 'Error' && [...this.controls.keys()].some(id => !ids.has(id))) { throw new Error('Résultat absent du rapport final.'); }
-        if (this.status === 'Skipped' && (value.coverage.complete || value.verdict === 'PASS')) { throw new Error('Annulation présentée comme réussie.'); }
+        if (this.status !== 'Error' && [...this.controls.keys()].some(id => !ids.has(id))) {
+            throw new Error('Résultat absent du rapport final.');
+        }
+        if (this.status === 'Skipped' && (value.coverage.complete || value.verdict === 'PASS')) {
+            throw new Error('Annulation présentée comme réussie.');
+        }
     }
     nodes(): PlanNode[] {
-        if (!this.snapshot) { return []; }
+        if (!this.snapshot) {
+            return [];
+        }
         return projectPlan(this.snapshot).map(technology => {
             for (const root of technology.children) {
                 root.children = root.children.map(control => this.controls.get(control.id) || control);
@@ -135,8 +271,13 @@ export class AuditState {
                     root.reason = root.children.find(control => control.status === root.status)?.reason;
                 }
             }
-            const incomplete = technology.children.some(root => root.children.some(control => ['Skipped', 'Blocked', 'Error', 'Warning'].includes(control.status || '')));
-            if (incomplete && !technology.status) { technology.status = 'Warning'; technology.reason = { code: 'coverage_incomplete', message: 'Pipeline partiellement couverte.' }; }
+            const incomplete = technology.children.some(root =>
+                root.children.some(control => ['Skipped', 'Blocked', 'Error', 'Warning'].includes(control.status || ''))
+            );
+            if (incomplete && !technology.status) {
+                technology.status = 'Warning';
+                technology.reason = { code: 'coverage_incomplete', message: 'Pipeline partiellement couverte.' };
+            }
             return technology;
         });
     }
@@ -152,28 +293,48 @@ export class SessionController {
     audit?: AuditState;
     constructor(readonly source: string) {}
     select(target: string): void {
-        if (this.busy) { throw new Error('Une session est déjà active.'); }
-        this.target = target; this.approved = true; this.preparation = undefined; this.audit = undefined; this.sourceValid = false;
+        if (this.busy) {
+            throw new Error('Une session est déjà active.');
+        }
+        this.target = target;
+        this.approved = true;
+        this.preparation = undefined;
+        this.audit = undefined;
+        this.sourceValid = false;
     }
-    canRun(trusted: boolean): boolean { return trusted && this.approved && this.sourceValid && !!this.target && !!this.preparation?.report.discovery.scan_complete && !this.busy; }
+    canRun(trusted: boolean): boolean {
+        return trusted && this.approved && this.sourceValid && !!this.target && !!this.preparation?.report.discovery.scan_complete && !this.busy;
+    }
     begin(trusted: boolean): AuditState {
-        if (!this.canRun(trusted)) { throw new Error('Target, préparation valide, source et autorisation requises avant l\'audit.'); }
-        this.busy = true; this.abort = new AbortController();
+        if (!this.canRun(trusted)) {
+            throw new Error("Target, préparation valide, source et autorisation requises avant l'audit.");
+        }
+        this.busy = true;
+        this.abort = new AbortController();
         this.audit = new AuditState(randomUUID().replace(/-/g, ''), this.target!);
         return this.audit;
     }
-    cancel(): void { this.abort?.abort(); }
-    end(): void { this.busy = false; this.abort = undefined; }
+    cancel(): void {
+        this.abort?.abort();
+    }
+    end(): void {
+        this.busy = false;
+        this.abort = undefined;
+    }
 }
 
 export function isInstalledExtensionSource(source: string): boolean {
-    return fsSync.existsSync(path.join(source, '.config', 'control-catalog.json'))
-        && !fsSync.existsSync(path.join(source, 'core', 'go.mod'))
-        && !fsSync.existsSync(path.join(source, '.git'));
+    return (
+        fsSync.existsSync(path.join(source, '.config', 'control-catalog.json')) &&
+        !fsSync.existsSync(path.join(source, 'core', 'go.mod')) &&
+        !fsSync.existsSync(path.join(source, '.git'))
+    );
 }
 
 export function runsDirectory(source: string): string {
-    if (process.env.COMPLIANCE_SESSIONS_DIR) { return process.env.COMPLIANCE_SESSIONS_DIR; }
+    if (process.env.COMPLIANCE_SESSIONS_DIR) {
+        return process.env.COMPLIANCE_SESSIONS_DIR;
+    }
     if (isInstalledExtensionSource(source)) {
         return path.join(os.homedir(), '.compliance', 'sessions', 'runs');
     }
@@ -189,9 +350,13 @@ export async function stateRoot(source: string): Promise<string> {
         current = path.join(current, segment);
         try {
             const entry = await fs.lstat(current);
-            if (entry.isSymbolicLink() || !entry.isDirectory()) { throw new Error('Le dossier d\'état ne doit pas être un lien ou un fichier.'); }
+            if (entry.isSymbolicLink() || !entry.isDirectory()) {
+                throw new Error("Le dossier d'état ne doit pas être un lien ou un fichier.");
+            }
         } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { throw error; }
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+                throw error;
+            }
             await fs.mkdir(current);
         }
     }
@@ -201,22 +366,37 @@ export async function stateRoot(source: string): Promise<string> {
 export async function validateTarget(source: string, target: string): Promise<string> {
     const canonicalSource = await fs.realpath(source);
     const canonicalTarget = await fs.realpath(target);
-    if (!(await fs.stat(canonicalTarget)).isDirectory()) { throw new Error('La Target doit être un dossier local.'); }
+    if (!(await fs.stat(canonicalTarget)).isDirectory()) {
+        throw new Error('La Target doit être un dossier local.');
+    }
     if (containsPath(canonicalSource, canonicalTarget) || containsPath(canonicalTarget, canonicalSource)) {
         throw new Error('Choisir une Target externe, distincte de la Pipeline source et de ses dossiers parents.');
     }
     return canonicalTarget;
 }
 
-export async function prepare(source: string, target: string, client?: DaemonClient, signal?: AbortSignal, sessionDirectory?: string, log: Logger = silentLogger): Promise<Preparation> {
+export async function prepare(
+    source: string,
+    target: string,
+    client?: DaemonClient,
+    signal?: AbortSignal,
+    sessionDirectory?: string,
+    log: Logger = silentLogger
+): Promise<Preparation> {
     const canonicalSource = await fs.realpath(source);
     const canonicalTarget = await validateTarget(canonicalSource, target);
     const id = randomUUID();
     const directory = sessionDirectory || path.join(await stateRoot(canonicalSource), id);
-    if (!sessionDirectory) { await fs.mkdir(directory); }
+    if (!sessionDirectory) {
+        await fs.mkdir(directory);
+    }
     const reportPath = path.join(directory, 'plan.json');
     if (!sessionDirectory) {
-        await fs.writeFile(path.join(directory, 'session.json'), JSON.stringify({ id, source: canonicalSource, target: canonicalTarget, created_at: new Date().toISOString(), mode: 'PlanOnly' }, null, 2), 'utf8');
+        await fs.writeFile(
+            path.join(directory, 'session.json'),
+            JSON.stringify({ id, source: canonicalSource, target: canonicalTarget, created_at: new Date().toISOString(), mode: 'PlanOnly' }, null, 2),
+            'utf8'
+        );
     }
 
     const daemon = client || new DaemonClient();
@@ -236,7 +416,8 @@ export async function prepare(source: string, target: string, client?: DaemonCli
     } catch (daemonErr) {
         const message = errorMessage(daemonErr);
         log.error('préparation en échec', { error: message, directory });
-        await fs.appendFile(path.join(directory, 'preparation.log'), `\n${new Date().toISOString()} ${message}\n`, 'utf8')
+        await fs
+            .appendFile(path.join(directory, 'preparation.log'), `\n${new Date().toISOString()} ${message}\n`, 'utf8')
             .catch(error => log.warn('préparation.log non écrit', { error: errorMessage(error) }));
         throw new Error(`Préparation impossible : ${message}. Journal : ${path.join(directory, 'preparation.log')}`, { cause: daemonErr });
     }
@@ -259,7 +440,9 @@ export async function validateSource(source: string, client?: DaemonClient): Pro
 export async function sessionArtifact(directory: string, artifact: string): Promise<string> {
     const candidate = path.resolve(directory, artifact);
     const real = await fs.realpath(candidate);
-    if (!containsPath(directory, real)) { throw new Error('Artefact de session redirigé hors dossier.'); }
+    if (!containsPath(directory, real)) {
+        throw new Error('Artefact de session redirigé hors dossier.');
+    }
     return real;
 }
 
@@ -270,11 +453,21 @@ async function atomicJson(file: string, value: unknown): Promise<void> {
 }
 
 function sessionHeadline(state: AuditState, cancelled: boolean): string {
-    if (cancelled) { return 'annulée'; }
-    if (state.status === 'Failed') { return 'terminée — Échec'; }
-    if (state.status === 'Succeeded') { return 'terminée — Réussi'; }
-    if (state.reason?.code === 'not_evaluated') { return `terminée — Non évalué${state.reason.message ? ` — ${state.reason.message}` : ''}`; }
-    if (state.status === 'Warning') { return `terminée — Partiel${state.reason?.message ? ` — ${state.reason.message}` : ''}`; }
+    if (cancelled) {
+        return 'annulée';
+    }
+    if (state.status === 'Failed') {
+        return 'terminée — Échec';
+    }
+    if (state.status === 'Succeeded') {
+        return 'terminée — Réussi';
+    }
+    if (state.reason?.code === 'not_evaluated') {
+        return `terminée — Non évalué${state.reason.message ? ` — ${state.reason.message}` : ''}`;
+    }
+    if (state.status === 'Warning') {
+        return `terminée — Partiel${state.reason?.message ? ` — ${state.reason.message}` : ''}`;
+    }
     return `terminée — ${state.status}`;
 }
 
@@ -316,47 +509,66 @@ async function stream(
         const executed: string[] = [];
         const absent: string[] = [];
         const unavailable: string[] = [];
-        await daemon.streamEvents(run.run_id, (ev) => {
-            try {
-                state.receive(ev);
-                if (ev && typeof ev === 'object') {
-                    const event = ev as { type?: string; control_id?: string; data?: Record<string, unknown> | null };
-                    const data = event.data || {};
-                    const result = data.result as { status?: string; duration_ms?: number; exit_code?: number | null } | undefined;
-                    const reason = data.reason as { code?: string; message?: string } | undefined;
-                    const id = event.control_id ?? '';
-                    const controlLog = runLog.child({ controlId: id });
-                    if (event.type === 'control_invocation') {
-                        controlLog.debug(formatInvocation(data));
-                    } else if (event.type === 'control_started') {
-                        controlLog.info('exécution en cours');
-                    } else if (event.type === 'control_completed') {
-                        const code = reason?.code || '';
-                        const technology = id.split('/')[0] || '';
-                        const fields = { ms: result?.duration_ms, exit: result?.exit_code, output: data.output_path };
-                        if (result?.status === 'success' || result?.status === 'fail' || result?.status === 'error') { executed.push(technology); }
-                        if (result?.status === 'success') { controlLog.info('exécuté OK', fields); }
-                        else if (result?.status === 'fail') { controlLog.info('exécuté KO', { ...fields, reason: reason?.message }); }
-                        else if (result?.status === 'error') { controlLog.error('erreur', { ...fields, reason: reason?.message }); }
-                        else if (code === 'technology_absent') { absent.push(technology); }
-                        else if (countsAsUnavailable(code)) { unavailable.push(`${id} — ${reason?.message || 'indisponible'}`); }
-                        else { controlLog.debug('non exécuté', { reason: code, message: reason?.message }); }
-                    } else if (event.type === 'session_completed' || event.type === 'session_cancelled') {
-                        const technologies = technologiesAbsentFromRun(executed, absent);
-                        if (technologies.length) { runLog.info(`ignorés (technologie absente) : ${technologies.join(', ')}`); }
-                        for (const line of groupUnavailableLines(unavailable)) { runLog.warn(`indisponible : ${line}`); }
-                        runLog.info(`session ${sessionHeadline(state, event.type === 'session_cancelled')}`);
-                    } else if (event.type === 'session_failed') {
-                        runLog.error('session en échec côté démon', { error: data.error });
+        await daemon.streamEvents(
+            run.run_id,
+            ev => {
+                try {
+                    state.receive(ev);
+                    if (ev && typeof ev === 'object') {
+                        const event = ev as { type?: string; control_id?: string; data?: Record<string, unknown> | null };
+                        const data = event.data || {};
+                        const result = data.result as { status?: string; duration_ms?: number; exit_code?: number | null } | undefined;
+                        const reason = data.reason as { code?: string; message?: string } | undefined;
+                        const id = event.control_id ?? '';
+                        const controlLog = runLog.child({ controlId: id });
+                        if (event.type === 'control_invocation') {
+                            controlLog.debug(formatInvocation(data));
+                        } else if (event.type === 'control_started') {
+                            controlLog.info('exécution en cours');
+                        } else if (event.type === 'control_completed') {
+                            const code = reason?.code || '';
+                            const technology = id.split('/')[0] || '';
+                            const fields = { ms: result?.duration_ms, exit: result?.exit_code, output: data.output_path };
+                            if (result?.status === 'success' || result?.status === 'fail' || result?.status === 'error') {
+                                executed.push(technology);
+                            }
+                            if (result?.status === 'success') {
+                                controlLog.info('exécuté OK', fields);
+                            } else if (result?.status === 'fail') {
+                                controlLog.info('exécuté KO', { ...fields, reason: reason?.message });
+                            } else if (result?.status === 'error') {
+                                controlLog.error('erreur', { ...fields, reason: reason?.message });
+                            } else if (code === 'technology_absent') {
+                                absent.push(technology);
+                            } else if (countsAsUnavailable(code)) {
+                                unavailable.push(`${id} — ${reason?.message || 'indisponible'}`);
+                            } else {
+                                controlLog.debug('non exécuté', { reason: code, message: reason?.message });
+                            }
+                        } else if (event.type === 'session_completed' || event.type === 'session_cancelled') {
+                            const technologies = technologiesAbsentFromRun(executed, absent);
+                            if (technologies.length) {
+                                runLog.info(`ignorés (technologie absente) : ${technologies.join(', ')}`);
+                            }
+                            for (const line of groupUnavailableLines(unavailable)) {
+                                runLog.warn(`indisponible : ${line}`);
+                            }
+                            runLog.info(`session ${sessionHeadline(state, event.type === 'session_cancelled')}`);
+                        } else if (event.type === 'session_failed') {
+                            runLog.error('session en échec côté démon', { error: data.error });
+                        }
                     }
+                    changed();
+                } catch (error) {
+                    const message = errorMessage(error);
+                    if (message.includes('Contrôle du plan') || message.includes('Inventaire de technologies') || message.includes('plan v1')) {
+                        throw error;
+                    }
+                    runLog.warn('événement de session ignoré', { error: message });
                 }
-                changed();
-            } catch (error) {
-                const message = errorMessage(error);
-                if (message.includes('Contrôle du plan') || message.includes('Inventaire de technologies') || message.includes('plan v1')) { throw error; }
-                runLog.warn('événement de session ignoré', { error: message });
-            }
-        }, signal);
+            },
+            signal
+        );
     } finally {
         signal.removeEventListener('abort', cancelHandler);
     }
@@ -401,11 +613,15 @@ export async function audit(
     };
     await atomicJson(path.join(directory, 'session.json'), metadata);
     await fs.writeFile(path.join(directory, 'heartbeat'), '', 'utf8');
-    const heartbeat = setInterval(() => { void fs.writeFile(path.join(directory, 'heartbeat'), '', 'utf8').catch(() => undefined); }, 1000);
+    const heartbeat = setInterval(() => {
+        void fs.writeFile(path.join(directory, 'heartbeat'), '', 'utf8').catch(() => undefined);
+    }, 1000);
     try {
         await validateSource(source, daemon);
         const fresh = await prepare(source, target, daemon, signal, directory, log);
-        if (!fresh.report.discovery.scan_complete) { throw new Error('Discovery incomplète ; audit interdit.'); }
+        if (!fresh.report.discovery.scan_complete) {
+            throw new Error('Discovery incomplète ; audit interdit.');
+        }
         const permissions = await ask(fresh);
         if (signal.aborted) {
             state.status = 'Skipped';
@@ -445,10 +661,17 @@ export async function audit(
         throw error;
     } finally {
         clearInterval(heartbeat);
-        if (!state.terminal) { state.fail('Session sans événement terminal.'); metadata.state = 'incomplete'; }
-        if (state.status === 'Skipped') { metadata.state = 'cancelled'; }
-        else if (state.status === 'Error') { metadata.state = 'incomplete'; }
-        else if (metadata.state === 'preparing') { metadata.state = 'completed'; }
+        if (!state.terminal) {
+            state.fail('Session sans événement terminal.');
+            metadata.state = 'incomplete';
+        }
+        if (state.status === 'Skipped') {
+            metadata.state = 'cancelled';
+        } else if (state.status === 'Error') {
+            metadata.state = 'incomplete';
+        } else if (metadata.state === 'preparing') {
+            metadata.state = 'completed';
+        }
         metadata.ended_at = new Date().toISOString();
         metadata.report_path = path.join(directory, 'compliance-report.json');
         await atomicJson(path.join(directory, 'session.json'), metadata);

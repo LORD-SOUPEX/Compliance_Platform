@@ -307,6 +307,58 @@ func BuildInvocation(
 		prefix := []string{"-output", "json", "-summary", "-ignore-missing-schemas", "-cache", cache}
 		return invocationWithFiles(executable, append(prefix, catalogArgs...), manifests), nil
 
+	case "biome":
+		// Formatting only: lint stays with ESLint and Stylelint. A biome.json of the
+		// repository is honoured; without one Biome uses its defaults.
+		webFiles, skip := exclusiveFiles(filesInRoot, repoRoot, ctrl.ExcludeRoots, func(file string) bool { return biomeFile(ctrl.Technology, file) })
+		if skip {
+			return nil, coveredByNestedRoot()
+		}
+		if len(webFiles) == 0 {
+			return nil, &ControlSkip{Code: "not_applicable", Message: "Aucun fichier JavaScript, TypeScript, JSON ou CSS pour Biome."}
+		}
+		prefix := []string{"format", "--reporter=sarif", "--files-ignore-unknown=true", "--no-errors-on-unmatched"}
+		return invocationWithFiles(executable, append(prefix, catalogArgs...), webFiles), nil
+
+	case "stylelint":
+		cssFiles, skip := exclusiveFiles(filesInRoot, repoRoot, ctrl.ExcludeRoots, cssFile)
+		if skip {
+			return nil, coveredByNestedRoot()
+		}
+		if len(cssFiles) == 0 {
+			return nil, &ControlSkip{Code: "not_applicable", Message: "Aucune feuille de style dans cette racine."}
+		}
+		args := []string{"--formatter", "json", "--allow-empty-input"}
+		if !stylelintConfigured(root, repoRoot) {
+			fallback, err := writeStylelintFallback()
+			if err != nil {
+				return nil, err
+			}
+			cleanup = append(cleanup, fallback)
+			args = append(args, "--config", fallback)
+		}
+		return nodeToolInvocation(executable, filepath.Join("..", "stylelint", "bin", "stylelint.mjs"), args, cssFiles, cleanup), nil
+
+	case "htmlhint":
+		htmlFiles, skip := exclusiveFiles(filesInRoot, repoRoot, ctrl.ExcludeRoots, htmlFile)
+		if skip {
+			return nil, coveredByNestedRoot()
+		}
+		if len(htmlFiles) == 0 {
+			return nil, &ControlSkip{Code: "not_applicable", Message: "Aucune page HTML dans cette racine."}
+		}
+		return nodeToolInvocation(executable, filepath.Join("..", "htmlhint", "bin", "htmlhint"), []string{"--format", "json"}, htmlFiles, cleanup), nil
+
+	case "osv-scanner":
+		// osv-scanner reads every lockfile and manifest under the root and asks osv.dev (network).
+		return &Invocation{Executable: executable, Arguments: []string{"scan", "source", "--recursive", "--format", "sarif", root}}, nil
+
+	case "golangci-lint":
+		if osutil.LookupExecutable("go") == "" {
+			return nil, &ControlSkip{Code: "capability_unavailable", Message: "golangci-lint exige la chaîne Go (commande go) dans le PATH."}
+		}
+		return &Invocation{Executable: executable, Arguments: append([]string{"run", "--output.sarif.path=stdout"}, append(catalogArgs, "./...")...)}, nil
+
 	case "hadolint":
 		containerFiles, skip := exclusiveFiles(filesInRoot, repoRoot, ctrl.ExcludeRoots, discovery.IsContainerFile)
 		if skip {
@@ -318,6 +370,8 @@ func BuildInvocation(
 		return invocationWithFiles(executable, []string{"--format", "json"}, containerFiles), nil
 
 	case "ansible-lint":
+		// SARIF gives the file, line and rule of every violation (read by the generic SARIF adapter).
+		arguments = append(arguments, "--format", "sarif")
 		arguments = append(arguments, catalogArgs...)
 		arguments = append(arguments, root)
 		if isPyRuntime {
@@ -506,6 +560,90 @@ func BuildInvocation(
 	}, nil
 }
 
+// biomeFile keeps the files of one technology, so that the JavaScript, TypeScript
+// and CSS controls of a same folder never format the same file twice.
+func biomeFile(technology, file string) bool {
+	ext := strings.ToLower(filepath.Ext(file))
+	switch technology {
+	case "typescript":
+		return ext == ".ts" || ext == ".tsx" || ext == ".mts" || ext == ".cts"
+	case "css":
+		return ext == ".css"
+	default:
+		base := strings.ToLower(filepath.Base(file))
+		// Lockfiles are written by package managers, not by people.
+		isJSON := (ext == ".json" || ext == ".jsonc") && base != "package-lock.json" && base != "npm-shrinkwrap.json"
+		return ext == ".js" || ext == ".jsx" || ext == ".mjs" || ext == ".cjs" || isJSON
+	}
+}
+
+func cssFile(file string) bool {
+	switch strings.ToLower(filepath.Ext(file)) {
+	case ".css", ".scss", ".less":
+		return true
+	default:
+		return false
+	}
+}
+
+func htmlFile(file string) bool {
+	switch strings.ToLower(filepath.Ext(file)) {
+	case ".html", ".htm":
+		return true
+	default:
+		return false
+	}
+}
+
+// stylelintConfigured looks for a Stylelint configuration from root up to the repository.
+func stylelintConfigured(root, repoRoot string) bool {
+	names := []string{".stylelintrc", ".stylelintrc.json", ".stylelintrc.yaml", ".stylelintrc.yml", ".stylelintrc.js", ".stylelintrc.cjs", ".stylelintrc.mjs",
+		"stylelint.config.js", "stylelint.config.cjs", "stylelint.config.mjs"}
+	for _, dir := range ancestorsWithin(repoRoot, relativeToRepo(repoRoot, root)) {
+		for _, name := range names {
+			if info, err := os.Stat(filepath.Join(dir, name)); err == nil && !info.IsDir() {
+				return true
+			}
+		}
+		if body, err := os.ReadFile(filepath.Join(dir, "package.json")); err == nil && strings.Contains(string(body), `"stylelint"`) {
+			var manifest map[string]json.RawMessage
+			if json.Unmarshal(body, &manifest) == nil {
+				if _, ok := manifest["stylelint"]; ok {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// writeStylelintFallback writes the core rules used when the repository has no
+// Stylelint configuration (Stylelint refuses to run without one).
+func writeStylelintFallback() (string, error) {
+	file, err := os.CreateTemp("", "compliance-stylelint-*.json")
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	_, err = file.WriteString(`{"rules":{"block-no-empty":true,"color-no-invalid-hex":true,"declaration-block-no-duplicate-properties":true,` +
+		`"property-no-unknown":true,"selector-pseudo-class-no-unknown":true,"unit-no-unknown":true,"no-duplicate-selectors":true,` +
+		`"font-family-no-duplicate-names":true,"string-no-newline":true,"no-invalid-double-slash-comments":true}}`)
+	return file.Name(), err
+}
+
+// nodeToolInvocation runs a Node tool through its script with the bundle's node,
+// batched under the command-line limit.
+func nodeToolInvocation(executable, relativeScript string, args, files, cleanup []string) *Invocation {
+	if probe, ok := nodeBinScript(executable, relativeScript, nil); ok {
+		inv := invocationWithFiles(probe.Executable, append(probe.Arguments, args...), files)
+		inv.Cleanup = cleanup
+		return inv
+	}
+	inv := invocationWithFiles(executable, args, files)
+	inv.Cleanup = cleanup
+	return inv
+}
+
 // kubernetesManifest keeps rendered manifests: YAML with apiVersion and kind, no template marker.
 func kubernetesManifest(file string) bool {
 	ext := strings.ToLower(filepath.Ext(file))
@@ -542,22 +680,6 @@ func yamlFilesOf(dir string) []string {
 		}
 	}
 	return files
-}
-
-// toolCrashed tells a tool that stopped on its own error from a tool that
-// reported findings: both exit non-zero, only the second is a compliance failure.
-func toolCrashed(command, stderr string, leaks int) bool {
-	if leaks > 0 {
-		return false
-	}
-	switch command {
-	case "trivy":
-		return strings.Contains(stderr, "FATAL")
-	case "terragrunt":
-		return !strings.Contains(stderr, "needs formatting") && strings.Contains(stderr, "ERROR")
-	default:
-		return false
-	}
 }
 
 // lastLine returns the last non-empty line of a tool output, for a diagnostic.
@@ -1273,22 +1395,26 @@ func pythonModuleName(command string) string {
 	}
 }
 
+// tsconfigProjects lists the tsconfig.json of the repository, skipping the same
+// folders as the discovery (.vscode-test, dist, node_modules...). Variants such as
+// tsconfig.build.json extend a tsconfig.json and are not separate projects.
 func tsconfigProjects(repoRoot string) []string {
+	skip := map[string]bool{}
+	for _, name := range discovery.SkipDirNames() {
+		skip[strings.ToLower(name)] = true
+	}
 	var projects []string
 	_ = filepath.WalkDir(repoRoot, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
-		name := entry.Name()
 		if entry.IsDir() {
-			switch strings.ToLower(name) {
-			case "node_modules", ".git", "dist", "build", ".tools", "vendor":
+			if path != repoRoot && skip[strings.ToLower(entry.Name())] {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		lower := strings.ToLower(name)
-		if strings.HasPrefix(lower, "tsconfig") && strings.HasSuffix(lower, ".json") {
+		if strings.EqualFold(entry.Name(), "tsconfig.json") {
 			projects = append(projects, path)
 		}
 		return nil
@@ -1403,13 +1529,7 @@ func versionProbeArgs(executable, command string) []string {
 		}
 		return osutil.PythonModuleArgs(module, versionArgs)
 	}
-	if command == "terraform" || command == "tofu" || command == "opentofu" {
-		return []string{"version"}
-	}
-	if command == "kubeconform" {
-		return []string{"-v"}
-	}
-	return []string{"--version"}
+	return osutil.DefaultVersionArgs(command)
 }
 
 // ProbeToolVersion runs the version command of a tool and returns the parsed version string.
@@ -1883,12 +2003,9 @@ func ExecuteCompliancePlan(
 							if inv.GitleaksReport != "" {
 								res.Leaks = readGitleaksFindings(inv.GitleaksReport, plan.Repository)
 							}
-							if ctrl.Tool != nil && ctrl.Tool.Command == "rumdl" {
-								res.Leaks = append(res.Leaks, parseRumdlOutput(stdout, plan.Repository)...)
-							} else if ctrl.Tool != nil {
+							if ctrl.Tool != nil {
 								parsed := stdout
-								switch ctrl.Tool.Command {
-								case "pip-audit", "yamllint", "bandit", "terragrunt":
+								if adapter, ok := adapterFor(ctrl.Tool.Command); ok && adapter.ReadsStderr {
 									parsed = stdout + "\n" + stderr
 								}
 								res.Leaks = append(res.Leaks, parseToolFindings(ctrl.Tool.Command, parsed, plan.Repository)...)

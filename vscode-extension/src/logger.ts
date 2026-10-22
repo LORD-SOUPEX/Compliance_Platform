@@ -13,7 +13,10 @@ export interface LogSink {
     error(message: string): void;
 }
 
-export interface LogContext { runId?: string; controlId?: string }
+export interface LogContext {
+    runId?: string;
+    controlId?: string;
+}
 
 export const masked = '<masqué>';
 const secretKey = '[A-Za-z0-9_.-]*(?:token|secret|password|passwd|passphrase|credential|api_?key|access_?key|private_?key|authorization)[A-Za-z0-9_.-]*';
@@ -33,10 +36,19 @@ export function redactArgs(args: readonly string[]): string[] {
     const out: string[] = [];
     let hideNext = false;
     for (const arg of args) {
-        if (hideNext) { out.push(masked); hideNext = false; continue; }
+        if (hideNext) {
+            out.push(masked);
+            hideNext = false;
+            continue;
+        }
         const [name] = arg.split('=', 1);
         if (arg.startsWith('-') && secretFlag.test(name)) {
-            if (arg.includes('=')) { out.push(`${name}=${masked}`); } else { out.push(arg); hideNext = true; }
+            if (arg.includes('=')) {
+                out.push(`${name}=${masked}`);
+            } else {
+                out.push(arg);
+                hideNext = true;
+            }
             continue;
         }
         out.push(redact(arg));
@@ -54,16 +66,33 @@ export function commandLine(executable: string, args: readonly string[]): string
 }
 
 function formatValue(value: unknown): string {
-    if (value === undefined || value === null) { return 'null'; }
-    if (value instanceof Error) { return displayArg(value.message); }
-    if (typeof value === 'string') { return displayArg(value); }
-    if (typeof value === 'number' || typeof value === 'boolean') { return String(value); }
-    try { return JSON.stringify(value) ?? 'null'; } catch { return '[valeur non sérialisable]'; }
+    if (value === undefined || value === null) {
+        return 'null';
+    }
+    if (value instanceof Error) {
+        return displayArg(value.message);
+    }
+    if (typeof value === 'string') {
+        return displayArg(value);
+    }
+    if (typeof value === 'number' || typeof value === 'boolean') {
+        return String(value);
+    }
+    try {
+        return JSON.stringify(value) ?? 'null';
+    } catch {
+        return '[valeur non sérialisable]';
+    }
 }
 
 export function formatFields(fields?: LogFields): string {
-    if (!fields) { return ''; }
-    return Object.entries(fields).filter(([, value]) => value !== undefined).map(([key, value]) => `${key}=${formatValue(value)}`).join(' ');
+    if (!fields) {
+        return '';
+    }
+    return Object.entries(fields)
+        .filter(([, value]) => value !== undefined)
+        .map(([key, value]) => `${key}=${formatValue(value)}`)
+        .join(' ');
 }
 
 export function errorMessage(error: unknown): string {
@@ -71,20 +100,41 @@ export function errorMessage(error: unknown): string {
 }
 
 export class Logger {
-    constructor(private readonly sink: LogSink, private readonly context: LogContext = {}) {}
+    constructor(
+        private readonly sink: LogSink,
+        private readonly context: LogContext = {}
+    ) {}
 
-    child(context: LogContext): Logger { return new Logger(this.sink, { ...this.context, ...context }); }
+    child(context: LogContext): Logger {
+        return new Logger(this.sink, { ...this.context, ...context });
+    }
 
-    trace(message: string, fields?: LogFields): void { this.write('trace', message, fields); }
-    debug(message: string, fields?: LogFields): void { this.write('debug', message, fields); }
-    info(message: string, fields?: LogFields): void { this.write('info', message, fields); }
-    warn(message: string, fields?: LogFields): void { this.write('warn', message, fields); }
-    error(message: string, fields?: LogFields): void { this.write('error', message, fields); }
+    trace(message: string, fields?: LogFields): void {
+        this.write('trace', message, fields);
+    }
+    debug(message: string, fields?: LogFields): void {
+        this.write('debug', message, fields);
+    }
+    info(message: string, fields?: LogFields): void {
+        this.write('info', message, fields);
+    }
+    warn(message: string, fields?: LogFields): void {
+        this.write('warn', message, fields);
+    }
+    error(message: string, fields?: LogFields): void {
+        this.write('error', message, fields);
+    }
 
     write(level: LogLevel, message: string, fields?: LogFields): void {
-        const prefix = [this.context.runId ? `[run ${this.context.runId.slice(0, 8)}]` : '', this.context.controlId ? `[${this.context.controlId}]` : ''].filter(Boolean).join(' ');
+        const prefix = [this.context.runId ? `[run ${this.context.runId.slice(0, 8)}]` : '', this.context.controlId ? `[${this.context.controlId}]` : '']
+            .filter(Boolean)
+            .join(' ');
         const text = redact([prefix, message, formatFields(fields)].filter(Boolean).join(' '));
-        try { this.sink[level](text); } catch { /* channel disposed during shutdown */ }
+        try {
+            this.sink[level](text);
+        } catch {
+            /* channel disposed during shutdown */
+        }
     }
 
     /** Logs a process this extension launches itself. */
@@ -97,7 +147,12 @@ export class Logger {
 export const silentLogger = new Logger({ trace() {}, debug() {}, info() {}, warn() {}, error() {} });
 
 /** One record of the daemon journal, as relayed by GET /api/v1/logs/stream. */
-export interface DaemonLogEntry { time?: string; level?: string; msg?: string; attrs?: LogFields }
+export interface DaemonLogEntry {
+    time?: string;
+    level?: string;
+    msg?: string;
+    attrs?: LogFields;
+}
 
 /**
  * Daemon records are shifted one level down so the channel's default (Info) shows
@@ -105,10 +160,14 @@ export interface DaemonLogEntry { time?: string; level?: string; msg?: string; a
  */
 export function relayLevel(daemonLevel: string | undefined): LogLevel {
     switch (daemonLevel) {
-        case 'error': return 'error';
-        case 'warn': return 'warn';
-        case 'info': return 'debug';
-        default: return 'trace';
+        case 'error':
+            return 'error';
+        case 'warn':
+            return 'warn';
+        case 'info':
+            return 'debug';
+        default:
+            return 'trace';
     }
 }
 
@@ -117,9 +176,15 @@ export function relayLevel(daemonLevel: string | undefined): LogLevel {
  * (vscode.LogLevel: Off=0, Trace=1, Debug=2, Info=3, Warning=4, Error=5).
  */
 export function daemonStreamLevel(channelLevel: number): 'debug' | 'info' | 'warn' | 'error' {
-    if (channelLevel <= 1) { return 'debug'; }
-    if (channelLevel === 2) { return 'info'; }
-    if (channelLevel === 5) { return 'error'; }
+    if (channelLevel <= 1) {
+        return 'debug';
+    }
+    if (channelLevel === 2) {
+        return 'info';
+    }
+    if (channelLevel === 5) {
+        return 'error';
+    }
     return 'warn';
 }
 
@@ -134,19 +199,35 @@ export function relayDaemonEntry(log: Logger, entry: DaemonLogEntry): void {
 
 /** Invocation record from the daemon (report.Invocation). */
 export interface InvocationRecord {
-    executable?: string; args?: string[]; raw_command_line?: string | null; cwd?: string;
-    env_added?: Record<string, string>; env_removed?: string[] | null; timeout_ms?: number;
-    stdout_path?: string | null; stderr_path?: string | null;
+    executable?: string;
+    args?: string[];
+    raw_command_line?: string | null;
+    cwd?: string;
+    env_added?: Record<string, string>;
+    env_removed?: string[] | null;
+    timeout_ms?: number;
+    stdout_path?: string | null;
+    stderr_path?: string | null;
 }
 
 /** Multi-line text for the channel: command, cwd, environment delta, stream files. */
 export function formatInvocation(record: InvocationRecord): string {
     const lines = [`exec ${record.raw_command_line || commandLine(record.executable || '?', record.args || [])}`];
-    if (record.cwd) { lines.push(`    cwd    : ${record.cwd}`); }
+    if (record.cwd) {
+        lines.push(`    cwd    : ${record.cwd}`);
+    }
     const added = Object.entries(record.env_added || {});
-    if (added.length) { lines.push(`    env+   : ${added.map(([key, value]) => `${key}=${displayArg(value)}`).join(' ')}`); }
-    if (record.env_removed?.length) { lines.push(`    env-   : ${record.env_removed.join(' ')}`); }
-    if (record.timeout_ms) { lines.push(`    timeout: ${Math.round(record.timeout_ms / 1000)} s`); }
-    if (record.stdout_path) { lines.push(`    sorties: ${record.stdout_path}, ${record.stderr_path || ''}`); }
+    if (added.length) {
+        lines.push(`    env+   : ${added.map(([key, value]) => `${key}=${displayArg(value)}`).join(' ')}`);
+    }
+    if (record.env_removed?.length) {
+        lines.push(`    env-   : ${record.env_removed.join(' ')}`);
+    }
+    if (record.timeout_ms) {
+        lines.push(`    timeout: ${Math.round(record.timeout_ms / 1000)} s`);
+    }
+    if (record.stdout_path) {
+        lines.push(`    sorties: ${record.stdout_path}, ${record.stderr_path || ''}`);
+    }
     return lines.join('\n');
 }

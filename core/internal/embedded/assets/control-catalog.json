@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_revision": 2,
+  "catalog_revision": 3,
   "controls": [
     {
       "id": "terraform.format.terraform",
@@ -1351,6 +1351,320 @@
       "objective": "Valider les manifestes Kubernetes contre les schémas de l'API.",
       "limitations": [
         "Les schémas sont téléchargés depuis le dépôt public kubernetes-json-schema. Les ressources sans schéma connu (CRD) sont ignorées."
+      ]
+    },
+    {
+      "id": "javascript.format.biome",
+      "name": "JavaScript format",
+      "technology": "javascript",
+      "capability": "formatting",
+      "tool": {
+        "name": "Biome",
+        "command": "biome"
+      },
+      "severity": "low",
+      "selection_policy": "all",
+      "applicability": {
+        "technology_status": [
+          "detected"
+        ],
+        "evidence_extensions": [
+          ".js",
+          ".jsx",
+          ".mjs",
+          ".cjs",
+          "package.json"
+        ]
+      },
+      "parameters": {},
+      "dependencies": [],
+      "timeout_seconds": 300,
+      "cost": "low",
+      "side_effect_level": "read_only",
+      "permissions": [],
+      "platform_support": [
+        "windows-x64",
+        "linux-x64",
+        "linux-arm64",
+        "macos-x64",
+        "macos-arm64"
+      ],
+      "objective": "Vérifier le formatage du JavaScript et du JSON.",
+      "limitations": [
+        "Formatage seulement : le lint reste à ESLint et Stylelint. Un biome.json du dépôt est appliqué ; sinon les réglages par défaut de Biome."
+      ]
+    },
+    {
+      "id": "typescript.format.biome",
+      "name": "TypeScript format",
+      "technology": "typescript",
+      "capability": "formatting",
+      "tool": {
+        "name": "Biome",
+        "command": "biome"
+      },
+      "severity": "low",
+      "selection_policy": "all",
+      "applicability": {
+        "technology_status": [
+          "detected"
+        ],
+        "evidence_extensions": [
+          ".ts",
+          ".tsx",
+          ".mts",
+          ".cts"
+        ]
+      },
+      "parameters": {},
+      "dependencies": [],
+      "timeout_seconds": 300,
+      "cost": "low",
+      "side_effect_level": "read_only",
+      "permissions": [],
+      "platform_support": [
+        "windows-x64",
+        "linux-x64",
+        "linux-arm64",
+        "macos-x64",
+        "macos-arm64"
+      ],
+      "objective": "Vérifier le formatage du TypeScript.",
+      "limitations": [
+        "Formatage seulement : le lint reste à ESLint et Stylelint. Un biome.json du dépôt est appliqué ; sinon les réglages par défaut de Biome."
+      ]
+    },
+    {
+      "id": "css.format.biome",
+      "name": "CSS format",
+      "technology": "css",
+      "capability": "formatting",
+      "tool": {
+        "name": "Biome",
+        "command": "biome"
+      },
+      "severity": "low",
+      "selection_policy": "all",
+      "applicability": {
+        "technology_status": [
+          "detected"
+        ],
+        "evidence_extensions": [
+          ".css"
+        ]
+      },
+      "parameters": {},
+      "dependencies": [],
+      "timeout_seconds": 300,
+      "cost": "low",
+      "side_effect_level": "read_only",
+      "permissions": [],
+      "platform_support": [
+        "windows-x64",
+        "linux-x64",
+        "linux-arm64",
+        "macos-x64",
+        "macos-arm64"
+      ],
+      "objective": "Vérifier le formatage des feuilles de style CSS.",
+      "limitations": [
+        "Formatage seulement : le lint reste à ESLint et Stylelint. Un biome.json du dépôt est appliqué ; sinon les réglages par défaut de Biome."
+      ]
+    },
+    {
+      "id": "css.lint.stylelint",
+      "name": "CSS lint",
+      "technology": "css",
+      "capability": "linting",
+      "tool": {
+        "name": "Stylelint",
+        "command": "stylelint"
+      },
+      "severity": "medium",
+      "selection_policy": "all",
+      "applicability": {
+        "technology_status": [
+          "detected"
+        ],
+        "evidence_extensions": [
+          ".css",
+          ".scss",
+          ".less"
+        ]
+      },
+      "parameters": {},
+      "dependencies": [],
+      "timeout_seconds": 300,
+      "cost": "low",
+      "side_effect_level": "read_only",
+      "permissions": [],
+      "platform_support": [
+        "windows-x64",
+        "linux-x64",
+        "linux-arm64",
+        "macos-x64",
+        "macos-arm64"
+      ],
+      "objective": "Détecter les erreurs des feuilles de style.",
+      "limitations": [
+        "Configuration Stylelint du dépôt si elle existe, sinon des règles de base (blocs vides, propriétés et unités inconnues, doublons)."
+      ]
+    },
+    {
+      "id": "html.lint.htmlhint",
+      "name": "HTML lint",
+      "technology": "html",
+      "capability": "linting",
+      "tool": {
+        "name": "HTMLHint",
+        "command": "htmlhint"
+      },
+      "severity": "medium",
+      "selection_policy": "all",
+      "applicability": {
+        "technology_status": [
+          "detected"
+        ],
+        "evidence_extensions": [
+          ".html",
+          ".htm"
+        ]
+      },
+      "parameters": {},
+      "dependencies": [],
+      "timeout_seconds": 300,
+      "cost": "low",
+      "side_effect_level": "read_only",
+      "permissions": [],
+      "platform_support": [
+        "windows-x64",
+        "linux-x64",
+        "linux-arm64",
+        "macos-x64",
+        "macos-arm64"
+      ],
+      "objective": "Détecter les erreurs de structure des pages HTML.",
+      "limitations": [
+        "Un .htmlhintrc du dépôt est appliqué ; sinon les règles par défaut de HTMLHint."
+      ]
+    },
+    {
+      "id": "dependencies.vulnerabilities.osv-scanner",
+      "name": "Dependency vulnerabilities",
+      "technology": "dependencies",
+      "capability": "vulnerabilities",
+      "tool": {
+        "name": "osv-scanner",
+        "command": "osv-scanner"
+      },
+      "severity": "high",
+      "selection_policy": "alternative",
+      "applicability": {
+        "technology_status": [
+          "detected"
+        ],
+        "evidence_extensions": []
+      },
+      "parameters": {},
+      "dependencies": [],
+      "timeout_seconds": 600,
+      "cost": "medium",
+      "side_effect_level": "network",
+      "permissions": [
+        "network"
+      ],
+      "platform_support": [
+        "windows-x64",
+        "linux-x64",
+        "linux-arm64",
+        "macos-x64",
+        "macos-arm64"
+      ],
+      "objective": "Signaler les dépendances tierces touchées par une vulnérabilité connue (osv.dev).",
+      "limitations": [
+        "Interroge l'API osv.dev ; seuls les noms et versions des paquets sont envoyés, pas le code."
+      ]
+    },
+    {
+      "id": "dependencies.vulnerabilities.trivy",
+      "name": "Dependency vulnerabilities",
+      "technology": "dependencies",
+      "capability": "vulnerabilities",
+      "tool": {
+        "name": "trivy",
+        "command": "trivy"
+      },
+      "severity": "high",
+      "selection_policy": "alternative",
+      "applicability": {
+        "technology_status": [
+          "detected"
+        ],
+        "evidence_extensions": []
+      },
+      "parameters": {
+        "scanners": [
+          "vuln"
+        ]
+      },
+      "dependencies": [],
+      "timeout_seconds": 600,
+      "cost": "medium",
+      "side_effect_level": "network",
+      "permissions": [
+        "network"
+      ],
+      "platform_support": [
+        "windows-x64",
+        "linux-x64",
+        "linux-arm64",
+        "macos-x64",
+        "macos-arm64"
+      ],
+      "objective": "Signaler les dépendances tierces touchées par une vulnérabilité connue.",
+      "limitations": [
+        "Alternative à osv-scanner. Télécharge la base de vulnérabilités de Trivy au premier lancement."
+      ]
+    },
+    {
+      "id": "go.lint.golangci-lint",
+      "name": "Go lint",
+      "technology": "go",
+      "capability": "linting",
+      "tool": {
+        "name": "golangci-lint",
+        "command": "golangci-lint"
+      },
+      "severity": "medium",
+      "selection_policy": "all",
+      "applicability": {
+        "technology_status": [
+          "detected"
+        ],
+        "evidence_extensions": [
+          ".go",
+          "go.mod"
+        ]
+      },
+      "parameters": {},
+      "dependencies": [],
+      "timeout_seconds": 600,
+      "cost": "medium",
+      "side_effect_level": "network_code_execution",
+      "permissions": [
+        "network",
+        "code_execution"
+      ],
+      "platform_support": [
+        "windows-x64",
+        "linux-x64",
+        "linux-arm64",
+        "macos-x64",
+        "macos-arm64"
+      ],
+      "objective": "Analyser le code Go avec golangci-lint.",
+      "limitations": [
+        "Exige la chaîne Go (go) dans le PATH ; les modules sont téléchargés si absents du cache. Un .golangci.yml du module est appliqué."
       ]
     }
   ]

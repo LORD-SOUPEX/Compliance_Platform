@@ -22,7 +22,10 @@ export class DaemonSupervisor implements vscode.Disposable {
     private heartbeat?: NodeJS.Timeout;
     private readonly item = vscode.window.createStatusBarItem('compliance.status', vscode.StatusBarAlignment.Left, 10);
 
-    constructor(private readonly source: string, private readonly log: Logger) {
+    constructor(
+        private readonly source: string,
+        private readonly log: Logger
+    ) {
         this.item.name = 'Compliance';
         this.item.command = 'compliance.showLogs';
         this.render();
@@ -32,27 +35,35 @@ export class DaemonSupervisor implements vscode.Disposable {
     /** Starts or joins the daemon. Concurrent callers share one attempt. */
     start(): Promise<DaemonHealth> {
         if (!this.starting) {
-            this.starting = this.startWithRetries().finally(() => { this.starting = undefined; });
+            this.starting = this.startWithRetries().finally(() => {
+                this.starting = undefined;
+            });
         }
         return this.starting;
     }
 
     private async startWithRetries(): Promise<DaemonHealth> {
-        if (this.state !== 'ready' && this.state !== 'busy') { this.set('starting'); }
+        if (this.state !== 'ready' && this.state !== 'busy') {
+            this.set('starting');
+        }
         let lastError: unknown;
         for (let attempt = 0; attempt <= retryDelaysMs.length; attempt++) {
             try {
                 const client = new DaemonClient();
                 const health = await client.ensureDaemon(this.source);
-                await client.registerClient(this.clientId, `VS Code ${vscode.version}`).catch(error =>
-                    this.log.debug('fenêtre non enregistrée auprès du démon', { error: errorMessage(error) }));
+                await client
+                    .registerClient(this.clientId, `VS Code ${vscode.version}`)
+                    .catch(error => this.log.debug('fenêtre non enregistrée auprès du démon', { error: errorMessage(error) }));
                 this.accept(health);
                 this.startHeartbeat();
                 return health;
             } catch (error) {
                 lastError = error;
                 if (attempt < retryDelaysMs.length) {
-                    this.log.warn(`démarrage du démon en échec, nouvel essai dans ${retryDelaysMs[attempt] / 1000} s`, { attempt: attempt + 1, error: errorMessage(error) });
+                    this.log.warn(`démarrage du démon en échec, nouvel essai dans ${retryDelaysMs[attempt] / 1000} s`, {
+                        attempt: attempt + 1,
+                        error: errorMessage(error)
+                    });
                     await new Promise(resolve => setTimeout(resolve, retryDelaysMs[attempt]));
                 }
             }
@@ -69,18 +80,26 @@ export class DaemonSupervisor implements vscode.Disposable {
     }
 
     private startHeartbeat(): void {
-        if (this.heartbeat) { return; }
-        this.heartbeat = setInterval(() => { void this.beat(); }, heartbeatMs);
+        if (this.heartbeat) {
+            return;
+        }
+        this.heartbeat = setInterval(() => {
+            void this.beat();
+        }, heartbeatMs);
         this.heartbeat.unref?.();
     }
 
     /** Keeps the window registered and the status current. Never starts a daemon by itself. */
     private async beat(): Promise<void> {
-        if (this.starting) { return; }
+        if (this.starting) {
+            return;
+        }
         const client = new DaemonClient();
         const health = await client.attach();
         if (!health) {
-            if (this.state !== 'stopped' && this.state !== 'failed') { this.log.info('démon arrêté ; il sera relancé à la prochaine commande'); }
+            if (this.state !== 'stopped' && this.state !== 'failed') {
+                this.log.info('démon arrêté ; il sera relancé à la prochaine commande');
+            }
             this.health = undefined;
             this.set('stopped');
             return;
@@ -110,7 +129,10 @@ export class DaemonSupervisor implements vscode.Disposable {
 
     /** Unregisters this window. The daemon keeps serving other windows and stops once idle. */
     async deactivate(): Promise<void> {
-        if (this.heartbeat) { clearInterval(this.heartbeat); this.heartbeat = undefined; }
+        if (this.heartbeat) {
+            clearInterval(this.heartbeat);
+            this.heartbeat = undefined;
+        }
         const client = new DaemonClient();
         if (await client.attach()) {
             await client.unregisterClient(this.clientId).catch(() => undefined);
@@ -118,12 +140,17 @@ export class DaemonSupervisor implements vscode.Disposable {
     }
 
     dispose(): void {
-        if (this.heartbeat) { clearInterval(this.heartbeat); this.heartbeat = undefined; }
+        if (this.heartbeat) {
+            clearInterval(this.heartbeat);
+            this.heartbeat = undefined;
+        }
         this.item.dispose();
     }
 
     private set(state: SupervisorState): void {
-        if (state !== this.state) { this.log.debug('état du moteur', { from: this.state, to: state }); }
+        if (state !== this.state) {
+            this.log.debug('état du moteur', { from: this.state, to: state });
+        }
         this.state = state;
         this.render();
     }

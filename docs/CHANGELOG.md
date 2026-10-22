@@ -33,6 +33,12 @@
 - **shfmt** (`shell.format.shfmt`) liste les scripts dont le formatage diffère ; **kubeconform** (`kubernetes.schema.kubeconform`, permission réseau) valide les manifestes rendus contre les schémas de l'API Kubernetes, avec un cache local.
 - **Windows sur ARM** : un outil absent de l'entrée `windows-arm64` du manifeste est pris dans `windows-x64` (émulation x64 de Windows 11), pour l'installation, la résolution et le bouton d'installation de l'extension.
 - **Catalogue** : révision 2. Les versions de shfmt (3.14.1) et kubeconform (0.8.0) sont dans `.config/tools-lock.json` et `scripts/build_and_publish_tools.py`, prêtes à publier sur `tools-v1`.
+- **Web** : `css.lint.stylelint` (configuration du dépôt, sinon règles de base), `html.lint.htmlhint`, et formatage Biome du JavaScript et du JSON, du TypeScript et du CSS (`*.format.biome`, réglages du `biome.json` du dépôt).
+- **Dépendances** : technologie `dependencies` détectée sur les lockfiles et manifestes ; `dependencies.vulnerabilities.osv-scanner` (osv.dev, permission réseau), avec Trivy (`vuln`) en alternative.
+- **Go** : `go.lint.golangci-lint` sur chaque `go.mod`, lecture SARIF ; les erreurs de compilation journalisées sont aussi des anomalies.
+- **Adaptateurs d'outils** : une table unique décrit la lecture de chaque outil, et un test vérifie que tout outil du catalogue en a une. Lecteur SARIF commun (Biome, osv-scanner, golangci-lint, ansible-lint, qui n'était pas lu du tout).
+- **Bundles** : le bundle Node (avec Stylelint et HTMLHint) se construit pour les cinq plateformes depuis n'importe quel hôte ; le bundle Python POSIX reste à construire sur un hôte natif. Catalogue en révision 3.
+- **Audit du dépôt par lui-même** : `tsc` ne descend plus dans `.vscode-test` ni dans les autres dossiers ignorés et ne prend que les `tsconfig.json` ; `ruff format` est lu même quand le diff contient `{}` ou `[]`. Le dépôt passe ses propres contrôles : `biome.json`, scripts Python formatés et corrigés (pylint 10/10, bandit), dépendance `xz` mise à jour (CVE-2025-58058).
 - **`compliance run`** prend le verrou partagé des outils comme le démon : un audit lancé pendant une installation attend sa fin. `COMPLIANCE_TOOLS_DIR` déplace le dossier des outils sans changer le profil utilisateur.
 
 ## 2.1.3

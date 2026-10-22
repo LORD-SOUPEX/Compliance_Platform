@@ -55,51 +55,6 @@ func markdownConfigPresent(repo string) bool {
 	return err == nil && strings.Contains(strings.ToLower(string(body)), "rumdl")
 }
 
-func parseToolFindings(command, stdout, repo string) []report.LocatedLeak {
-	var leaks []report.LocatedLeak
-	switch command {
-	case "checkov":
-		leaks = parseCheckov(stdout, repo)
-	case "tflint":
-		leaks = parseTFLint(stdout, repo)
-	case "shellcheck":
-		leaks = parseShellcheck(stdout, repo)
-	case "trivy":
-		leaks = parseTrivy(stdout, repo)
-	case "terraform", "tofu":
-		leaks = parseFmtFiles(stdout, repo)
-	case "terragrunt":
-		leaks = parseTerragruntFmt(stdout, repo)
-	case "shfmt":
-		leaks = parseShfmt(stdout, repo)
-	case "kubeconform":
-		leaks = parseKubeconform(stdout, repo)
-	case "Invoke-ScriptAnalyzer":
-		leaks = parsePSScriptAnalyzer(stdout, repo)
-	case "ruff":
-		leaks = parseRuff(stdout, repo)
-	case "pylint":
-		leaks = parsePylint(stdout, repo)
-	case "bandit":
-		leaks = parseBandit(stdout, repo)
-	case "pytest":
-		leaks = parsePytest(stdout, repo)
-	case "pip-audit":
-		leaks = parsePipAudit(stdout, repo)
-	case "yamllint":
-		leaks = parseYamllint(stdout, repo)
-	case "hadolint":
-		leaks = parseHadolint(stdout, repo)
-	case "eslint":
-		leaks = parseESLint(stdout, repo)
-	case "tsc":
-		leaks = parseTSC(stdout, repo)
-	default:
-		return nil
-	}
-	return filterSkipped(leaks)
-}
-
 func filterSkipped(leaks []report.LocatedLeak) []report.LocatedLeak {
 	kept := leaks[:0]
 	for _, leak := range leaks {
@@ -536,7 +491,10 @@ func decodeJSONDocuments(stdout string, consume func(json.RawMessage)) bool {
 
 func parseRuff(stdout, repo string) []report.LocatedLeak {
 	var leaks []report.LocatedLeak
-	if decodeJSONDocuments(stdout, func(raw json.RawMessage) {
+	// ruff check gives a JSON array; ruff format gives a diff whose code may hold
+	// {} or [] that also decode as JSON. Only real rows count as JSON output.
+	jsonRows := false
+	decodeJSONDocuments(stdout, func(raw json.RawMessage) {
 		var rows []struct {
 			Filename string `json:"filename"`
 			Code     string `json:"code"`
@@ -549,6 +507,7 @@ func parseRuff(stdout, repo string) []report.LocatedLeak {
 		if json.Unmarshal(raw, &rows) != nil {
 			return
 		}
+		jsonRows = true
 		for _, row := range rows {
 			line := row.Location.Row
 			if line < 1 {
@@ -563,7 +522,8 @@ func parseRuff(stdout, repo string) []report.LocatedLeak {
 				RuleID: row.Code, Description: row.Message, Severity: "medium",
 			})
 		}
-	}) {
+	})
+	if jsonRows {
 		return leaks
 	}
 	seen := map[string]bool{}

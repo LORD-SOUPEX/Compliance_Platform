@@ -1,10 +1,13 @@
 package distribution
 
 import (
+	"archive/tar"
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -111,5 +114,47 @@ func TestWindowsArm64BorrowsX64Tools(t *testing.T) {
 	}
 	if linux, _, _ := toolsForHost(manifest, "linux-arm64"); len(linux) != 0 {
 		t.Fatalf("only Windows on ARM borrows x64 tools: %v", linux)
+	}
+}
+
+// A Linux or macOS Node bundle ships node_modules/.bin launchers as symbolic
+// links. Extraction keeps them working (a link, or a copy where links are not allowed).
+func TestInstallTreeKeepsNodeLaunchers(t *testing.T) {
+	var buffer bytes.Buffer
+	gz := gzip.NewWriter(&buffer)
+	tw := tar.NewWriter(gz)
+	add := func(header *tar.Header, body string) {
+		header.Size = int64(len(body))
+		if err := tw.WriteHeader(header); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add(&tar.Header{Name: "node/bin/node", Mode: 0o755, Typeflag: tar.TypeReg}, "#!node")
+	add(&tar.Header{Name: "node/node_modules/eslint/bin/eslint.js", Mode: 0o644, Typeflag: tar.TypeReg}, "console.log('eslint')")
+	if err := tw.WriteHeader(&tar.Header{Name: "node/node_modules/.bin/eslint", Typeflag: tar.TypeSymlink, Linkname: "../eslint/bin/eslint.js", Mode: 0o777}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cache := t.TempDir()
+	if err := installTree(buffer.Bytes(), "https://example.invalid/linux-x64-node-tools.tar.gz", cache, "node/bin/node"); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(cache, "node", "node_modules", ".bin", "eslint"))
+	if err != nil || !strings.Contains(string(body), "eslint") {
+		t.Fatalf("launcher unusable: %q %v", body, err)
+	}
+	if runtime.GOOS != "windows" {
+		info, _ := os.Stat(filepath.Join(cache, "node", "bin", "node"))
+		if info.Mode().Perm()&0o111 == 0 {
+			t.Fatalf("node is not executable: %v", info.Mode())
+		}
 	}
 }

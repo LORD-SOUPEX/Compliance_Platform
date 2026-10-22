@@ -3,7 +3,7 @@
 scripts/build_and_publish_tools.py — Build & Publish Tools Registry for Compliance Platform
 
 Builds standalone, relocatable archives for:
-  - 12 native tools across 5 platforms (windows-x64, linux-x64, linux-arm64, macos-x64, macos-arm64)
+  - 15 native tools across 5 platforms (windows-x64, linux-x64, linux-arm64, macos-x64, macos-arm64)
   - Python bundle for windows-x64 (relocatable CPython 3.11.9 with checkov, bandit, pylint, pytest, pip-audit, yamllint)
   - CPython standalone for POSIX platforms (linux-x64, linux-arm64, macos-x64, macos-arm64)
   - Node bundle for windows-x64 (portable Node 22 LTS with eslint and typescript)
@@ -14,11 +14,17 @@ signs with Ed25519, and publishes to GitHub Release tools-v1 on LORD-SOUPEX/Comp
 """
 
 import argparse
+import functools
 import hashlib
 import io
 import json
 import os
+import platform
+import posixpath
 import shutil
+
+# Every subprocess below runs a fixed build tool (npm, go, gh, git, pip) with
+# arguments assembled here, never a shell command from outside input.
 import subprocess  # nosec B404
 import sys
 import tarfile
@@ -33,24 +39,41 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DIST_DIR = REPO_ROOT / "dist-tools"
 CACHE_DIR = REPO_ROOT / ".tools" / "cache" / "upstream"
 ED25519_KEY_PATH = REPO_ROOT / ".tools" / "cache" / "distribution_ed25519.key"
-GO_BINARY = REPO_ROOT / ".tools" / "go" / "bin" / ("go.exe" if sys.platform == "win32" else "go")
+GO_BINARY = (
+    REPO_ROOT
+    / ".tools"
+    / "go"
+    / "bin"
+    / ("go.exe" if sys.platform == "win32" else "go")
+)
 
-REGISTRY_BASE_URL = "https://github.com/LORD-SOUPEX/Compliance_Platform/releases/download/tools-v1"
+REGISTRY_BASE_URL = (
+    "https://github.com/LORD-SOUPEX/Compliance_Platform/releases/download/tools-v1"
+)
 REPO_SLUG = "LORD-SOUPEX/Compliance_Platform"
 RELEASE_TAG = "tools-v1"
 LOCK_PATH = REPO_ROOT / ".config" / "tools-lock.json"
+# `python -m checkov` needs a __main__ module that the wheel does not ship.
+CHECKOV_MAIN = (
+    "import sys\n"
+    "from checkov.main import Checkov\n\n"
+    "if __name__ == '__main__':\n"
+    "    sys.exit(Checkov().run())\n"
+)
 LOCK: dict = {}
 
 
 def load_tool_lock() -> dict:
     """Versions live in .config/tools-lock.json. One edit, then --only <tool>."""
-    global LOCK
-    LOCK = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
+    LOCK.clear()
+    LOCK.update(json.loads(LOCK_PATH.read_text(encoding="utf-8")))
     for name, cfg in UPSTREAM_BINARIES.items():
         new = str(LOCK["native"][name])
         old = str(cfg["version"])
         if new != old:
-            cfg["urls"] = {plat: url.replace(old, new) for plat, url in cfg["urls"].items()}
+            cfg["urls"] = {
+                plat: url.replace(old, new) for plat, url in cfg["urls"].items()
+            }
             cfg["version"] = new
     return LOCK
 
@@ -62,6 +85,7 @@ def registry_documents() -> list[Path]:
         config / "runtime-manifest.json.sig",
         config / "control-catalog.json",
     ]
+
 
 PLATFORMS = ["windows-x64", "linux-x64", "linux-arm64", "macos-x64", "macos-arm64"]
 
@@ -177,7 +201,8 @@ UPSTREAM_BINARIES = {
             "macos-x64": "https://github.com/rvben/rumdl/releases/download/v0.2.79/rumdl-v0.2.79-x86_64-apple-darwin.tar.gz",
             "macos-arm64": "https://github.com/rvben/rumdl/releases/download/v0.2.79/rumdl-v0.2.79-aarch64-apple-darwin.tar.gz",
         },
-    },    "shfmt": {
+    },
+    "shfmt": {
         "version": "3.14.1",
         "version_args": ["--version"],
         "bare_binary": True,
@@ -187,6 +212,41 @@ UPSTREAM_BINARIES = {
             "linux-arm64": "https://github.com/mvdan/sh/releases/download/v3.14.1/shfmt_v3.14.1_linux_arm64",
             "macos-x64": "https://github.com/mvdan/sh/releases/download/v3.14.1/shfmt_v3.14.1_darwin_amd64",
             "macos-arm64": "https://github.com/mvdan/sh/releases/download/v3.14.1/shfmt_v3.14.1_darwin_arm64",
+        },
+    },
+    "biome": {
+        "version": "2.6.2",
+        "version_args": ["--version"],
+        "bare_binary": True,
+        "urls": {
+            "windows-x64": "https://github.com/biomejs/biome/releases/download/%40biomejs%2Fbiome%402.6.2/biome-win32-x64.exe",
+            "linux-x64": "https://github.com/biomejs/biome/releases/download/%40biomejs%2Fbiome%402.6.2/biome-linux-x64-musl",
+            "linux-arm64": "https://github.com/biomejs/biome/releases/download/%40biomejs%2Fbiome%402.6.2/biome-linux-arm64-musl",
+            "macos-x64": "https://github.com/biomejs/biome/releases/download/%40biomejs%2Fbiome%402.6.2/biome-darwin-x64",
+            "macos-arm64": "https://github.com/biomejs/biome/releases/download/%40biomejs%2Fbiome%402.6.2/biome-darwin-arm64",
+        },
+    },
+    "osv-scanner": {
+        "version": "2.7.0",
+        "version_args": ["--version"],
+        "bare_binary": True,
+        "urls": {
+            "windows-x64": "https://github.com/google/osv-scanner/releases/download/v2.7.0/osv-scanner_windows_amd64.exe",
+            "linux-x64": "https://github.com/google/osv-scanner/releases/download/v2.7.0/osv-scanner_linux_amd64",
+            "linux-arm64": "https://github.com/google/osv-scanner/releases/download/v2.7.0/osv-scanner_linux_arm64",
+            "macos-x64": "https://github.com/google/osv-scanner/releases/download/v2.7.0/osv-scanner_darwin_amd64",
+            "macos-arm64": "https://github.com/google/osv-scanner/releases/download/v2.7.0/osv-scanner_darwin_arm64",
+        },
+    },
+    "golangci-lint": {
+        "version": "2.15.0",
+        "version_args": ["version"],
+        "urls": {
+            "windows-x64": "https://github.com/golangci/golangci-lint/releases/download/v2.15.0/golangci-lint-2.15.0-windows-amd64.zip",
+            "linux-x64": "https://github.com/golangci/golangci-lint/releases/download/v2.15.0/golangci-lint-2.15.0-linux-amd64.tar.gz",
+            "linux-arm64": "https://github.com/golangci/golangci-lint/releases/download/v2.15.0/golangci-lint-2.15.0-linux-arm64.tar.gz",
+            "macos-x64": "https://github.com/golangci/golangci-lint/releases/download/v2.15.0/golangci-lint-2.15.0-darwin-amd64.tar.gz",
+            "macos-arm64": "https://github.com/golangci/golangci-lint/releases/download/v2.15.0/golangci-lint-2.15.0-darwin-arm64.tar.gz",
         },
     },
     "kubeconform": {
@@ -223,6 +283,8 @@ def sha256_bytes(data: bytes) -> str:
 
 
 def download_cached(url: str, filename: str, retries: int = 5) -> Path:
+    if not url.startswith("https://"):
+        raise ValueError(f"Téléchargement refusé hors HTTPS : {url}")
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     dest = CACHE_DIR / filename
     if dest.exists() and dest.stat().st_size > 0:
@@ -231,15 +293,22 @@ def download_cached(url: str, filename: str, retries: int = 5) -> Path:
     for attempt in range(1, retries + 1):
         try:
             print(f"  [DL] {url} -> {dest.name} (attempt {attempt}/{retries})")
-            req = urllib.request.Request(url, headers={"User-Agent": "Compliance-Platform-Build"})
-            with urllib.request.urlopen(req, timeout=45) as resp, open(dest, "wb") as out:
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "Compliance-Platform-Build"}
+            )
+            with (
+                urllib.request.urlopen(req, timeout=45) as resp,  # nosec B310
+                open(dest, "wb") as out,
+            ):
                 shutil.copyfileobj(resp, out)
             return dest
         except (urllib.error.URLError, urllib.error.HTTPError, OSError) as e:
             if dest.exists():
                 dest.unlink()
             if attempt == retries:
-                raise RuntimeError(f"Download failed after {retries} attempts: {url} -> {e}")
+                raise RuntimeError(
+                    f"Download failed after {retries} attempts: {url} -> {e}"
+                ) from e
             wait = attempt * 3
             print(f"  [RETRY] Download error: {e}. Retrying in {wait}s...")
             time.sleep(wait)
@@ -279,7 +348,9 @@ def extract_binary_from_archive(archive_path: Path, binary_name: str) -> bytes:
     raise RuntimeError(f"Binary {binary_name} not found in {archive_path.name}")
 
 
-def package_single_binary(raw_bytes: bytes, target_filename: str, inner_name: str) -> tuple[Path, str, str]:
+def package_single_binary(
+    raw_bytes: bytes, target_filename: str, inner_name: str
+) -> tuple[Path, str, str]:
     DIST_DIR.mkdir(parents=True, exist_ok=True)
     out_path = DIST_DIR / target_filename
     bin_sha = sha256_bytes(raw_bytes)
@@ -300,7 +371,9 @@ def package_single_binary(raw_bytes: bytes, target_filename: str, inner_name: st
     return out_path, arc_sha, bin_sha
 
 
-def build_native_tool(tool_name: str, platform: str, cfg: dict) -> tuple[str, str, str, str]:
+def build_native_tool(
+    tool_name: str, platform: str, cfg: dict
+) -> tuple[str, str, str, str]:
     version = cfg["version"]
     url = cfg["urls"][platform]
     is_win = platform.startswith("windows")
@@ -350,7 +423,7 @@ def build_python_bundle_windows() -> tuple[str, str, str]:
         checkov_main = checkov_dir / "__main__.py"
         if not checkov_main.exists():
             checkov_main.write_text(
-                "import sys\nfrom checkov.main import Checkov\n\nif __name__ == '__main__':\n    sys.exit(Checkov().run())\n",
+                CHECKOV_MAIN,
                 encoding="utf-8",
             )
 
@@ -360,28 +433,28 @@ def build_python_bundle_windows() -> tuple[str, str, str]:
     with tarfile.open(out_path, "w:gz") as tf:
         for root, dirs, files in os.walk(src_python):
             # Exclude pycache and test caches
-            dirs[:] = [d for d in dirs if d not in ("__pycache__", ".pytest_cache", ".ruff_cache")]
+            dirs[:] = [
+                d
+                for d in dirs
+                if d not in ("__pycache__", ".pytest_cache", ".ruff_cache")
+            ]
             rel_dir = Path(root).relative_to(src_python)
             for file in files:
                 if file.endswith((".pyc", ".pyo")):
                     continue
                 src_file = Path(root) / file
                 arc_member = f"python/{rel_dir / file}".replace("\\", "/")
-                
+
                 # If it's a script with a hardcoded shebang, sanitize it
                 content = None
-                if "Scripts" in src_file.parts and not file.endswith((".exe", ".dll", ".pyd")):
+                if "Scripts" in src_file.parts and not file.endswith(
+                    (".exe", ".dll", ".pyd")
+                ):
                     try:
-                        raw = src_file.read_bytes()
-                        if raw.startswith(b"#!"):
-                            lines = raw.split(b"\n", 1)
-                            if b"python" in lines[0].lower():
-                                new_shebang = b"#!/usr/bin/env python"
-                                rest = lines[1] if len(lines) > 1 else b""
-                                content = new_shebang + b"\n" + rest
+                        content = relocatable_script(src_file.read_bytes(), b"python")
                     except OSError:
-                        pass
-                
+                        content = None
+
                 if content is not None:
                     ti = tarfile.TarInfo(name=arc_member)
                     ti.size = len(content)
@@ -390,7 +463,9 @@ def build_python_bundle_windows() -> tuple[str, str, str]:
                     tf.addfile(ti, io.BytesIO(content))
                 else:
                     ti = tf.gettarinfo(src_file, arcname=arc_member)
-                    ti.mode = 0o755 if file.endswith((".exe", ".cmd", ".bat")) else 0o644
+                    ti.mode = (
+                        0o755 if file.endswith((".exe", ".cmd", ".bat")) else 0o644
+                    )
                     with open(src_file, "rb") as f:
                         tf.addfile(ti, f)
 
@@ -398,43 +473,171 @@ def build_python_bundle_windows() -> tuple[str, str, str]:
     return out_name, arc_sha, "python/python.exe"
 
 
-def build_node_bundle_windows() -> tuple[str, str, str]:
-    node_version = LOCK["node"]["node"]
-    out_name = f"windows-x64-node-tools-{node_version}.zip"
-    out_path = DIST_DIR / out_name
-    print(f"  [BUNDLE] Building Node {node_version} bundle for windows-x64...")
+def relocatable_script(raw: bytes, interpreter: bytes) -> bytes | None:
+    """A pip launcher whose shebang points to the build machine's python, rewritten
+    to `#!/usr/bin/env <interpreter>`; None when the file is not such a script."""
+    if not raw.startswith(b"#!"):
+        return None
+    first, _, rest = raw.partition(b"\n")
+    if b"python" not in first.lower():
+        return None
+    return b"#!/usr/bin/env " + interpreter + b"\n" + rest
 
-    node_url = f"https://nodejs.org/dist/v{node_version}/win-x64/node.exe"
-    cached_node = download_cached(node_url, f"node-v{node_version}-win-x64.exe")
 
+# npm package -> (command, tools-lock key). The packages are plain JavaScript:
+# they are installed once and shipped with the node binary of each platform.
+NODE_TOOLS = {
+    "eslint": ("eslint", "eslint"),
+    "typescript": ("tsc", "typescript"),
+    "stylelint": ("stylelint", "stylelint"),
+    "htmlhint": ("htmlhint", "htmlhint"),
+}
+NODE_DIST = {
+    "windows-x64": "win-x64",
+    "linux-x64": "linux-x64",
+    "linux-arm64": "linux-arm64",
+    "macos-x64": "darwin-x64",
+    "macos-arm64": "darwin-arm64",
+}
+
+
+@functools.lru_cache(maxsize=1)
+def install_node_packages() -> Path:
+    """npm install of every Node tool, once per run, from any host."""
     tmp_dir = Path(tempfile.mkdtemp(prefix="node-bundle-"))
-    try:
-        npm_cmd = shutil.which("npm.cmd") or shutil.which("npm") or "npm"
-        subprocess.run(
-            [npm_cmd, "install", "--prefix", str(tmp_dir), f"eslint@{LOCK['node']['eslint']}", f"typescript@{LOCK['node']['typescript']}", "--no-audit", "--no-fund"],
-            check=True,
-            capture_output=True,
+    npm_cmd = shutil.which("npm.cmd") or shutil.which("npm") or "npm"
+    specs = [
+        f"{package}@{LOCK['node'][key]}" for package, (_, key) in NODE_TOOLS.items()
+    ]
+    subprocess.run(  # nosec B603
+        [
+            npm_cmd,
+            "install",
+            "--prefix",
+            str(tmp_dir),
+            *specs,
+            "--no-audit",
+            "--no-fund",
+            "--save-exact",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return tmp_dir
+
+
+def node_bin_links(modules: Path) -> dict[str, str]:
+    """Launcher name -> script path relative to node_modules/.bin, from each package.json "bin"."""
+    links = {}
+    for package in NODE_TOOLS:
+        manifest = json.loads(
+            (modules / package / "package.json").read_text(encoding="utf-8")
         )
+        bins = manifest.get("bin") or {}
+        if isinstance(bins, str):
+            bins = {manifest["name"]: bins}
+        for name, rel in bins.items():
+            links[name] = posixpath.normpath(f"../{package}/{rel}")
+    return links
 
-        DIST_DIR.mkdir(parents=True, exist_ok=True)
+
+def build_node_bundle(platform: str) -> tuple[str, str, str]:
+    """Node runtime plus the Node tools. Windows: zip with .cmd launchers.
+    Linux and macOS: tar.gz with node/bin/node (0755) and .bin symbolic links."""
+    node_version = LOCK["node"]["node"]
+    windows = platform.startswith("windows")
+    out_name = f"{platform}-node-tools-{node_version}{'.zip' if windows else '.tar.gz'}"
+    out_path = DIST_DIR / out_name
+    print(f"  [BUNDLE] Building Node {node_version} bundle for {platform}...")
+    modules = install_node_packages() / "node_modules"
+    links = node_bin_links(modules)
+    DIST_DIR.mkdir(parents=True, exist_ok=True)
+
+    def module_files():
+        for folder, _, files in os.walk(modules):
+            rel_dir = Path(folder).relative_to(modules)
+            if rel_dir.parts[:1] == (".bin",):
+                continue  # launchers are generated per platform below
+            for file in files:
+                yield (
+                    Path(folder) / file,
+                    f"node/node_modules/{(rel_dir / file).as_posix()}".replace(
+                        "/./", "/"
+                    ),
+                )
+
+    if windows:
+        node_url = f"https://nodejs.org/dist/v{node_version}/win-x64/node.exe"
+        cached_node = download_cached(node_url, f"node-v{node_version}-win-x64.exe")
         with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            with open(cached_node, "rb") as f:
-                node_bytes = f.read()
-            zf.writestr("node/node.exe", node_bytes, compress_type=zipfile.ZIP_DEFLATED)
+            zf.write(cached_node, "node/node.exe")
+            for src, member in module_files():
+                zf.write(src, member)
+            for name, target in links.items():
+                script = target.replace("/", "\\")
+                zf.writestr(
+                    f"node/node_modules/.bin/{name}.cmd",
+                    f'@"%~dp0\\..\\..\\node.exe" "%~dp0\\{script}" %*\r\n',
+                )
+        return out_name, sha256_file(out_path), "node/node.exe"
 
-            node_modules = tmp_dir / "node_modules"
-            for root, dirs, files in os.walk(node_modules):
-                rel_dir = Path(root).relative_to(tmp_dir)
-                for file in files:
-                    src_file = Path(root) / file
-                    arc_member = f"node/{rel_dir / file}".replace("\\", "/")
-                    with open(src_file, "rb") as f:
-                        zf.writestr(arc_member, f.read(), compress_type=zipfile.ZIP_DEFLATED)
-    finally:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+    dist = NODE_DIST[platform]
+    tarball = download_cached(
+        f"https://nodejs.org/dist/v{node_version}/node-v{node_version}-{dist}.tar.gz",
+        f"node-v{node_version}-{dist}.tar.gz",
+    )
+    with tarfile.open(tarball, "r:gz") as source:
+        node_bytes = source.extractfile(f"node-v{node_version}-{dist}/bin/node").read()
+    with tarfile.open(out_path, "w:gz") as tf:
+        info = tarfile.TarInfo("node/bin/node")
+        info.size, info.mode = len(node_bytes), 0o755
+        tf.addfile(info, io.BytesIO(node_bytes))
+        for src, member in module_files():
+            info = tf.gettarinfo(str(src), member)
+            info.mode = 0o755 if info.mode & 0o111 else 0o644
+            info.uid = info.gid = 0
+            info.uname = info.gname = ""
+            with open(src, "rb") as handle:
+                tf.addfile(info, handle)
+        for name, target in links.items():
+            info = tarfile.TarInfo(f"node/node_modules/.bin/{name}")
+            info.type, info.linkname, info.mode = tarfile.SYMTYPE, target, 0o777
+            tf.addfile(info)
+    return out_name, sha256_file(out_path), "node/bin/node"
 
-    arc_sha = sha256_file(out_path)
-    return out_name, arc_sha, "node/node.exe"
+
+def build_node_bundle_windows() -> tuple[str, str, str]:
+    return build_node_bundle("windows-x64")
+
+
+def node_rows(platform: str, arc: str, sha: str, node_bin: str) -> dict:
+    """Manifest entries of the Node bundle: the runtime and one entry per tool."""
+    suffix = ".cmd" if platform.startswith("windows") else ""
+    rows = {
+        "node": {
+            "name": "node",
+            "version": LOCK["node"]["node"],
+            "install": "bundle",
+            "archive": arc,
+            "archive_sha256": sha,
+            "binary_in_archive": node_bin,
+            "binary_sha256": "",
+            "version_args": ["-v"],
+        }
+    }
+    for command, key in NODE_TOOLS.values():
+        rows[command] = {
+            "name": command,
+            "version": LOCK["node"][key],
+            "install": "bundle",
+            "bundle": "node",
+            "archive": arc,
+            "archive_sha256": sha,
+            "binary_in_archive": f"node/node_modules/.bin/{command}{suffix}",
+            "binary_sha256": "",
+            "version_args": ["-v"] if command == "tsc" else ["--version"],
+        }
+    return rows
 
 
 def build_psscriptanalyzer_bundle_windows() -> tuple[str, str, str]:
@@ -447,18 +650,27 @@ def build_psscriptanalyzer_bundle_windows() -> tuple[str, str, str]:
     cached_nupkg = download_cached(ps_url, f"PSScriptAnalyzer-{ps_version}.nupkg")
 
     DIST_DIR.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(cached_nupkg) as src_zf, zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as dst_zf:
+    with (
+        zipfile.ZipFile(cached_nupkg) as src_zf,
+        zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as dst_zf,
+    ):
         for item in src_zf.infolist():
             if item.is_dir() or item.filename.startswith(("_rels/", "package/")):
                 continue
             if item.filename.endswith((".nuspec", "[Content_Types].xml")):
                 continue
             data = src_zf.read(item)
-            arc_name = f"powershell-modules/PSScriptAnalyzer/{item.filename}".replace("\\", "/")
+            arc_name = f"powershell-modules/PSScriptAnalyzer/{item.filename}".replace(
+                "\\", "/"
+            )
             dst_zf.writestr(arc_name, data, compress_type=zipfile.ZIP_DEFLATED)
 
     arc_sha = sha256_file(out_path)
-    return out_name, arc_sha, "powershell-modules/PSScriptAnalyzer/PSScriptAnalyzer.psd1"
+    return (
+        out_name,
+        arc_sha,
+        "powershell-modules/PSScriptAnalyzer/PSScriptAnalyzer.psd1",
+    )
 
 
 def package_posix_cpython(platform: str) -> tuple[str, str, str]:
@@ -474,6 +686,8 @@ def package_posix_cpython(platform: str) -> tuple[str, str, str]:
 
 
 def sign_manifest(manifest_bytes: bytes, key_path: Path) -> str:
+    (REPO_ROOT / ".tools").mkdir(parents=True, exist_ok=True)
+    (REPO_ROOT / ".tools" / "manifest-to-sign.json").write_bytes(manifest_bytes)
     tmp_go = REPO_ROOT / ".tools" / "temp_signer.go"
     code = f"""package main
 import (
@@ -486,7 +700,7 @@ func main() {{
     keyBytes, err := os.ReadFile({json.dumps(str(key_path))})
     if err != nil {{ fmt.Fprintf(os.Stderr, "key read: %v\\n", err); os.Exit(1) }}
     priv := ed25519.NewKeyFromSeed(keyBytes)
-    manifestBytes, err := os.ReadFile({json.dumps(str(REPO_ROOT / ".config" / "runtime-manifest.json"))})
+    manifestBytes, err := os.ReadFile({json.dumps(str(REPO_ROOT / ".tools" / "manifest-to-sign.json"))})
     if err != nil {{ fmt.Fprintf(os.Stderr, "manifest read: %v\\n", err); os.Exit(1) }}
     sig := ed25519.Sign(priv, manifestBytes)
     fmt.Print(hex.EncodeToString(sig))
@@ -495,7 +709,12 @@ func main() {{
     with open(tmp_go, "w", encoding="utf-8") as f:
         f.write(code)
     try:
-        res = subprocess.run([str(GO_BINARY), "run", str(tmp_go)], check=True, capture_output=True, text=True)
+        res = subprocess.run(  # nosec B603
+            [str(GO_BINARY), "run", str(tmp_go)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
         return res.stdout.strip()
     finally:
         if tmp_go.exists():
@@ -506,54 +725,93 @@ def get_github_token() -> str:
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if token:
         return token
-    res = subprocess.run(["git", "credential", "fill"], input="protocol=https\nhost=github.com\n", text=True, capture_output=True, check=False)
+    res = subprocess.run(  # nosec B603
+        [shutil.which("git") or "git", "credential", "fill"],
+        input="protocol=https\nhost=github.com\n",
+        text=True,
+        capture_output=True,
+        check=False,
+    )
     for line in res.stdout.splitlines():
         if line.startswith("password="):
             return line.split("=", 1)[1]
-    raise RuntimeError("GitHub Token not found in GH_TOKEN, GITHUB_TOKEN or git credential")
+    raise RuntimeError(
+        "GitHub Token not found in GH_TOKEN, GITHUB_TOKEN or git credential"
+    )
 
 
 def publish_github_release(tag: str, assets: list[Path], repo_slug: str = REPO_SLUG):
-    print(f"\n[RELEASE] Publishing {len(assets)} assets to GitHub Release {tag} on {repo_slug}...")
-    gh_bin = REPO_ROOT / ".tools" / "bin" / ("gh.exe" if sys.platform == "win32" else "gh")
+    print(
+        f"\n[RELEASE] Publishing {len(assets)} assets to GitHub Release {tag} on {repo_slug}..."
+    )
+    gh_bin = (
+        REPO_ROOT / ".tools" / "bin" / ("gh.exe" if sys.platform == "win32" else "gh")
+    )
     token = get_github_token()
     env = os.environ.copy()
     env["GH_TOKEN"] = token
 
     check_cmd = [str(gh_bin), "release", "view", tag, "--repo", repo_slug]
-    res = subprocess.run(check_cmd, env=env, capture_output=True, text=True, check=False)
+    res = subprocess.run(  # nosec B603
+        check_cmd, env=env, capture_output=True, text=True, check=False
+    )
     if res.returncode != 0:
         print(f"Creating release {tag} on {repo_slug}...")
         create_cmd = [
-            str(gh_bin), "release", "create", tag,
-            "--repo", repo_slug,
-            "--title", "Compliance Platform Tools Registry v1",
-            "--notes", "Self-hosted relocatable tools registry for Compliance Platform v2.1.0. runtime-manifest.json and control-catalog.json are release assets.",
+            str(gh_bin),
+            "release",
+            "create",
+            tag,
+            "--repo",
+            repo_slug,
+            "--title",
+            "Compliance Platform Tools Registry v1",
+            "--notes",
+            (
+                "Self-hosted relocatable tools registry for Compliance Platform v2.1.0. "
+                "runtime-manifest.json and control-catalog.json are release assets."
+            ),
         ]
-        subprocess.run(create_cmd, env=env, check=True)
+        subprocess.run(create_cmd, env=env, check=True)  # nosec B603
 
     print("Uploading assets to release...")
     batch_size = 5
     for i in range(0, len(assets), batch_size):
-        chunk = assets[i:i + batch_size]
-        upload_cmd = [str(gh_bin), "release", "upload", tag, "--repo", repo_slug, "--clobber"] + [str(p) for p in chunk]
+        chunk = assets[i : i + batch_size]
+        upload_cmd = [
+            str(gh_bin),
+            "release",
+            "upload",
+            tag,
+            "--repo",
+            repo_slug,
+            "--clobber",
+        ] + [str(p) for p in chunk]
         for attempt in range(1, 6):
-            res = subprocess.run(upload_cmd, env=env, capture_output=True, text=True, check=False)
+            res = subprocess.run(  # nosec B603
+                upload_cmd, env=env, capture_output=True, text=True, check=False
+            )
             if res.returncode == 0:
-                print(f"  Uploaded {min(i + len(chunk), len(assets))}/{len(assets)} assets.")
+                print(
+                    f"  Uploaded {min(i + len(chunk), len(assets))}/{len(assets)} assets."
+                )
                 break
-            print(f"  [RETRY] Upload chunk failed ({res.stderr.strip()}). Retrying in {attempt * 2}s (attempt {attempt}/5)...")
+            print(
+                f"  [RETRY] Upload chunk failed ({res.stderr.strip()}). "
+                f"Retrying in {attempt * 2}s (attempt {attempt}/5)..."
+            )
             time.sleep(attempt * 2)
             if attempt == 5:
-                raise subprocess.CalledProcessError(res.returncode, upload_cmd, output=res.stdout, stderr=res.stderr)
+                raise subprocess.CalledProcessError(
+                    res.returncode, upload_cmd, output=res.stdout, stderr=res.stderr
+                )
     print("[PASS] All assets successfully uploaded to release!")
 
 
 def host_matches_platform(plat: str) -> bool:
     if sys.platform == "win32":
         return plat == "windows-x64"
-    import platform as sys_plat
-    mach = sys_plat.machine().lower()
+    mach = platform.machine().lower()
     if sys.platform == "linux":
         if mach in ("x86_64", "amd64"):
             return plat == "linux-x64"
@@ -568,7 +826,8 @@ def host_matches_platform(plat: str) -> bool:
 
 
 def build_python_bundle_posix(plat: str) -> tuple[str, str, str]:
-    """Builds a relocatable Python bundle on Linux/macOS with checkov, bandit, pylint, pytest, pip-audit, yamllint, ansible-lint."""
+    """Builds a relocatable Python bundle on Linux/macOS with checkov, bandit,
+    pylint, pytest, pip-audit, yamllint and ansible-lint."""
     out_name = f"{plat}-python-tools-{LOCK['python']['cpython']}.tar.gz"
     out_path = DIST_DIR / out_name
     print(f"  [BUNDLE] Building relocatable Python bundle for {plat}...")
@@ -580,7 +839,8 @@ def build_python_bundle_posix(plat: str) -> tuple[str, str, str]:
     tmp_dir = Path(tempfile.mkdtemp(prefix=f"py-bundle-{plat}-"))
     try:
         with tarfile.open(src_tar, "r:gz") as tf:
-            tf.extractall(tmp_dir)
+            # The "data" filter rejects absolute paths, ../ and device files.
+            tf.extractall(tmp_dir, filter="data")
 
         py_bin = tmp_dir / "python" / "bin" / "python3"
         if not py_bin.exists():
@@ -595,8 +855,16 @@ def build_python_bundle_posix(plat: str) -> tuple[str, str, str]:
             f"yamllint=={LOCK['python']['yamllint']}",
             f"ansible-lint=={LOCK['python']['ansible-lint']}",
         ]
-        subprocess.run(
-            [str(py_bin), "-m", "pip", "install", "--no-cache-dir", "--no-warn-script-location"] + pip_pkgs,
+        subprocess.run(  # nosec B603
+            [
+                str(py_bin),
+                "-m",
+                "pip",
+                "install",
+                "--no-cache-dir",
+                "--no-warn-script-location",
+            ]
+            + pip_pkgs,
             check=True,
         )
 
@@ -604,7 +872,7 @@ def build_python_bundle_posix(plat: str) -> tuple[str, str, str]:
             main_py = p / "__main__.py"
             if not main_py.exists():
                 main_py.write_text(
-                    "import sys\nfrom checkov.main import Checkov\n\nif __name__ == '__main__':\n    sys.exit(Checkov().run())\n",
+                    CHECKOV_MAIN,
                     encoding="utf-8",
                 )
 
@@ -613,15 +881,11 @@ def build_python_bundle_posix(plat: str) -> tuple[str, str, str]:
             for item in bin_dir.iterdir():
                 if item.is_file() and not item.is_symlink():
                     try:
-                        raw = item.read_bytes()
-                        if raw.startswith(b"#!"):
-                            lines = raw.split(b"\n", 1)
-                            if b"python" in lines[0].lower():
-                                new_shebang = b"#!/usr/bin/env python3"
-                                rest = lines[1] if len(lines) > 1 else b""
-                                item.write_bytes(new_shebang + b"\n" + rest)
+                        rewritten = relocatable_script(item.read_bytes(), b"python3")
                     except OSError:
-                        pass
+                        rewritten = None
+                    if rewritten is not None:
+                        item.write_bytes(rewritten)
 
         DIST_DIR.mkdir(parents=True, exist_ok=True)
         with tarfile.open(out_path, "w:gz") as tf:
@@ -631,9 +895,17 @@ def build_python_bundle_posix(plat: str) -> tuple[str, str, str]:
                     if file.endswith((".pyc", ".pyo")):
                         continue
                     src_file = Path(root) / file
-                    arc_member = f"python/{src_file.relative_to(tmp_dir / 'python')}".replace("\\", "/")
+                    arc_member = (
+                        f"python/{src_file.relative_to(tmp_dir / 'python')}".replace(
+                            "\\", "/"
+                        )
+                    )
                     ti = tf.gettarinfo(src_file, arcname=arc_member)
-                    ti.mode = 0o755 if ("bin" in src_file.parts or file.endswith((".sh",))) else 0o644
+                    ti.mode = (
+                        0o755
+                        if ("bin" in src_file.parts or file.endswith((".sh",)))
+                        else 0o644
+                    )
                     with open(src_file, "rb") as f:
                         tf.addfile(ti, f)
 
@@ -659,7 +931,9 @@ def python_rows(include_ansible: bool = False) -> list[tuple[str, str, str]]:
 
 def write_signed_manifest(manifest: dict) -> None:
     manifest_json_path = REPO_ROOT / ".config" / "runtime-manifest.json"
-    manifest_bytes = json.dumps(manifest, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
+    manifest_bytes = (
+        json.dumps(manifest, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
+    )
     manifest_json_path.write_bytes(manifest_bytes)
     sig_hex = sign_manifest(manifest_bytes, ED25519_KEY_PATH)
     sig_path = REPO_ROOT / ".config" / "runtime-manifest.json.sig"
@@ -671,7 +945,9 @@ def write_signed_manifest(manifest: dict) -> None:
     print("[MANIFEST] Manifeste signé et recopié dans les assets embarqués")
 
 
-def native_entry(tool_name: str, cfg: dict, out_arc: str, arc_sha: str, inner_bin: str, bin_sha: str) -> dict:
+def native_entry(tool_name: str, cfg: dict, built: tuple[str, str, str, str]) -> dict:
+    """Manifest entry of a native tool; built is (archive, archive_sha256, binary_in_archive, binary_sha256)."""
+    out_arc, arc_sha, inner_bin, bin_sha = built
     return {
         "name": tool_name,
         "version": cfg["version"],
@@ -693,21 +969,20 @@ def build_only(tool: str, args) -> None:
         for plat in PLATFORMS:
             out_arc, arc_sha, inner_bin, bin_sha = build_native_tool(tool, plat, cfg)
             assets.append(DIST_DIR / out_arc)
-            manifest["platforms"][plat]["tools"][tool] = native_entry(tool, cfg, out_arc, arc_sha, inner_bin, bin_sha)
-    elif tool in {"node", "eslint", "tsc", "typescript"}:
-        node_arc, node_sha, node_bin = build_node_bundle_windows()
-        assets.append(DIST_DIR / node_arc)
-        tools = manifest["platforms"]["windows-x64"]["tools"]
-        tools["node"]["version"] = LOCK["node"]["node"]
-        tools["node"]["archive"] = node_arc
-        tools["node"]["archive_sha256"] = node_sha
-        tools["node"]["binary_in_archive"] = node_bin
-        tools["eslint"]["version"] = LOCK["node"]["eslint"]
-        tools["eslint"]["archive"] = node_arc
-        tools["eslint"]["archive_sha256"] = node_sha
-        tools["tsc"]["version"] = LOCK["node"]["typescript"]
-        tools["tsc"]["archive"] = node_arc
-        tools["tsc"]["archive_sha256"] = node_sha
+            manifest["platforms"][plat]["tools"][tool] = native_entry(
+                tool, cfg, (out_arc, arc_sha, inner_bin, bin_sha)
+            )
+    elif tool in {
+        "node",
+        "typescript",
+        *(command for command, _ in NODE_TOOLS.values()),
+    }:
+        for plat in PLATFORMS:
+            node_arc, node_sha, node_bin = build_node_bundle(plat)
+            assets.append(DIST_DIR / node_arc)
+            manifest["platforms"][plat]["tools"].update(
+                node_rows(plat, node_arc, node_sha, node_bin)
+            )
     elif tool in {"PSScriptAnalyzer", "Invoke-ScriptAnalyzer"}:
         ps_arc, ps_sha, ps_bin = build_psscriptanalyzer_bundle_windows()
         assets.append(DIST_DIR / ps_arc)
@@ -719,10 +994,15 @@ def build_only(tool: str, args) -> None:
             tools[alias]["binary_in_archive"] = ps_bin
     elif tool == "python" or tool in LOCK.get("python", {}):
         if not host_matches_platform("windows-x64"):
-            raise SystemExit("La mise à jour d'un paquet Python se fait sur l'hôte Windows x64 qui détient .tools/python.")
+            raise SystemExit(
+                "La mise à jour d'un paquet Python se fait sur l'hôte Windows x64 qui détient .tools/python."
+            )
         py = REPO_ROOT / ".tools" / "python" / "python.exe"
         if tool not in {"python", "cpython"}:
-            subprocess.run([str(py), "-m", "pip", "install", f"{tool}=={LOCK['python'][tool]}"], check=True)
+            subprocess.run(  # nosec B603
+                [str(py), "-m", "pip", "install", f"{tool}=={LOCK['python'][tool]}"],
+                check=True,
+            )
         py_arc, py_sha, py_bin = build_python_bundle_windows()
         assets.append(DIST_DIR / py_arc)
         tools = manifest["platforms"]["windows-x64"]["tools"]
@@ -738,7 +1018,15 @@ def build_only(tool: str, args) -> None:
             tools[name]["archive_sha256"] = py_sha
             tools[name]["python_module"] = module
     else:
-        known = ", ".join(sorted(UPSTREAM_BINARIES) + ["python", "node", "eslint", "tsc", "PSScriptAnalyzer"])
+        known = ", ".join(
+            sorted(UPSTREAM_BINARIES)
+            + [
+                "python",
+                "node",
+                *(command for command, _ in NODE_TOOLS.values()),
+                "PSScriptAnalyzer",
+            ]
+        )
         raise SystemExit(f"Outil inconnu : {tool}. Outils : {known}")
     write_signed_manifest(manifest)
     if args.dry_run or args.skip_upload:
@@ -748,13 +1036,37 @@ def build_only(tool: str, args) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Build and publish Compliance Platform tools registry")
-    parser.add_argument("--repo", default=REPO_SLUG, help=f"GitHub repository slug (default: {REPO_SLUG})")
-    parser.add_argument("--tag", default=RELEASE_TAG, help=f"GitHub release tag (default: {RELEASE_TAG})")
-    parser.add_argument("--dry-run", action="store_true", help="Build and measure archives, generate manifest, but do not upload")
-    parser.add_argument("--skip-upload", action="store_true", help="Skip uploading to GitHub Releases")
-    parser.add_argument("--only", default="", help="Reconstruit et publie un seul outil, plus le manifeste et le catalogue")
-    parser.add_argument("--publish-registry", action="store_true", help="Publie runtime-manifest.json, sa signature et control-catalog.json sans reconstruire les archives")
+    parser = argparse.ArgumentParser(
+        description="Build and publish Compliance Platform tools registry"
+    )
+    parser.add_argument(
+        "--repo",
+        default=REPO_SLUG,
+        help=f"GitHub repository slug (default: {REPO_SLUG})",
+    )
+    parser.add_argument(
+        "--tag",
+        default=RELEASE_TAG,
+        help=f"GitHub release tag (default: {RELEASE_TAG})",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Build and measure archives, generate manifest, but do not upload",
+    )
+    parser.add_argument(
+        "--skip-upload", action="store_true", help="Skip uploading to GitHub Releases"
+    )
+    parser.add_argument(
+        "--only",
+        default="",
+        help="Reconstruit et publie un seul outil, plus le manifeste et le catalogue",
+    )
+    parser.add_argument(
+        "--publish-registry",
+        action="store_true",
+        help="Publie runtime-manifest.json, sa signature et control-catalog.json sans reconstruire les archives",
+    )
     args = parser.parse_args()
     load_tool_lock()
     if args.only:
@@ -769,9 +1081,13 @@ def main():
 
     registry_base_url = f"https://github.com/{args.repo}/releases/download/{args.tag}"
 
-    print("================================================================================")
+    print(
+        "================================================================================"
+    )
     print(f"Building Compliance Platform Tools Registry ({args.tag}) on {args.repo}")
-    print("================================================================================")
+    print(
+        "================================================================================"
+    )
 
     manifest_platforms = {}
     built_assets = []
@@ -780,7 +1096,9 @@ def main():
         print(f"\nProcessing platform {plat}...")
         plat_tools = {}
         for tool_name, cfg in UPSTREAM_BINARIES.items():
-            out_arc, arc_sha, inner_bin, bin_sha = build_native_tool(tool_name, plat, cfg)
+            out_arc, arc_sha, inner_bin, bin_sha = build_native_tool(
+                tool_name, plat, cfg
+            )
             built_assets.append(DIST_DIR / out_arc)
             plat_tools[tool_name] = {
                 "name": tool_name,
@@ -821,41 +1139,6 @@ def main():
                     "binary_sha256": "",
                     "version_args": ["--version"],
                 }
-
-            node_arc, node_sha, node_bin = build_node_bundle_windows()
-            built_assets.append(DIST_DIR / node_arc)
-            plat_tools["node"] = {
-                "name": "node",
-                "version": LOCK["node"]["node"],
-                "install": "bundle",
-                "archive": node_arc,
-                "archive_sha256": node_sha,
-                "binary_in_archive": node_bin,
-                "binary_sha256": "",
-                "version_args": ["-v"],
-            }
-            plat_tools["eslint"] = {
-                "name": "eslint",
-                "version": LOCK["node"]["eslint"],
-                "install": "bundle",
-                "bundle": "node",
-                "archive": node_arc,
-                "archive_sha256": node_sha,
-                "binary_in_archive": "node/node_modules/.bin/eslint.cmd",
-                "binary_sha256": "",
-                "version_args": ["--version"],
-            }
-            plat_tools["tsc"] = {
-                "name": "tsc",
-                "version": LOCK["node"]["typescript"],
-                "install": "bundle",
-                "bundle": "node",
-                "archive": node_arc,
-                "archive_sha256": node_sha,
-                "binary_in_archive": "node/node_modules/.bin/tsc.cmd",
-                "binary_sha256": "",
-                "version_args": ["-v"],
-            }
 
             ps_arc, ps_sha, ps_bin = build_psscriptanalyzer_bundle_windows()
             built_assets.append(DIST_DIR / ps_arc)
@@ -914,6 +1197,10 @@ def main():
                     "version_args": ["--version"],
                 }
 
+        node_arc, node_sha, node_bin = build_node_bundle(plat)
+        built_assets.append(DIST_DIR / node_arc)
+        plat_tools.update(node_rows(plat, node_arc, node_sha, node_bin))
+
         manifest_platforms[plat] = {
             "status": "qualified" if plat == "windows-x64" else "targeted",
             "tools": plat_tools,
@@ -932,7 +1219,9 @@ def main():
     }
 
     manifest_json_path = REPO_ROOT / ".config" / "runtime-manifest.json"
-    manifest_bytes = json.dumps(manifest, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
+    manifest_bytes = (
+        json.dumps(manifest, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
+    )
     with open(manifest_json_path, "wb") as f:
         f.write(manifest_bytes)
     print(f"\n[MANIFEST] Written schema 3 manifest to {manifest_json_path}")
@@ -962,7 +1251,9 @@ def main():
         print("\n[INFO] Dry-run or skip-upload active: skipped release publishing.")
         return
 
-    publish_github_release(args.tag, unique_assets + registry_documents(), repo_slug=args.repo)
+    publish_github_release(
+        args.tag, unique_assets + registry_documents(), repo_slug=args.repo
+    )
 
 
 if __name__ == "__main__":

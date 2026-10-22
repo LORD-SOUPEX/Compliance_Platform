@@ -3,6 +3,10 @@ jobs = 1
 
 [FORMAT]
 max-line-length = 120
+# Download URLs in tables stay on one line: wrapping them would only hide them.
+ignore-long-lines = ^\s*(# )?<?https?://\S+>?$|^\s*"[\w.-]+": "https?://\S+",?$
+# The registry build script gathers every platform in one place on purpose.
+max-module-lines = 1500
 
 [MESSAGES CONTROL]
 disable =

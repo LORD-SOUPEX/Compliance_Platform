@@ -618,3 +618,28 @@ func TestManifestAndYAMLFileSelection(t *testing.T) {
 		t.Fatalf("own YAML files without templates or sub-folders expected, got %v", files)
 	}
 }
+
+func TestRuffFormatDiffWithBracesIsStillRead(t *testing.T) {
+	stdout := "unformatted: File would be reformatted\n --> build.py:37:13\n   |\n   - x = {}\n   + x = []\n\nunformatted: File would be reformatted\n --> pkg/tool.py:3:1\n"
+	leaks := parseRuff(stdout, "")
+	if len(leaks) != 2 || leaks[0].File != "build.py" || leaks[0].Line != 37 || leaks[1].File != "pkg/tool.py" {
+		t.Fatalf("ruff format = %+v", leaks)
+	}
+}
+
+func TestTSConfigProjectsSkipDiscoveryFolders(t *testing.T) {
+	repo := t.TempDir()
+	for _, name := range []string{"tsconfig.json", "app/tsconfig.json", "app/tsconfig.build.json", ".vscode-test/vscode/ext/tsconfig.json", "node_modules/x/tsconfig.json"} {
+		path := filepath.Join(repo, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	projects := tsconfigProjects(repo)
+	if len(projects) != 2 {
+		t.Fatalf("projects = %v", projects)
+	}
+}

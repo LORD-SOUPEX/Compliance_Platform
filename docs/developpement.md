@@ -19,7 +19,9 @@ npm run test:webview
 
 `npm run lint` applique ESLint (`eslint.config.mjs`, règles typées strictes) à l'extension. `npm run test:unit` compile puis lance les tests `node:test` de `src/test/unit` (analyseur SSE, journal, client du démon), sans VS Code ni binaire. `golangci-lint` lit `core/.golangci.yml`.
 
-Les fichiers Go sont en fin de ligne LF sur tous les OS (`.gitattributes`), ce que `gofmt` exige.
+Les fichiers Go sont en fin de ligne LF sur tous les OS (`.gitattributes`), ce que `gofmt` exige. Le JavaScript, le TypeScript, le CSS et le JSON suivent `biome.json` (`biome format --write`) ; les scripts Python passent `ruff format`, `ruff check`, `pylint --rcfile .pylintrc` et `bandit`.
+
+Le dépôt s'audite lui-même avec le moteur (`compliance run -repo . -allow-code -allow-network`) : chaque contrôle exécuté doit réussir.
 
 ## Démo multi-technologies
 
@@ -32,17 +34,19 @@ export COMPLIANCE_TOOLS_DIR="$PWD/.tools/registry"
 python scripts/check_benchmark.py benchmark.json --min-executed 25
 ```
 
-Le vérificateur exige les 15 technologies, aucune erreur d'exécution, une anomalie localisée pour chaque contrôle en échec et un processus enregistré pour chaque contrôle exécuté.
+Le vérificateur exige les 19 technologies, aucune erreur d'exécution, une anomalie localisée pour chaque contrôle en échec et un processus enregistré pour chaque contrôle exécuté.
 
 ## Registre `tools-v1`
 
-`scripts/build_and_publish_tools.py` reconditionne les 10 binaires natifs pour les cinq plateformes, assemble les bundles Python, Node et `PSScriptAnalyzer`, calcule les SHA-256, met à jour `.config/runtime-manifest.json` et publie les assets aplatis sur la release GitHub `tools-v1`, y compris `runtime-manifest.json`, `runtime-manifest.json.sig` et `control-catalog.json`.
+`scripts/build_and_publish_tools.py` reconditionne les 15 binaires natifs pour les cinq plateformes, assemble le bundle Node des cinq plateformes depuis n'importe quel hôte, les bundles Python (hôte natif) et `PSScriptAnalyzer`, calcule les SHA-256, met à jour `.config/runtime-manifest.json` et publie les assets aplatis sur la release GitHub `tools-v1`, y compris `runtime-manifest.json`, `runtime-manifest.json.sig` et `control-catalog.json`.
 
 Les versions sont dans `.config/tools-lock.json`. Pour publier un seul linter sans reconstruire les autres archives :
 
 ```bash
 py scripts/build_and_publish_tools.py --only ruff
 ```
+
+`--only stylelint` (ou `eslint`, `tsc`, `htmlhint`, `node`) reconstruit le bundle Node des cinq plateformes.
 
 Pour republier uniquement le manifeste et le catalogue déjà signés :
 

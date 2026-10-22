@@ -174,7 +174,8 @@ func TestBuiltInSecretsAreAlwaysMasked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := redactor.Redact("token=ghp_abcdefghijklmnopqrstuvwxyz0123 key=AKIAABCDEFGHIJKLMNOP -----BEGIN RSA PRIVATE KEY-----")
+	// Fake values shaped like secrets, on purpose: they test the masking.
+	out := redactor.Redact("token=ghp_abcdefghijklmnopqrstuvwxyz0123 key=AKIAABCDEFGHIJKLMNOP -----BEGIN RSA PRIVATE KEY-----") // gitleaks:allow
 	if strings.Contains(out, "ghp_abcdef") || strings.Contains(out, "AKIAABCD") || strings.Contains(out, "BEGIN RSA PRIVATE KEY") {
 		t.Fatalf("secret left in output: %s", out)
 	}

@@ -70,7 +70,7 @@ function remap(node, lines) {
 function load(name) {
     try {
         return require(name);
-    } catch (error) {
+    } catch {
         return null;
     }
 }
@@ -138,7 +138,7 @@ if (typedParser) {
                     let map = null;
                     try {
                         map = JSON.parse(out.sourceMapText || '{}');
-                    } catch (error) {
+                    } catch {
                         map = null;
                     }
                     if (map && map.mappings) {

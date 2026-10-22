@@ -13,7 +13,7 @@ Le moteur d'exécution autonome écrit en Go (`core/`) et son démon local HTTP/
 - **Moteur Go local** : Discovery, Capability Matrix, Tool Resolver, Compliance Engine, rapport canonique et démon HTTP/SSE. Le binaire est cross-compilé pour six cibles. **Seul Windows x64 est qualifié** sur cette machine ; Linux et macOS sont expérimentaux (binaires présents, selftest physique non fait).
 - **Extension VS Code intégrée** : Interface TreeView locale connectée au démon local via HTTP et streaming d'événements temps réel (SSE), avec lecteur de rapports interactif natif et visualisations de findings.
 - **Sécurité et confinement stricts** : Démon éphémère ou persistant sur `127.0.0.1:0`, jeton Bearer 256 bits généré localement, validation stricte des en-têtes `Host` et `Origin`, approbation explicite des dossiers cibles (*workspace approval*), confinement des processus enfants (Job Objects sous Windows avec vérification stricte, process groups POSIX sous Linux/macOS) et annulation immédiate sans processus orphelin.
-- **Résolution d'outils découplée et registre auto-hébergé** : Registre d'archives précompilées et autonomes hébergées sur la release GitHub `tools-v1` (`https://github.com/LORD-SOUPEX/Compliance_Platform/releases/tag/tools-v1`), sans dépendance envers PyPI, npm ou PowerShell Gallery à l'exécution. Les 10 outils natifs sont fournis pour 5 plateformes (`windows-x64`, `linux-x64`, `linux-arm64`, `macos-x64`, `macos-arm64`). Les bundles complets pré-assemblés Python (`checkov`, `bandit`, `pylint`, `pytest`, `pip-audit`, `yamllint`), Node (`eslint`, `tsc`) et `PSScriptAnalyzer` sont publiés et qualifiés pour `windows-x64`. Sur Linux et macOS, les bundles complets peuvent être construits sur un hôte POSIX via `scripts/build_and_publish_tools.py` ou résolus via le `PATH` système.
+- **Résolution d'outils découplée et registre auto-hébergé** : Registre d'archives précompilées et autonomes hébergées sur la release GitHub `tools-v1` (`https://github.com/LORD-SOUPEX/Compliance_Platform/releases/tag/tools-v1`), sans dépendance envers PyPI, npm ou PowerShell Gallery à l'exécution. Les 15 outils natifs (`ruff`, `gitleaks`, `tflint`, `trivy`, `terraform`, `tofu`, `hadolint`, `terragrunt`, `shellcheck`, `rumdl`, `shfmt`, `kubeconform`, `biome`, `osv-scanner`, `golangci-lint`) sont construits pour les 5 plateformes (`windows-x64`, `linux-x64`, `linux-arm64`, `macos-x64`, `macos-arm64`), de même que le bundle Node (Node 22, ESLint, TypeScript, Stylelint, HTMLHint). Le bundle Python (`checkov`, `bandit`, `pylint`, `pytest`, `pip-audit`, `yamllint`, plus `ansible-lint` hors Windows) se construit sur un hôte natif de chaque plateforme ; `PSScriptAnalyzer` est publié pour `windows-x64`. Windows sur ARM utilise les outils `windows-x64`. Un outil absent du registre reste résolu par le `PATH`.
 - **Ordre strict de résolution des outils** :
   1. Pour `eslint`/`tsc` : `node_modules/.bin` de la Target en priorité, sinon bundle `~/.compliance/tools/node` téléchargé depuis le registre.
   2. Pour tous les autres outils : `.tools/bin` (dev local) ➔ `~/.compliance/tools/{bin,python,node,powershell-modules}` (registre installé) ➔ `PATH` système.
@@ -26,6 +26,8 @@ Le moteur d'exécution autonome écrit en Go (`core/`) et son démon local HTTP/
 ## Technologies et Contrôles Couverts
 
 ESLint et `tsc` viennent du `node_modules` de la cible, ou de `~/.compliance/tools/node` après synchronisation. Sans configuration ESLint, le moteur applique une configuration minimale et audite les fichiers. `tsc` exige un `tsconfig.json`. Les outils de répertoire (Terraform, etc.) restent un contrôle par racine. Le rapport regroupe ces racines sous une carte par outil. Chaque racine se déroule vers les fichiers touchés, puis vers la ligne, la règle et le message. Checkov, TFLint, ShellCheck, Trivy et `terraform fmt` alimentent ces listes. Une technologie déjà exécutée sur une racine n'apparaît pas dans les contrôles non applicables. Markdown utilise `rumdl check`. Sans configuration Markdown du dépôt, la règle de longueur de ligne MD013 est désactivée. `pytest` qui ne collecte aucun test (code 5) n'est pas un échec. Gitleaks ignore les dossiers d'artefacts et les binaires. `testdata`, `fixtures` et `__snapshots__` ne sont ni des racines ni des anomalies.
+
+Technologies transverses : `secrets` (Gitleaks sur tout le dépôt), `yaml` (yamllint hors Ansible et hors templates) et `dependencies` (osv-scanner, ou Trivy en alternative, sur les lockfiles et manifestes : npm, pip, Poetry, Go, Cargo, Maven...). Web : CSS (Stylelint, formatage Biome), HTML (HTMLHint), formatage Biome du JavaScript, du JSON et du TypeScript. Go : golangci-lint, avec la chaîne `go` du poste. Chaque outil a un adaptateur dans le moteur (lecture de sa sortie, SARIF quand l'outil le produit) : toute anomalie est rattachée à un fichier, une ligne et une règle.
 
 Les outils du registre `tools-v1` peuvent être téléchargés en HTTPS après accord (version, source, dossier utilisateur). Une signature Ed25519 absente ou différente génère un avertissement journalisé sans bloquer l'installation. Une somme SHA-256 d'archive ou de binaire différente refuse l'outil. Rien n'est téléchargé à l'installation du VSIX. Les entreprises peuvent configurer un miroir privé via `compliance.registryUrl` (ou variable d'environnement `COMPLIANCE_REGISTRY_URL`) et un jeton enregistré par **ICP: Définir le jeton du registre d'outils** (stockage sécurisé de VS Code) ou `COMPLIANCE_REGISTRY_TOKEN`. Voir `docs/architecture.md`.
 
@@ -67,6 +69,14 @@ Les sessions conservées vont de 1 à 1000 (`compliance.maxSessions`, défaut 5)
 | yaml.lint.yamllint | yaml | yamllint |
 | shell.format.shfmt | shell | shfmt |
 | kubernetes.schema.kubeconform | kubernetes | kubeconform |
+| javascript.format.biome | javascript | biome |
+| typescript.format.biome | typescript | biome |
+| css.format.biome | css | biome |
+| css.lint.stylelint | css | stylelint |
+| html.lint.htmlhint | html | htmlhint |
+| dependencies.vulnerabilities.osv-scanner | dependencies | osv-scanner |
+| dependencies.vulnerabilities.trivy | dependencies | trivy |
+| go.lint.golangci-lint | go | golangci-lint |
 <!-- catalog-controls:end -->
 
 ---
@@ -106,6 +116,7 @@ Compliance_Platform/
 │   │   ├── daemonLifecycle.ts          # Identification des binaires du démon
 │   │   ├── engineVersion.ts            # Version attendue du moteur
 │   │   └── localSettings.ts            # Réglages de portée application
+│   ├── eslint.config.mjs               # ESLint strict de l'extension
 │   ├── package_vsix.py                 # Packaging OPC universel et cross-compilation
 │   ├── package.json                    # Manifeste d'extension VS Code (v2.1.3)
 │   └── tsconfig.json
@@ -114,11 +125,16 @@ Compliance_Platform/
 │   ├── tools-lock.json                 # Versions des linters publiées sur tools-v1
 │   ├── platform-support.json           # Matrice d'éligibilité et statuts multi-OS
 │   └── runtime-manifest.json           # Manifeste des binaires d'outils (signature facultative)
+├── scripts/
+│   ├── build_and_publish_tools.py      # Construction et publication du registre tools-v1
+│   ├── check_benchmark.py              # Vérification d'un audit de la démo multi-technologies
+│   └── check_emoji.py                  # Hook pre-commit : pictogrammes interdits
 ├── docs/                               # Documentation technique exhaustive
 │   ├── extension.md                    # Page Marketplace, copiée dans le VSIX
 │   ├── architecture.md                 # Architecture, flux et sécurité
 │   ├── developpement.md                # Tests, packaging, signature
 │   └── CHANGELOG.md                    # Historique publié avec l'extension
+├── biome.json                          # Formatage JavaScript, TypeScript, CSS et JSON
 ├── .gitignore                          # Règles d'exclusion Git (0 binaire versionné)
 └── README.md                           # Documentation de référence du projet
 ```

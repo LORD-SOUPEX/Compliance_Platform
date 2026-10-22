@@ -5,14 +5,20 @@ export class Cdp {
     private constructor(private readonly socket: WebSocket) {
         socket.addEventListener('message', event => {
             void Promise.resolve(event.data).then(async data => {
-            const text = typeof data === 'string' ? data : await (data as Blob).text();
-            const message = JSON.parse(text) as { id?: number; method?: string; params?: unknown; result?: { result?: { value?: unknown } }; error?: { message?: string } };
-            if (message.id && this.pending.has(message.id)) {
-                this.pending.get(message.id)!({ result: message.result, error: message.error });
-                this.pending.delete(message.id);
-            } else if (message.method) {
-                this.events.push({ method: message.method, params: message.params });
-            }
+                const text = typeof data === 'string' ? data : await (data as Blob).text();
+                const message = JSON.parse(text) as {
+                    id?: number;
+                    method?: string;
+                    params?: unknown;
+                    result?: { result?: { value?: unknown } };
+                    error?: { message?: string };
+                };
+                if (message.id && this.pending.has(message.id)) {
+                    this.pending.get(message.id)!({ result: message.result, error: message.error });
+                    this.pending.delete(message.id);
+                } else if (message.method) {
+                    this.events.push({ method: message.method, params: message.params });
+                }
             });
         });
     }
@@ -28,12 +34,19 @@ export class Cdp {
         const id = ++this.id;
         const response = new Promise<{ result?: { result?: { value?: unknown } }; error?: { message?: string } }>((resolve, reject) => {
             const timer = setTimeout(() => reject(new Error(`CDP ${method} sans réponse`)), 15000);
-            this.pending.set(id, value => { clearTimeout(timer); resolve(value); });
+            this.pending.set(id, value => {
+                clearTimeout(timer);
+                resolve(value);
+            });
         });
         this.socket.send(JSON.stringify({ id, method, params }));
         const settled = await response;
-        if (settled.error) { throw new Error(settled.error.message || method); }
+        if (settled.error) {
+            throw new Error(settled.error.message || method);
+        }
         return settled;
     }
-    close(): void { this.socket.close(); }
+    close(): void {
+        this.socket.close();
+    }
 }

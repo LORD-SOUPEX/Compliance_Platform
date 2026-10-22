@@ -11,7 +11,10 @@
     "shellcheck": "0.10.0",
     "rumdl": "0.2.79",
     "shfmt": "3.14.1",
-    "kubeconform": "0.8.0"
+    "kubeconform": "0.8.0",
+    "biome": "2.6.2",
+    "osv-scanner": "2.7.0",
+    "golangci-lint": "2.15.0"
   },
   "python": {
     "cpython": "3.11.9",
@@ -26,7 +29,9 @@
   "node": {
     "node": "22.14.0",
     "eslint": "9.21.0",
-    "typescript": "5.7.3"
+    "typescript": "5.7.3",
+    "stylelint": "17.16.0",
+    "htmlhint": "1.9.2"
   },
   "powershell": {
     "PSScriptAnalyzer": "1.23.0"

@@ -12,7 +12,10 @@ const manifest = {
 
 test('Windows on ARM borrows x64 tools and keeps its own first', () => {
     const tools = selectManifestTools(manifest, 'windows-arm64', ['rumdl', 'ruff', 'trivy']);
-    assert.deepEqual(tools, [{ command: 'rumdl', version: 'arm', source: 'arm.zip' }, { command: 'ruff', version: '0.16', source: 'ruff.zip' }]);
+    assert.deepEqual(tools, [
+        { command: 'rumdl', version: 'arm', source: 'arm.zip' },
+        { command: 'ruff', version: '0.16', source: 'ruff.zip' }
+    ]);
 });
 
 test('other platforms only use their own entry', () => {

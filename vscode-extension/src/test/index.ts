@@ -27,27 +27,47 @@ export async function run(): Promise<void> {
             engine_version: '2.0.14',
             metrics: { discovery_ms: 1, resolver_ms: 1, compliance_ms: 1, reporting_ms: 1, total_duration_ms: 4321 },
             verdict_reasons: [],
-            findings: [{ control_id: 'javascript/linting/eslint/.', root: 'infra/vpc', file: '/main.tf', line: 3, column: 1, name: 'CKV_TF_1', message: 'pin the source', diagnostics: [] }],
-            coverage: { complete: true, executed_controls: 2, detected_technologies: 1, covered_technologies: 1, label: 'Couverture complète : 1 technologie(s) couverte(s) sur 1 détectée(s).' },
+            findings: [
+                {
+                    control_id: 'javascript/linting/eslint/.',
+                    root: 'infra/vpc',
+                    file: '/main.tf',
+                    line: 3,
+                    column: 1,
+                    name: 'CKV_TF_1',
+                    message: 'pin the source',
+                    diagnostics: []
+                }
+            ],
+            coverage: {
+                complete: true,
+                executed_controls: 2,
+                detected_technologies: 1,
+                covered_technologies: 1,
+                label: 'Couverture complète : 1 technologie(s) couverte(s) sur 1 détectée(s).'
+            },
             discovery: { technologies: [{ technology: 'javascript', status: 'detected', evidence: [] }] }
         },
-        controls: [{
-            id: 'javascript/linting/eslint/.',
-            name: 'JavaScript lint',
-            technology: 'javascript',
-            root: '.',
-            status: 'Succeeded' as const,
-            result: { status: 'success', duration_ms: 12, stdout, stderr: '', diagnostics: [] },
-            findings: []
-        }, {
-            id: 'javascript/security/gitleaks/.',
-            name: 'JavaScript secrets',
-            technology: 'javascript',
-            root: '.',
-            status: 'Succeeded' as const,
-            result: { status: 'success', duration_ms: 4, stdout: '', stderr: '', diagnostics: [] },
-            findings: []
-        }]
+        controls: [
+            {
+                id: 'javascript/linting/eslint/.',
+                name: 'JavaScript lint',
+                technology: 'javascript',
+                root: '.',
+                status: 'Succeeded' as const,
+                result: { status: 'success', duration_ms: 12, stdout, stderr: '', diagnostics: [] },
+                findings: []
+            },
+            {
+                id: 'javascript/security/gitleaks/.',
+                name: 'JavaScript secrets',
+                technology: 'javascript',
+                root: '.',
+                status: 'Succeeded' as const,
+                result: { status: 'success', duration_ms: 4, stdout: '', stderr: '', diagnostics: [] },
+                findings: []
+            }
+        ]
     } as LoadedReport;
     fs.writeFileSync(document.file, '{}\n');
     const received: string[] = [];
@@ -66,20 +86,34 @@ export async function run(): Promise<void> {
         panel.webview.onDidReceiveMessage(message => {
             const parsed = reportMessage(message);
             received.push(parsed.action);
-            if (parsed.action === 'output') { outputIds.push(parsed.controlId); }
+            if (parsed.action === 'output') {
+                outputIds.push(parsed.controlId);
+            }
             if (parsed.action === 'finding') {
                 const finding = visibleFindings(document.report)[parsed.index];
-                void revealFinding(document.target, finding).then(editor => {
-                    openedFinding = editor.document.uri.fsPath;
-                    openedLine = editor.selection.active.line;
-                }).catch(error => { findingError = String(error); });
+                void revealFinding(document.target, finding)
+                    .then(editor => {
+                        openedFinding = editor.document.uri.fsPath;
+                        openedLine = editor.selection.active.line;
+                    })
+                    .catch(error => {
+                        findingError = String(error);
+                    });
             }
-            if (parsed.action === 'ready') { clearTimeout(timer); resolve(); }
+            if (parsed.action === 'ready') {
+                clearTimeout(timer);
+                resolve();
+            }
             if (parsed.action === 'output') {
                 const marker = parsed.controlId === 'javascript/security/gitleaks/.' ? 'gitleaks-empty-output' : stdout;
-                void vscode.workspace.openTextDocument({ content: marker, language: 'plaintext' }).then(doc => vscode.window.showTextDocument(doc)).then(editor => {
-                    if (editor.document.getText().includes('gitleaks-empty-output')) { sawGitleaks = true; }
-                });
+                void vscode.workspace
+                    .openTextDocument({ content: marker, language: 'plaintext' })
+                    .then(doc => vscode.window.showTextDocument(doc))
+                    .then(editor => {
+                        if (editor.document.getText().includes('gitleaks-empty-output')) {
+                            sawGitleaks = true;
+                        }
+                    });
             }
         });
     });
@@ -93,15 +127,26 @@ export async function run(): Promise<void> {
         windowsHide: true
     });
     let driverLog = '';
-    driver.stdout?.on('data', chunk => { driverLog += String(chunk); });
-    driver.stderr?.on('data', chunk => { driverLog += String(chunk); });
+    driver.stdout?.on('data', chunk => {
+        driverLog += String(chunk);
+    });
+    driver.stderr?.on('data', chunk => {
+        driverLog += String(chunk);
+    });
     const driverCode = await new Promise<number>(resolve => driver.on('close', code => resolve(code ?? 1)));
     assert.strictEqual(driverCode, 0, driverLog);
     const deadline = Date.now() + 8000;
-    while (Date.now() < deadline && (!['output', 'pick', 'raw', 'folder', 'finding'].every(action => received.includes(action)) || outputIds.length < 2 || !openedFinding || !sawGitleaks)) {
+    while (
+        Date.now() < deadline &&
+        (!['output', 'pick', 'raw', 'folder', 'finding'].every(action => received.includes(action)) || outputIds.length < 2 || !openedFinding || !sawGitleaks)
+    ) {
         await new Promise(resolve => setTimeout(resolve, 100));
     }
-    assert.deepStrictEqual(['output', 'pick', 'raw', 'folder', 'finding'].filter(action => !received.includes(action)), [], `Messages manquants : ${received.join(',')}`);
+    assert.deepStrictEqual(
+        ['output', 'pick', 'raw', 'folder', 'finding'].filter(action => !received.includes(action)),
+        [],
+        `Messages manquants : ${received.join(',')}`
+    );
     assert.strictEqual(findingError, '', findingError);
     assert.ok(openedFinding.replace(/\\/g, '/').endsWith('infra/vpc/main.tf'), `Fichier ouvert : ${openedFinding}`);
     assert.strictEqual(openedLine, 2, `Ligne ouverte : ${openedLine}`);

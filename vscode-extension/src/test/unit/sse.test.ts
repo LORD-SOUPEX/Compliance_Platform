@@ -4,12 +4,7 @@ import { SseParser } from '../../sse';
 
 test('fields survive chunk boundaries and CRLF split in two', () => {
     const parser = new SseParser();
-    const events = [
-        ...parser.feed('id: 7\r\nevent: control_sta'),
-        ...parser.feed('rted\r\ndata: {"a":'),
-        ...parser.feed('1}\r'),
-        ...parser.feed('\n\r\n')
-    ];
+    const events = [...parser.feed('id: 7\r\nevent: control_sta'), ...parser.feed('rted\r\ndata: {"a":'), ...parser.feed('1}\r'), ...parser.feed('\n\r\n')];
     assert.deepEqual(events, [{ event: 'control_started', data: '{"a":1}', id: '7' }]);
 });
 

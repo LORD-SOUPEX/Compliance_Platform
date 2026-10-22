@@ -4,29 +4,48 @@ import * as vscode from 'vscode';
 import { reportButtonCommand } from './reportActions.js';
 import { buildReportModel, LayoutControl, nonApplicableMarkup, reportDurationMs, unavailableSummary, verdictReasonLines } from './reportLayout';
 import { controlOutputText } from './model';
-import { controlRelativeFile, Fields, fields, findingLocation, LoadedReport, loadReport, readSession, readStable, ReportControl, ReportReference, reportMessage, runsDirectory, targetFile, text } from './daemonClient';
+import {
+    controlRelativeFile,
+    Fields,
+    fields,
+    findingLocation,
+    LoadedReport,
+    loadReport,
+    readSession,
+    readStable,
+    ReportControl,
+    ReportReference,
+    reportMessage,
+    runsDirectory,
+    targetFile,
+    text
+} from './daemonClient';
 import { hasMachineConsent, machineConsentKey, MachineConsent } from './toolProvision';
 
 export function escaped(value: unknown, limit = 50000): string {
     const original = text(value);
     const bounded = original.length > limit ? `${original.slice(0, limit)}\n[Affichage limite ; ouvrir les sorties ou le JSON brut.]` : original;
-    return bounded.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]!));
+    return bounded.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
 }
-export function sectionId(id: string): string { return `section-${createHash('sha256').update(id).digest('hex')}`; }
-const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
+export function sectionId(id: string): string {
+    return `section-${createHash('sha256').update(id).digest('hex')}`;
+}
+const array = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 /** Scalar JSON value as text; objects and absent values give ''. */
-const scalar = (value: unknown): string => typeof value === 'string' ? value : typeof value === 'number' || typeof value === 'boolean' ? String(value) : '';
-const reasonText = (value: unknown) => fields(value) ? `${text(value.code)} : ${text(value.message)}` : text(value);
+const scalar = (value: unknown): string => (typeof value === 'string' ? value : typeof value === 'number' || typeof value === 'boolean' ? String(value) : '');
+const reasonText = (value: unknown) => (fields(value) ? `${text(value.code)} : ${text(value.message)}` : text(value));
 
 export function reportHtml(document: LoadedReport, css: string, cspSource: string, nonce: string, iconSrc: string): string {
     const report = document.report;
     const coverage = fields(report.coverage) ? report.coverage : {};
     const discovery = fields(report.discovery) ? report.discovery : {};
-    const technologies = array(discovery.technologies).filter(fields).map(item => ({
-        technology: scalar(item.technology),
-        status: scalar(item.status),
-        evidence: array(item.evidence).map(value => text(value))
-    }));
+    const technologies = array(discovery.technologies)
+        .filter(fields)
+        .map(item => ({
+            technology: scalar(item.technology),
+            status: scalar(item.status),
+            evidence: array(item.evidence).map(value => text(value))
+        }));
     const model = buildReportModel({
         verdict: report.verdict,
         coverage: {
@@ -58,8 +77,12 @@ export function reportHtml(document: LoadedReport, css: string, cspSource: strin
     const executedRows = executedMarkup(model.executed, findingCount, findings, !!document.directory, inlineFindings);
     const unavailable = unavailableSummary(document.controls.map(layoutControl));
     const unavailableCount = model.cards.find(item => item.label === 'Indisponibles')?.value || 0;
-    const tools = model.tools.length ? `<details><summary>Outils à provisionner <span>${escaped(new Set(model.tools).size)}</span></summary><ul>${[...new Set(model.tools)].map(tool => `<li>${escaped(tool)}</li>`).join('')}</ul><button type="button" data-action="provision">Installer les outils manquants</button></details>` : '';
-    const unavailableBlock = unavailableCount ? `<section class="reasons"><h2>Indisponibles <span>${escaped(unavailableCount)}</span></h2><ul>${unavailable.map(line => `<li>${escaped(line)}</li>`).join('')}</ul></section>` : '';
+    const tools = model.tools.length
+        ? `<details><summary>Outils à provisionner <span>${escaped(new Set(model.tools).size)}</span></summary><ul>${[...new Set(model.tools)].map(tool => `<li>${escaped(tool)}</li>`).join('')}</ul><button type="button" data-action="provision">Installer les outils manquants</button></details>`
+        : '';
+    const unavailableBlock = unavailableCount
+        ? `<section class="reasons"><h2>Indisponibles <span>${escaped(unavailableCount)}</span></h2><ul>${unavailable.map(line => `<li>${escaped(line)}</li>`).join('')}</ul></section>`
+        : '';
     const absent = nonApplicableMarkup(document.controls.map(layoutControl));
     const durationText = formatDuration(duration);
     const sessionLabel = document.historical ? 'Rapport historique' : 'Session courante';
@@ -118,7 +141,9 @@ function sameControl(findingId: string, controlId: string): boolean {
 }
 
 function formatDuration(duration: number | undefined): string {
-    if (duration === undefined) { return 'Non renseignée'; }
+    if (duration === undefined) {
+        return 'Non renseignée';
+    }
     return `${String(duration).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} ms`;
 }
 
@@ -138,24 +163,34 @@ function svgIcon(pathData: string): string {
 }
 
 function verdictIcon(kind: string): string {
-    if (kind === 'pass') { return svgIcon(icons.check); }
-    if (kind === 'unevaluated') { return '<span class="ico dash" aria-hidden="true">-</span>'; }
+    if (kind === 'pass') {
+        return svgIcon(icons.check);
+    }
+    if (kind === 'unevaluated') {
+        return '<span class="ico dash" aria-hidden="true">-</span>';
+    }
     return svgIcon(icons.alert);
 }
 
 export function visibleFindings(report: Fields): Fields[] {
-    return array(report.findings).filter(fields).filter(finding => !skippedFinding(finding));
+    return array(report.findings)
+        .filter(fields)
+        .filter(finding => !skippedFinding(finding));
 }
 
 export async function revealFinding(target: string, finding: Fields): Promise<vscode.TextEditor> {
     const location = findingLocation(finding);
-    if (!location) { throw new Error('Localisation fiable ou confiance absente.'); }
+    if (!location) {
+        throw new Error('Localisation fiable ou confiance absente.');
+    }
     const relative = controlRelativeFile(scalar(finding.root), location.file);
     const file = await targetFile(target, relative);
     const opened = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
     const editor = await vscode.window.showTextDocument(opened);
     if (location.line !== undefined) {
-        if (location.line > opened.lineCount || (location.column !== undefined && location.column - 1 > opened.lineAt(location.line - 1).text.length)) { throw new Error('Position du finding devenue incohérente avec le fichier ; aucune position inventée.'); }
+        if (location.line > opened.lineCount || (location.column !== undefined && location.column - 1 > opened.lineAt(location.line - 1).text.length)) {
+            throw new Error('Position du finding devenue incohérente avec le fichier ; aucune position inventée.');
+        }
         const position = new vscode.Position(location.line - 1, (location.column || 1) - 1);
         editor.selection = new vscode.Selection(position, position);
         editor.revealRange(new vscode.Range(position, position));
@@ -166,84 +201,117 @@ export async function revealFinding(target: string, finding: Fields): Promise<vs
 function findingIndexes(controlId: string, findings: Fields[]): Map<string, number[]> {
     const files = new Map<string, number[]>();
     findings.forEach((finding, index) => {
-        if (skippedFinding(finding) || !sameControl(scalar(finding.control_id), controlId)) { return; }
+        if (skippedFinding(finding) || !sameControl(scalar(finding.control_id), controlId)) {
+            return;
+        }
         const located = findingLocation(finding);
         const file = located ? controlRelativeFile(scalar(finding.root), located.file) : '(sans fichier)';
         const bucket = files.get(file);
-        if (bucket) { bucket.push(index); }
-        else { files.set(file, [index]); }
+        if (bucket) {
+            bucket.push(index);
+        } else {
+            files.set(file, [index]);
+        }
     });
     return files;
 }
 
 function findingTable(findings: Fields[], indexes: number[]): string {
-    const rows = indexes.map(index => {
-        const finding = findings[index];
-        const location = findingLocation(finding);
-        const rule = scalar(finding.name) || scalar(finding.rule_id);
-        const message = scalar(finding.message) || array(finding.diagnostics).map(reasonText).join('; ');
-        const open = location ? `<button type="button" data-action="finding" data-finding-index="${index}">Ouvrir à la ligne</button>` : '';
-        return `<tr><td>${escaped(location?.line ?? '')}</td><td>${escaped(rule)}</td><td>${escaped(message, 500)}</td><td>${open}</td></tr>`;
-    }).join('');
+    const rows = indexes
+        .map(index => {
+            const finding = findings[index];
+            const location = findingLocation(finding);
+            const rule = scalar(finding.name) || scalar(finding.rule_id);
+            const message = scalar(finding.message) || array(finding.diagnostics).map(reasonText).join('; ');
+            const open = location ? `<button type="button" data-action="finding" data-finding-index="${index}">Ouvrir à la ligne</button>` : '';
+            return `<tr><td>${escaped(location?.line ?? '')}</td><td>${escaped(rule)}</td><td>${escaped(message, 500)}</td><td>${open}</td></tr>`;
+        })
+        .join('');
     return `<div class="finding-table"><table><thead><tr><th>Ligne</th><th>Règle</th><th>Message</th><th>Action</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 export function findingFileTree(controlId: string, findings: Fields[], inlineRows: boolean): string {
     const files = findingIndexes(controlId, findings);
-    if (!files.size) { return ''; }
-    const nodes = [...files.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([file, indexes]) => {
-        const summary = `<summary><code>${escaped(file)}</code><span>${escaped(indexes.length)} anomalie${indexes.length === 1 ? '' : 's'}</span></summary>`;
-        if (!inlineRows) {
-            return `<details class="file-node" data-pending="1" data-control-id="${escaped(controlId, 4096)}" data-file="${escaped(file, 4096)}">${summary}<div class="finding-host"></div></details>`;
-        }
-        return `<details class="file-node">${summary}${findingTable(findings, indexes)}</details>`;
-    }).join('');
+    if (!files.size) {
+        return '';
+    }
+    const nodes = [...files.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([file, indexes]) => {
+            const summary = `<summary><code>${escaped(file)}</code><span>${escaped(indexes.length)} anomalie${indexes.length === 1 ? '' : 's'}</span></summary>`;
+            if (!inlineRows) {
+                return `<details class="file-node" data-pending="1" data-control-id="${escaped(controlId, 4096)}" data-file="${escaped(file, 4096)}">${summary}<div class="finding-host"></div></details>`;
+            }
+            return `<details class="file-node">${summary}${findingTable(findings, indexes)}</details>`;
+        })
+        .join('');
     return `<div class="file-tree">${nodes}</div>`;
 }
 
 export function findingRows(controlId: string, file: string, findings: Fields[]): string {
     const indexes = findingIndexes(controlId, findings).get(file);
-    if (!indexes?.length) { return '<p class="muted">Aucune anomalie pour ce fichier.</p>'; }
+    if (!indexes?.length) {
+        return '<p class="muted">Aucune anomalie pour ce fichier.</p>';
+    }
     return findingTable(findings, indexes);
 }
 
-function executedMarkup(controls: Array<LayoutControl & { label: string; showOutput: boolean }>, findingCount: Map<string, number>, findings: Fields[], canOpen: boolean, inlineFindings: boolean): string {
+function executedMarkup(
+    controls: Array<LayoutControl & { label: string; showOutput: boolean }>,
+    findingCount: Map<string, number>,
+    findings: Fields[],
+    canOpen: boolean,
+    inlineFindings: boolean
+): string {
     const groups = new Map<string, typeof controls>();
     for (const control of controls) {
         const identity = controlIdentity(control);
         const key = `${control.technology}/${identity.capability}/${identity.tool}`;
         groups.set(key, [...(groups.get(key) || []), control]);
     }
-    return [...groups.values()].map(rows => {
-        const sample = controlIdentity(rows[0]);
-        const failed = rows.some(control => control.resultStatus !== 'success');
-        const total = rows.reduce((sum, control) => sum + (findingCount.get(control.id) || 0), 0);
-        const lines = rows.map(control => {
-            const identity = controlIdentity(control);
-            const output = control.showOutput && canOpen ? `<button type="button" data-action="output" data-control-id="${escaped(control.id, 4096)}">Ouvrir les sorties</button>` : '';
-            const count = findingCount.get(control.id.replace(/\\/g, '/')) || 0;
-            const head = `<span class="badge ${control.resultStatus === 'success' ? 'pass' : 'fail'}">${escaped(control.label)}</span><span class="root">${escaped(identity.root || '.')}</span><span>${control.durationMs === undefined ? '' : `${escaped(control.durationMs)} ms`}</span><span>${escaped(count)} anomalie${count === 1 ? '' : 's'}</span>${output}`;
-            if (!inlineFindings && count > 0) {
-                return `<details class="control ${control.resultStatus === 'success' ? 'pass' : 'fail'}" id="${sectionId(control.id)}" data-pending="1" data-control-id="${escaped(control.id, 4096)}"><summary>${head}</summary><div class="finding-host"></div></details>`;
-            }
-            const tree = findingFileTree(control.id, findings, true);
-            if (!tree) {
-                return `<div class="control ${control.resultStatus === 'success' ? 'pass' : 'fail'}" id="${sectionId(control.id)}">${head}</div>`;
-            }
-            return `<details class="control ${control.resultStatus === 'success' ? 'pass' : 'fail'}" id="${sectionId(control.id)}"><summary>${head}</summary>${tree}</details>`;
-        }).join('');
-        return `<article class="tool-card ${failed ? 'fail' : 'pass'}"><header><span class="badge ${failed ? 'fail' : 'pass'}">${failed ? 'Échec' : 'Réussi'}</span><div><strong>${escaped(rows[0].technology)} · ${escaped(sample.capability)} · ${escaped(sample.tool)}</strong><p>${escaped(rows.length)} dossier${rows.length === 1 ? '' : 's'} · ${escaped(total)} anomalie${total === 1 ? '' : 's'}</p></div></header><div class="control-list">${lines}</div></article>`;
-    }).join('') || '<p class="muted">Aucun contrôle exécuté.</p>';
+    return (
+        [...groups.values()]
+            .map(rows => {
+                const sample = controlIdentity(rows[0]);
+                const failed = rows.some(control => control.resultStatus !== 'success');
+                const total = rows.reduce((sum, control) => sum + (findingCount.get(control.id) || 0), 0);
+                const lines = rows
+                    .map(control => {
+                        const identity = controlIdentity(control);
+                        const output =
+                            control.showOutput && canOpen
+                                ? `<button type="button" data-action="output" data-control-id="${escaped(control.id, 4096)}">Ouvrir les sorties</button>`
+                                : '';
+                        const count = findingCount.get(control.id.replace(/\\/g, '/')) || 0;
+                        const head = `<span class="badge ${control.resultStatus === 'success' ? 'pass' : 'fail'}">${escaped(control.label)}</span><span class="root">${escaped(identity.root || '.')}</span><span>${control.durationMs === undefined ? '' : `${escaped(control.durationMs)} ms`}</span><span>${escaped(count)} anomalie${count === 1 ? '' : 's'}</span>${output}`;
+                        if (!inlineFindings && count > 0) {
+                            return `<details class="control ${control.resultStatus === 'success' ? 'pass' : 'fail'}" id="${sectionId(control.id)}" data-pending="1" data-control-id="${escaped(control.id, 4096)}"><summary>${head}</summary><div class="finding-host"></div></details>`;
+                        }
+                        const tree = findingFileTree(control.id, findings, true);
+                        if (!tree) {
+                            return `<div class="control ${control.resultStatus === 'success' ? 'pass' : 'fail'}" id="${sectionId(control.id)}">${head}</div>`;
+                        }
+                        return `<details class="control ${control.resultStatus === 'success' ? 'pass' : 'fail'}" id="${sectionId(control.id)}"><summary>${head}</summary>${tree}</details>`;
+                    })
+                    .join('');
+                return `<article class="tool-card ${failed ? 'fail' : 'pass'}"><header><span class="badge ${failed ? 'fail' : 'pass'}">${failed ? 'Échec' : 'Réussi'}</span><div><strong>${escaped(rows[0].technology)} · ${escaped(sample.capability)} · ${escaped(sample.tool)}</strong><p>${escaped(rows.length)} dossier${rows.length === 1 ? '' : 's'} · ${escaped(total)} anomalie${total === 1 ? '' : 's'}</p></div></header><div class="control-list">${lines}</div></article>`;
+            })
+            .join('') || '<p class="muted">Aucun contrôle exécuté.</p>'
+    );
 }
 
 function reasonBlock(detail: string, reasons: string[]): string {
     const lines = verdictReasonLines(detail, reasons);
-    if (!lines.length) { return ''; }
+    if (!lines.length) {
+        return '';
+    }
     return `<section class="reasons"><h2>Raisons du verdict</h2><ul>${lines.map(line => `<li>${escaped(line)}</li>`).join('')}</ul></section>`;
 }
 
 function gapBlock(gaps: string[]): string {
-    if (!gaps.length) { return ''; }
+    if (!gaps.length) {
+        return '';
+    }
     return `<section class="reasons"><h2>Lacunes de couverture <span>${escaped(gaps.length)}</span></h2><ul>${gaps.map(line => `<li>${escaped(line)}</li>`).join('')}</ul></section>`;
 }
 
@@ -333,50 +401,101 @@ export class ReportPanel implements vscode.Disposable {
     private navigationApproved = false;
     private pendingFocus?: string;
     private requestSequence = 0;
-    constructor(private readonly context: vscode.ExtensionContext, private readonly source: string, private readonly provision?: (commands: string[]) => Promise<void>) {}
-    dispose(): void { this.panel?.dispose(); }
-    html(): string | undefined { return this.panel?.webview.html; }
-    knownReference(): ReportReference | undefined { return this.last; }
+    constructor(
+        private readonly context: vscode.ExtensionContext,
+        private readonly source: string,
+        private readonly provision?: (commands: string[]) => Promise<void>
+    ) {}
+    dispose(): void {
+        this.panel?.dispose();
+    }
+    html(): string | undefined {
+        return this.panel?.webview.html;
+    }
+    knownReference(): ReportReference | undefined {
+        return this.last;
+    }
     async restore(): Promise<void> {
         const value: unknown = this.context.workspaceState.get('compliance.lastReport');
-        if (!vscode.workspace.isTrusted || !fields(value) || typeof value.runId !== 'string' || typeof value.target !== 'string' || typeof value.source !== 'string') { return; }
+        if (
+            !vscode.workspace.isTrusted ||
+            !fields(value) ||
+            typeof value.runId !== 'string' ||
+            typeof value.target !== 'string' ||
+            typeof value.source !== 'string'
+        ) {
+            return;
+        }
         const reference = value as unknown as ReportReference;
         try {
             const session = await readSession(this.source, reference);
             await loadReport(this.source, path.join(session.directory, 'compliance-report.json'), reference, true);
             this.last = reference;
-        } catch (error) { await vscode.window.showWarningMessage(`Derniere session non restaurable : ${String(error)}`); }
+        } catch (error) {
+            await vscode.window.showWarningMessage(`Derniere session non restaurable : ${String(error)}`);
+        }
     }
     async openSession(reference?: ReportReference, focus?: string, historical = false): Promise<void> {
         const selected = reference || this.last;
-        if (!selected) { throw new Error('Aucun rapport explicitement rattaché à une session connue.'); }
+        if (!selected) {
+            throw new Error('Aucun rapport explicitement rattaché à une session connue.');
+        }
         const session = await readSession(this.source, selected);
         await this.open(path.join(session.directory, 'compliance-report.json'), selected, historical || !reference, focus);
         this.last = selected;
         await this.context.workspaceState.update('compliance.lastReport', selected);
     }
     async open(file: string, reference?: ReportReference, historical = true, focus?: string): Promise<void> {
-        if (!vscode.workspace.isTrusted) { throw new Error('Approuver la Pipeline source avant sa validation.'); }
+        if (!vscode.workspace.isTrusted) {
+            throw new Error('Approuver la Pipeline source avant sa validation.');
+        }
         const request = ++this.requestSequence;
         const loaded = await loadReport(this.source, file, reference, historical);
-        if (reference && reference.runId === loaded.runId && !historical) { loaded.historical = false; }
-        if (request !== this.requestSequence) { return; }
-        if (focus && !loaded.controls.some(control => control.id === focus || `root/${control.technology}/${control.root}` === focus || `technology/${control.technology}` === focus)) { throw new Error('Section de rapport inconnue.'); }
-        this.document = loaded; this.reference = reference; this.navigationApproved = !historical;
+        if (reference && reference.runId === loaded.runId && !historical) {
+            loaded.historical = false;
+        }
+        if (request !== this.requestSequence) {
+            return;
+        }
+        if (
+            focus &&
+            !loaded.controls.some(
+                control => control.id === focus || `root/${control.technology}/${control.root}` === focus || `technology/${control.technology}` === focus
+            )
+        ) {
+            throw new Error('Section de rapport inconnue.');
+        }
+        this.document = loaded;
+        this.reference = reference;
+        this.navigationApproved = !historical;
         this.pendingFocus = focus;
         if (!this.panel) {
             this.panel = vscode.window.createWebviewPanel('compliance.report', 'Rapport Compliance', vscode.ViewColumn.One, {
-                enableScripts: true, retainContextWhenHidden: false,
-                localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media'), vscode.Uri.joinPath(this.context.extensionUri, '.extension-build/media')]
+                enableScripts: true,
+                retainContextWhenHidden: false,
+                localResourceRoots: [
+                    vscode.Uri.joinPath(this.context.extensionUri, 'media'),
+                    vscode.Uri.joinPath(this.context.extensionUri, '.extension-build/media')
+                ]
             });
-            this.panel.onDidDispose(() => { this.panel = undefined; this.document = undefined; });
-            this.panel.webview.onDidReceiveMessage(message => { void this.handle(message).catch(error => vscode.window.showErrorMessage(String(error))); });
+            this.panel.onDidDispose(() => {
+                this.panel = undefined;
+                this.document = undefined;
+            });
+            this.panel.webview.onDidReceiveMessage(message => {
+                void this.handle(message).catch(error => vscode.window.showErrorMessage(String(error)));
+            });
         }
         const webview = this.panel.webview;
         this.panel.title = `Compliance ${text(loaded.report.verdict || 'PLAN')} : ${loaded.runId.slice(0, 8)}`;
         const icon = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media/icon.png')).toString();
-        webview.html = reportHtml(loaded, webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media/report.css')).toString(),
-            webview.cspSource, randomBytes(16).toString('hex'), icon);
+        webview.html = reportHtml(
+            loaded,
+            webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media/report.css')).toString(),
+            webview.cspSource,
+            randomBytes(16).toString('hex'),
+            icon
+        );
         this.panel.reveal();
     }
     async pick(): Promise<void> {
@@ -389,52 +508,80 @@ export class ReportPanel implements vscode.Disposable {
             filters: { 'compliance-report.json': ['json'] },
             openLabel: 'Ouvrir le rapport'
         });
-        if (!selected?.length) { return; }
+        if (!selected?.length) {
+            return;
+        }
         if (path.basename(selected[0].fsPath) !== 'compliance-report.json') {
             throw new Error('compliance.openReportFile : choisir un fichier nommé compliance-report.json.');
         }
         await this.open(selected[0].fsPath);
     }
     async refresh(): Promise<void> {
-        if (!this.document) { throw new Error('Aucun rapport ouvert.'); }
+        if (!this.document) {
+            throw new Error('Aucun rapport ouvert.');
+        }
         await this.open(this.document.file, this.reference, this.document.historical);
     }
     async raw(): Promise<void> {
-        if (!this.document) { throw new Error('Aucun rapport ouvert.'); }
+        if (!this.document) {
+            throw new Error('Aucun rapport ouvert.');
+        }
         const bytes = await readStable(this.document.file);
-        if (createHash('sha256').update(bytes).digest('hex') !== this.document.sha256) { throw new Error('Rapport modifié ; actualiser avant ouverture du JSON brut.'); }
+        if (createHash('sha256').update(bytes).digest('hex') !== this.document.sha256) {
+            throw new Error('Rapport modifié ; actualiser avant ouverture du JSON brut.');
+        }
         await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(this.document.file)));
     }
     async openFolder(): Promise<void> {
         const document = this.document;
-        if (!document?.directory) { throw new Error('Aucune session associée : le dossier ne peut pas être ouvert.'); }
-        if (this.reference) { await readSession(this.source, this.reference); }
+        if (!document?.directory) {
+            throw new Error('Aucune session associée : le dossier ne peut pas être ouvert.');
+        }
+        if (this.reference) {
+            await readSession(this.source, this.reference);
+        }
         await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(document.directory));
     }
     private async handle(value: unknown): Promise<void> {
         const message = reportMessage(value);
         const document = this.document;
-        if (!document) { throw new Error('Rapport fermé.'); }
+        if (!document) {
+            throw new Error('Rapport fermé.');
+        }
         if (message.action === 'ready') {
-            if (this.pendingFocus) { await this.panel?.webview.postMessage({ type: 'focus', id: sectionId(this.pendingFocus) }); this.pendingFocus = undefined; }
+            if (this.pendingFocus) {
+                await this.panel?.webview.postMessage({ type: 'focus', id: sectionId(this.pendingFocus) });
+                this.pendingFocus = undefined;
+            }
             return;
         }
         if (message.action === 'provision') {
-            const commands = document.controls.filter(control => control.reason?.code === 'tool_unavailable').map(control => {
-                const tool = fields(control.plan?.tool) ? control.plan?.tool : undefined;
-                return fields(tool) && typeof tool.command === 'string' ? tool.command : '';
-            }).filter(command => command && command !== 'none');
-            if (!this.provision) { throw new Error('compliance.provisionTools : installation indisponible dans cette vue.'); }
+            const commands = document.controls
+                .filter(control => control.reason?.code === 'tool_unavailable')
+                .map(control => {
+                    const tool = fields(control.plan?.tool) ? control.plan?.tool : undefined;
+                    return fields(tool) && typeof tool.command === 'string' ? tool.command : '';
+                })
+                .filter(command => command && command !== 'none');
+            if (!this.provision) {
+                throw new Error('compliance.provisionTools : installation indisponible dans cette vue.');
+            }
             await this.provision([...new Set(commands)]);
             return;
         }
         if (message.action === 'pick' || message.action === 'raw' || message.action === 'folder') {
             const command = reportButtonCommand(message.action);
-            if (!command) { throw new Error('Action Webview inconnue.'); }
+            if (!command) {
+                throw new Error('Action Webview inconnue.');
+            }
             try {
-                if (message.action === 'pick') { await this.pick(); }
-                else if (message.action === 'raw') { await this.raw(); }
-                else { await this.openFolder(); }
+                if (message.action === 'pick') {
+                    await this.pick();
+                } else if (message.action === 'raw') {
+                    await this.raw();
+                } else {
+                    await this.openFolder();
+                }
             } catch (error) {
                 throw new Error(`${command} : ${error instanceof Error ? error.message : String(error)}`, { cause: error });
             }
@@ -442,8 +589,13 @@ export class ReportPanel implements vscode.Disposable {
         }
         if (message.action === 'output') {
             const control = document.controls.find(item => item.id === message.controlId);
-            if (!control?.result) { throw new Error('Contrôle inconnu ou sans sortie.'); }
-            await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ content: controlOutputText(document.runId, control.id, control.result), language: 'plaintext' })); return;
+            if (!control?.result) {
+                throw new Error('Contrôle inconnu ou sans sortie.');
+            }
+            await vscode.window.showTextDocument(
+                await vscode.workspace.openTextDocument({ content: controlOutputText(document.runId, control.id, control.result), language: 'plaintext' })
+            );
+            return;
         }
         if (message.action === 'files') {
             const html = findingFileTree(message.controlId, visibleFindings(document.report), false);
@@ -455,17 +607,29 @@ export class ReportPanel implements vscode.Disposable {
             await this.panel?.webview.postMessage({ type: 'fill', controlId: message.controlId, file: message.file, html });
             return;
         }
-        if (message.action !== 'finding') { throw new Error('Action Webview inconnue.'); }
+        if (message.action !== 'finding') {
+            throw new Error('Action Webview inconnue.');
+        }
         const findings = visibleFindings(document.report);
         const finding = findings[message.index];
-        if (!finding) { throw new Error('Finding inconnu.'); }
-        if (!findingLocation(finding) || !vscode.workspace.isTrusted) { throw new Error('Localisation fiable ou confiance absente.'); }
+        if (!finding) {
+            throw new Error('Finding inconnu.');
+        }
+        if (!findingLocation(finding) || !vscode.workspace.isTrusted) {
+            throw new Error('Localisation fiable ou confiance absente.');
+        }
         if (!this.navigationApproved) {
             if (hasMachineConsent(this.context.globalState.get<MachineConsent>(machineConsentKey))) {
                 this.navigationApproved = true;
             } else {
-                const approval = await vscode.window.showWarningMessage(`Rapport historique : autoriser la navigation dans cette Target ?\n${document.target}\nAucun contrôle ne sera exécuté.`, { modal: true }, 'Autoriser la navigation');
-                if (approval !== 'Autoriser la navigation') { return; }
+                const approval = await vscode.window.showWarningMessage(
+                    `Rapport historique : autoriser la navigation dans cette Target ?\n${document.target}\nAucun contrôle ne sera exécuté.`,
+                    { modal: true },
+                    'Autoriser la navigation'
+                );
+                if (approval !== 'Autoriser la navigation') {
+                    return;
+                }
                 this.navigationApproved = true;
             }
         }

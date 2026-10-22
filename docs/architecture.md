@@ -34,25 +34,30 @@ Le moteur reçoit un dossier local. Il ne demande ni compte de forge ni réseau 
 
 ## Résolution des outils
 
-1. `eslint` et `tsc` : `node_modules/.bin` de la cible, sinon `~/.compliance/tools/node`.
+1. Outils Node (`eslint`, `tsc`, `stylelint`, `htmlhint`) : `node_modules/.bin` de la racine du contrôle puis de ses parents, sinon `~/.compliance/tools/node`.
 2. Les autres outils : `.tools/bin` du dépôt de développement, puis `~/.compliance/tools/{bin,python,node,powershell-modules}`, puis `PATH`. `COMPLIANCE_TOOLS_DIR` remplace `~/.compliance/tools` (tests isolés sur le poste).
 3. ESLint, `tsc` et Gitleaks forment un seul contrôle par technologie. ESLint tourne une fois dans chaque racine réunie ; `tsc` vérifie chaque `tsconfig.json` ; Gitleaks parcourt le dépôt entier.
 4. OpenTofu : TFLint et Checkov lisent une copie temporaire de la racine où chaque `.tofu` devient `.tf` ; les anomalies citent les fichiers `.tofu`.
 5. Windows sur ARM : un outil absent de l'entrée `windows-arm64` du manifeste vient de `windows-x64` et s'installe sous `bin/windows-x64`.
-6. `secrets` (Gitleaks, tout le dépôt) et `yaml` (yamllint hors Ansible et hors templates) sont des technologies transverses détectées par la découverte.
+6. `secrets` (Gitleaks, tout le dépôt), `yaml` (yamllint hors Ansible et hors templates) et `dependencies` (osv-scanner, Trivy en alternative) sont des technologies transverses détectées par la découverte.
+7. `css` et `html` appartiennent au `package.json` le plus proche, sinon à leur dossier ; `go` à son `go.mod`. golangci-lint exige la commande `go` dans le `PATH`.
 
 Les outils Python du registre passent par `python -m`, pas par un shebang figé. Checkov est qualifié par un import court (`python -c`), pas par le CLI, avec un délai de 60 secondes et un interpréteur isolé (`PYTHONNOUSERSITE`, `PYTHONPATH` vide). Trivy est qualifié avec un cache local et sans vérification de version en ligne. Un échec ou un délai de sonde est `probe_failed` : le rapport le montre et ne propose pas de le réinstaller. Seul un binaire absent du disque reste « installable depuis le manifeste ». Sur Windows, `ansible` et `ansible-lint` sont incompatibles avant cette recherche : `yamllint` couvre les playbooks. Une longue liste de fichiers est découpée sous 24 000 caractères. L'extraction d'une archive utilise les chemins étendus Windows quand le chemin dépasse 248 caractères.
 
 Le registre est la release GitHub `tools-v1` (`https://github.com/LORD-SOUPEX/Compliance_Platform/releases/tag/tools-v1`). Les assets sont à plat : `<plateforme>-<outil>-<version>.<ext>`.
 
-- Dix binaires natifs (`ruff`, `gitleaks`, `tflint`, `trivy`, `terraform`, `tofu`, `hadolint`, `terragrunt`, `shellcheck`, `rumdl`) pour `windows-x64`, `linux-x64`, `linux-arm64`, `macos-x64` et `macos-arm64`.
-- Bundle Python Windows x64 : CPython 3.11.9 et `checkov`, `bandit`, `pylint`, `pytest`, `pip-audit`, `yamllint`. Sur Linux et macOS, le même bundle se construit sur un hôte POSIX ou les outils viennent du `PATH`.
-- Bundle Node Windows x64 : Node 22.14.0, ESLint 9.21.0, TypeScript 5.7.3. Aucun `npm install`.
+- Quinze binaires natifs (`ruff`, `gitleaks`, `tflint`, `trivy`, `terraform`, `tofu`, `hadolint`, `terragrunt`, `shellcheck`, `rumdl`, `shfmt`, `kubeconform`, `biome`, `osv-scanner`, `golangci-lint`) pour `windows-x64`, `linux-x64`, `linux-arm64`, `macos-x64` et `macos-arm64`.
+- Bundle Python : CPython 3.11.9 et `checkov`, `bandit`, `pylint`, `pytest`, `pip-audit`, `yamllint` (plus `ansible-lint` hors Windows). Il contient des roues compilées : il se construit sur un hôte natif de chaque plateforme.
+- Bundle Node pour les cinq plateformes : Node 22.14.0, ESLint 9.21.0, TypeScript 5.7.3, Stylelint 17.16.0, HTMLHint 1.9.2. Les paquets sont du JavaScript pur, installés une fois ; seul le binaire `node` change. Windows reçoit des lanceurs `.cmd`, Linux et macOS des liens symboliques dans `node_modules/.bin` et `node/bin/node` en `0755`. Aucun `npm install` sur le poste audité.
 - `PSScriptAnalyzer` 1.23.0 dans `~/.compliance/tools/powershell-modules`.
 
 L'URL du registre se change avec `compliance.registryUrl`, `-registry-url` ou `COMPLIANCE_REGISTRY_URL`. Le jeton est conservé dans le stockage sécurisé de VS Code (`SecretStorage`) et passe au moteur par `COMPLIANCE_REGISTRY_TOKEN`, jamais en argument de ligne de commande. Une signature Ed25519 absente ou différente produit un avertissement et n'empêche pas l'installation. Une somme SHA-256 d'archive ou de binaire différente refuse l'outil. Le bundle d'autorité de certification d'entreprise est lu depuis `COMPLIANCE_CA_BUNDLE`, `SSL_CERT_FILE`, un fichier local, puis le magasin Windows, et il est transmis aux sondes, aux contrôles et aux téléchargements. Les variables `HTTPS_PROXY` et `HTTP_PROXY` du processus sont conservées.
 
 Au démarrage, le démon interroge `<registry_base_url>/runtime-manifest.json` et `<registry_base_url>/control-catalog.json` pendant au plus 3 secondes. Si le manifeste distant annonce une version d'outil plus haute, un `catalog_revision` plus grand, ou un outil nouveau, les deux fichiers sont écrits dans `~/.compliance/registry-cache/`. Un outil déjà installé dans `~/.compliance/tools/` est alors remplacé par cette version. Hors ligne, le démon utilise ce cache, puis les fichiers embarqués dans le binaire. La version du `.vsix` ne change pas.
+
+## Adaptateurs d'outils
+
+Chaque outil du catalogue a un adaptateur (`core/internal/engine/adapters.go`) : son lecteur de sortie, s'il faut lire stderr (Stylelint, Bandit, pip-audit, yamllint, golangci-lint, Terragrunt) et comment reconnaître un arrêt de l'outil sur sa propre erreur (rendu en `error`, jamais en `fail`). Un test exige un adaptateur pour chaque outil du catalogue. Le lecteur SARIF commun sert Biome, osv-scanner, golangci-lint et ansible-lint ; il lit les URI `file:///` des trois OS. Ajouter un outil : une entrée de catalogue, un cas de commande dans `BuildInvocation`, un adaptateur.
 
 ## Compteurs du rapport
 

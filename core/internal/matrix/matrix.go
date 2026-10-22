@@ -236,13 +236,7 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 
 		probeArgs := distribution.VersionArgs(platform.ID, command)
 		if len(probeArgs) == 0 {
-			probeArgs = []string{"--version"}
-			if command == "terraform" || command == "tofu" || command == "opentofu" {
-				probeArgs = []string{"version"}
-			}
-			if command == "kubeconform" {
-				probeArgs = []string{"-v"}
-			}
+			probeArgs = osutil.DefaultVersionArgs(command)
 		}
 
 		timeout := osutil.ProbeTimeoutFor(command)
@@ -382,7 +376,7 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 	// Priority 1: Target node_modules/.bin
 	// Priority 2: Bundle ~/.compliance/tools/node (or .tools/node)
 	// Priority 3: System PATH
-	if command == "eslint" || command == "tsc" {
+	if osutil.NodeTool(command) {
 		cmdNames := []string{command, command + ".cmd", command + ".exe", command + ".ps1"}
 		if repoRoot != "" {
 			targetBin := filepath.Join(repoRoot, "node_modules", ".bin")

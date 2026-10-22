@@ -20,6 +20,28 @@ var ProbeTimeoutFor = func(command string) time.Duration {
 	return 10 * time.Second
 }
 
+// DefaultVersionArgs is the version probe of a native tool when the manifest has none.
+func DefaultVersionArgs(command string) []string {
+	switch command {
+	case "terraform", "tofu", "opentofu", "golangci-lint":
+		return []string{"version"}
+	case "kubeconform":
+		return []string{"-v"}
+	default:
+		return []string{"--version"}
+	}
+}
+
+// NodeTool reports tools installed in a Node package (repository node_modules or the managed bundle).
+func NodeTool(command string) bool {
+	switch command {
+	case "eslint", "tsc", "stylelint", "htmlhint":
+		return true
+	default:
+		return false
+	}
+}
+
 // CheckovProbeArgs imports the package and prints its version without
 // starting the Checkov CLI, which pulls policies and the network. Checkov 3
 // has no checkov.__version__: the installed distribution metadata gives it.
