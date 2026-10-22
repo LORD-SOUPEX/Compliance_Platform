@@ -1,5 +1,16 @@
 # Changelog
 
+## Non publié
+
+- **Journal du démon** : `~/.compliance/logs/daemon.log` en JSON, avec rotation, et `daemon-console.log` pour stdout et stderr du processus. Chaque phase du démarrage est horodatée. Les sondes d'outils sont tracées avec le résultat du cache. Le flux `GET /api/v1/logs/stream` relaie le journal à l'extension.
+- **Commandes exécutées** : chaque processus d'un contrôle est décrit dans `invocations[]` (exécutable, arguments, `cwd`, variables ajoutées ou retirées, timeout, code retour, durée, octets lus) et annoncé par l'évènement `control_invocation`. Les secrets sont masqués.
+- **Sorties complètes** : stdout et stderr de chaque processus sont écrits séparément dans le dossier `logs` de la session, au-delà de la limite de capture du rapport.
+- **Canal Compliance** : `LogOutputChannel` avec niveaux et horodatage, corrélation par session et par contrôle. Nouvelle commande **ICP: Ouvrir le journal du démon**.
+- **Robustesse** : analyseur SSE conservant son état entre paquets ; une erreur pendant le flux d'un audit termine l'audit au lieu de le bloquer ; délai maximal sur chaque requête au démon ; deux démarrages simultanés partagent un même démon ; un démon déjà lancé par une autre fenêtre (code de sortie 3) n'est plus une erreur.
+- **Jeton du registre** : stocké dans le stockage sécurisé de VS Code (**ICP: Définir le jeton du registre d'outils**). Un `compliance.registryToken` présent dans `settings.json` y est déplacé puis effacé.
+- **Installation des outils** : l'extension lit le manifeste actif (cache du registre) comme le moteur. La sortie de `compliance runtime sync` est relayée dans le canal.
+- **ICP: Ouvrir les sorties du contrôle** affiche de nouveau stdout, stderr et diagnostics du contrôle choisi.
+
 ## 2.1.3
 
 - **Sonde et installation** : un outil présent dont la qualification échoue ou expire reste un échec de sonde (`probe_failed`). Il n'est plus réécrit en « Outil installable depuis le manifeste » et ne relance pas l'installation. Seul un outil absent du disque et déclaré au manifeste reste `tool_unavailable`.

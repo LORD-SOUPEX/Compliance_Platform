@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,6 +20,7 @@ import (
 	"compliance/internal/discovery"
 	"compliance/internal/distribution"
 	"compliance/internal/embedded"
+	"compliance/internal/logging"
 	"compliance/internal/matrix"
 	"compliance/internal/osutil"
 	"compliance/internal/report"
@@ -1290,6 +1292,74 @@ type ExecutionOptions struct {
 	Redactor       *Redactor
 	OnControlStart func(ctrl *PlannedControl)
 	OnControlDone  func(ctrl *PlannedControl, res *report.ExecutionResult)
+	// OnInvocation runs just before each process of a control starts.
+	OnInvocation func(ctrl *PlannedControl, inv report.Invocation)
+	// LogDir receives the complete stdout and stderr of every process. Empty keeps them in memory only.
+	LogDir string
+	// OutputFileLimit bounds each stream file. Zero means DefaultOutputFileLimit.
+	OutputFileLimit int64
+	Logger          *slog.Logger
+}
+
+// DefaultOutputFileLimit bounds one stream copy on disk.
+const DefaultOutputFileLimit = 50 * 1024 * 1024
+
+// LogFileBase maps a control id to a file name stem valid on every OS.
+// filepath.Base("javascript/linting/eslint/.") is "." on Windows, hence the replacer.
+func LogFileBase(controlID string) string {
+	name := strings.NewReplacer("/", "__", "\\", "__", ":", "_", "..", "_").Replace(strings.TrimSpace(controlID))
+	name = strings.Trim(name, "._ ")
+	if name == "" {
+		name = "control"
+	}
+	return name
+}
+
+// streamFiles opens the disk copies of one process. Index 0 is the main call; follow-ups are numbered from 2.
+// The returned paths are relative to the session folder, with forward slashes.
+func streamFiles(logDir, controlID string, index int, limit int64) (*osutil.CappedFile, *osutil.CappedFile, string, string) {
+	if logDir == "" {
+		return nil, nil, "", ""
+	}
+	if limit <= 0 {
+		limit = DefaultOutputFileLimit
+	}
+	stem := LogFileBase(controlID)
+	if index > 0 {
+		stem = fmt.Sprintf("%s.%d", stem, index+1)
+	}
+	outName, errName := stem+".stdout.log", stem+".stderr.log"
+	stdout, err := osutil.CreateCappedFile(filepath.Join(logDir, outName), limit)
+	if err != nil {
+		return nil, nil, "", ""
+	}
+	stderr, err := osutil.CreateCappedFile(filepath.Join(logDir, errName), limit)
+	if err != nil {
+		_ = stdout.Close()
+		return nil, nil, "", ""
+	}
+	prefix := filepath.Base(logDir)
+	return stdout, stderr, filepath.ToSlash(filepath.Join(prefix, outName)), filepath.ToSlash(filepath.Join(prefix, errName))
+}
+
+// redactStreamFile applies the session redaction patterns to a disk copy once the process ended.
+func redactStreamFile(path string, redactor *Redactor) {
+	if path == "" || redactor == nil || len(redactor.Patterns) == 0 {
+		return
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(path, []byte(redactor.Redact(string(body))), 0o600)
+}
+
+func redactedArgs(args []string, redactor *Redactor) []string {
+	out := logging.RedactArgs(args)
+	for i := range out {
+		out[i] = redactor.Redact(out[i])
+	}
+	return out
 }
 
 // ExecuteCompliancePlan runs all planned controls in topological order and produces ExecutionResults.
@@ -1307,6 +1377,11 @@ func ExecuteCompliancePlan(
 		globalTimeout = 1800 * time.Second
 	}
 
+	logger := opts.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	daemonEnv := os.Environ()
 	planStart := time.Now()
 	completed := make(map[string]*report.ExecutionResult)
 	var results []report.ExecutionResult
@@ -1493,7 +1568,7 @@ func ExecuteCompliancePlan(
 						var ran time.Duration
 						var truncated, cancelled, timedOut bool
 						var procErr error
-						for _, call := range calls {
+						for index, call := range calls {
 							exe, args := call.Executable, call.Arguments
 							if call.RawCommandLine == "" {
 								exe, args = osutil.ScriptCommand(call.Executable, call.Arguments)
@@ -1506,7 +1581,28 @@ func ExecuteCompliancePlan(
 							if len(call.Env) > 0 {
 								env = append(env, call.Env...)
 							}
-							procRes, err := osutil.RunBounded(ctx, osutil.CommandSpec{
+							record := report.Invocation{
+								Executable: filepath.ToSlash(exe),
+								Args:       redactedArgs(args, opts.Redactor),
+								Cwd:        filepath.ToSlash(execRoot),
+								TimeoutMs:  effectiveTimeout.Milliseconds(),
+								StartedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+							}
+							if call.RawCommandLine != "" {
+								raw := opts.Redactor.Redact(logging.RedactText(call.RawCommandLine))
+								record.RawCommandLine = &raw
+							}
+							record.EnvAdded, record.EnvRemoved = logging.EnvDiff(daemonEnv, env)
+							stdoutFile, stderrFile, stdoutPath, stderrPath := streamFiles(opts.LogDir, ctrl.ID, index, opts.OutputFileLimit)
+							if stdoutFile != nil {
+								record.StdoutPath, record.StderrPath = &stdoutPath, &stderrPath
+							}
+							if opts.OnInvocation != nil {
+								opts.OnInvocation(ctrl, record)
+							}
+							logger.Debug("control_invocation", "control_id", ctrl.ID, "executable", record.Executable, "args", record.Args,
+								"cwd", record.Cwd, "env_added", record.EnvAdded, "env_removed", record.EnvRemoved, "timeout_ms", record.TimeoutMs)
+							spec := osutil.CommandSpec{
 								Executable:       exe,
 								Args:             args,
 								CommandLine:      call.RawCommandLine,
@@ -1516,11 +1612,38 @@ func ExecuteCompliancePlan(
 									Timeout:        effectiveTimeout,
 									MaxOutputBytes: ctrl.MaxOutputBytes,
 								},
-							})
+							}
+							if stdoutFile != nil {
+								spec.StdoutSink, spec.StderrSink = stdoutFile, stderrFile
+							}
+							procRes, err := osutil.RunBounded(ctx, spec)
+							if stdoutFile != nil {
+								record.TruncatedOnDisk = stdoutFile.Truncated() || stderrFile.Truncated()
+								_ = stdoutFile.Close()
+								_ = stderrFile.Close()
+								redactStreamFile(filepath.Join(opts.LogDir, filepath.Base(stdoutPath)), opts.Redactor)
+								redactStreamFile(filepath.Join(opts.LogDir, filepath.Base(stderrPath)), opts.Redactor)
+							}
 							if err != nil {
+								message := err.Error()
+								record.Error = &message
+								res.Invocations = append(res.Invocations, record)
+								logger.Error("control_process_error", "control_id", ctrl.ID, "executable", record.Executable, "err", err)
 								procErr = err
 								break
 							}
+							code := procRes.ExitCode
+							record.ExitCode = &code
+							record.DurationMs = procRes.Duration.Milliseconds()
+							record.TimedOut = procRes.TimedOut
+							record.Cancelled = procRes.Cancelled
+							record.StdoutBytes = procRes.StdoutBytes
+							record.StderrBytes = procRes.StderrBytes
+							record.TruncatedInReport = procRes.OutputTruncated
+							res.Invocations = append(res.Invocations, record)
+							logger.Debug("control_process_exit", "control_id", ctrl.ID, "exit_code", code, "duration_ms", record.DurationMs,
+								"timed_out", record.TimedOut, "cancelled", record.Cancelled, "stdout_bytes", record.StdoutBytes,
+								"stderr_bytes", record.StderrBytes, "truncated_in_report", record.TruncatedInReport)
 							if stdoutBuf.Len() > 0 && procRes.Stdout != "" {
 								stdoutBuf.WriteString("\n")
 							}
@@ -1967,6 +2090,8 @@ type ComplianceOptions struct {
 	OnPlanReady             func(planReport *report.Report)
 	OnControlStart          func(ctrl *PlannedControl)
 	OnControlDone           func(ctrl *PlannedControl, res *report.ExecutionResult)
+	OnInvocation            func(ctrl *PlannedControl, inv report.Invocation)
+	LogDir                  string
 	DisabledTechnologies    []string
 	DisabledControls        []string
 }
@@ -2080,6 +2205,9 @@ func RunCompliance(ctx context.Context, opts ComplianceOptions) (*report.Report,
 			Redactor:       redactor,
 			OnControlStart: opts.OnControlStart,
 			OnControlDone:  opts.OnControlDone,
+			OnInvocation:   opts.OnInvocation,
+			LogDir:         opts.LogDir,
+			Logger:         slog.Default().With("run_id", opts.RunID),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("exécution du plan de conformité échouée: %w", err)

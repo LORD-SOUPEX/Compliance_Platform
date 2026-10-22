@@ -148,8 +148,8 @@ func runBoundedOS(ctx context.Context, spec CommandSpec) (*ProcessResult, error)
 	if maxOutput <= 0 {
 		maxOutput = 1024 * 1024
 	}
-	stdoutCap := NewBoundedCapture(maxOutput)
-	stderrCap := NewBoundedCapture(maxOutput)
+	stdoutCap := NewBoundedCaptureWithSink(maxOutput, spec.StdoutSink)
+	stderrCap := NewBoundedCaptureWithSink(maxOutput, spec.StderrSink)
 
 	startTime := time.Now()
 	if err := cmd.Start(); err != nil {
@@ -210,6 +210,8 @@ func runBoundedOS(ctx context.Context, spec CommandSpec) (*ProcessResult, error)
 	result.Stderr = stderrCap.String()
 	result.OutputTruncated = stdoutCap.Truncated() || stderrCap.Truncated()
 	result.TotalBytesRead = stdoutCap.TotalRead() + stderrCap.TotalRead()
+	result.StdoutBytes = stdoutCap.TotalRead()
+	result.StderrBytes = stderrCap.TotalRead()
 	result.TimedOut = timedOut
 	result.Cancelled = cancelled
 

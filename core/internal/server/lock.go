@@ -12,6 +12,10 @@ var (
 	ErrDaemonAlreadyRunning = errors.New("une instance du démon compliance est déjà en cours d'exécution")
 )
 
+// ExitAlreadyRunning is the daemon exit code when another instance holds the lock.
+// A client that sees it waits for the running daemon instead of reporting a failure.
+const ExitAlreadyRunning = 3
+
 // WriteDaemonState writes daemon.json atomically.
 func WriteDaemonState(statePath string, state DaemonState) error {
 	dir := filepath.Dir(statePath)

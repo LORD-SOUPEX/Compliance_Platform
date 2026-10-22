@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -167,6 +168,7 @@ func RefreshRegistry(ctx context.Context, opts RefreshOptions) RegistrySelection
 	remoteManifest, manifestErr := fetchLimited(fetchCtx, client, registryURL+"/runtime-manifest.json", opts.RegistryToken)
 	remoteCatalog, catalogErr := fetchLimited(fetchCtx, client, registryURL+"/control-catalog.json", opts.RegistryToken)
 	if manifestErr != nil || catalogErr != nil || !validManifest(remoteManifest) || !validCatalog(remoteCatalog) {
+		slog.Warn("registry_unreachable", "url", registryURL, "manifest_err", manifestErr, "catalog_err", catalogErr)
 		RememberRegistry(selection)
 		return selection
 	}
@@ -190,7 +192,7 @@ func RefreshRegistry(ctx context.Context, opts RefreshOptions) RegistrySelection
 	selection.CatalogPath = cacheCatalog
 	selection.Source = "remote"
 	RememberRegistry(selection)
-	fmt.Fprintf(os.Stderr, "[INFO] Registre distant plus récent : manifeste et catalogue mis en cache.\n")
+	slog.Info("registry_refreshed", "url", registryURL, "manifest", cacheManifest, "catalog", cacheCatalog)
 	return selection
 }
 
@@ -251,6 +253,7 @@ func UpgradeInstalledTools(opts UpgradeOptions) []string {
 		if !versionNewer(entry.Version, known) {
 			continue
 		}
+		slog.Info("tool_upgrade_started", "tool", name, "from", known, "version", entry.Version)
 		_, syncErr := SyncRuntime(SyncOptions{
 			ManifestPath:  opts.ManifestPath,
 			SigPath:       opts.SigPath,
@@ -261,13 +264,13 @@ func UpgradeInstalledTools(opts UpgradeOptions) []string {
 			RegistryToken: opts.Token,
 		})
 		if syncErr != nil {
-			fmt.Fprintf(os.Stderr, "[WARN] Mise à jour de %s ignorée : %v\n", name, syncErr)
+			slog.Warn("tool_upgrade_failed", "tool", name, "version", entry.Version, "err", syncErr)
 			continue
 		}
 		stamp[name] = entry.Version
 		changed = true
 		upgraded = append(upgraded, name)
-		fmt.Fprintf(os.Stderr, "[INFO] %s mis à jour vers %s.\n", name, entry.Version)
+		slog.Info("tool_upgraded", "tool", name, "from", known, "version", entry.Version)
 	}
 	if changed {
 		_ = writeInstalledVersions(opts.CacheDir, stamp)

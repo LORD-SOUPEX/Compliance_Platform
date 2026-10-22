@@ -122,6 +122,17 @@
         "icon": "$(output)"
       },
       {
+        "command": "compliance.showDaemonLog",
+        "category": "ICP",
+        "title": "Ouvrir le journal du démon",
+        "icon": "$(file-text)"
+      },
+      {
+        "command": "compliance.setRegistryToken",
+        "category": "ICP",
+        "title": "Définir le jeton du registre d'outils"
+      },
+      {
         "command": "compliance.authorizeMachine",
         "category": "ICP",
         "title": "Autoriser Compliance sur cette machine"
@@ -255,8 +266,9 @@
           "type": "string",
           "default": "",
           "scope": "application",
-          "description": "Jeton d'authentification Bearer pour le registre d'outils privé.",
-          "markdownDescription": "Jeton d'authentification Bearer pour le registre d'outils privé. Peut également être défini via la variable d'environnement `COMPLIANCE_REGISTRY_TOKEN`."
+          "description": "Obsolète : utiliser la commande « ICP: Définir le jeton du registre d'outils ».",
+          "markdownDescription": "Obsolète. Le jeton est conservé dans le stockage sécurisé de VS Code (commande **ICP: Définir le jeton du registre d'outils**). Une valeur saisie ici y est déplacée au démarrage, puis effacée de `settings.json`. La variable d'environnement `COMPLIANCE_REGISTRY_TOKEN` reste lue par le moteur.",
+          "markdownDeprecationMessage": "Utiliser la commande **ICP: Définir le jeton du registre d'outils**. Ce réglage est synchronisé en clair par Settings Sync."
         }
       }
     }

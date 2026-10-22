@@ -95,7 +95,9 @@ La découverte ignore `.git`, `.vscode`, `.vscode-test`, `.rumdl_cache`, `node_m
 | ICP: Ouvrir compliance-report.json | Ouvre le fichier de rapport dans l'éditeur. |
 | ICP: Ouvrir les sorties du contrôle | Montre stdout et stderr du contrôle sélectionné dans l'arbre. |
 | ICP: Ouvrir le dossier de session | Ouvre le dossier de la session dans l'explorateur du système. |
-| ICP: Ouvrir le journal Output | Affiche le canal **Compliance** (durées, purge, contrôles). |
+| ICP: Ouvrir le journal Output | Affiche le canal **Compliance** : horodatage et niveau par ligne, commande exacte de chaque outil au niveau Debug. |
+| ICP: Ouvrir le journal du démon | Ouvre `~/.compliance/logs/daemon.log` (JSON, une ligne par évènement). |
+| ICP: Définir le jeton du registre d'outils | Enregistre ou efface le jeton du miroir privé dans le stockage sécurisé de VS Code. |
 
 Dans le rapport : **Ouvrir un rapport…** choisit un `compliance-report.json` dans le dossier des sessions, **JSON brut** ouvre le fichier, **Dossier de session** ouvre le dossier. **Installer les outils manquants** télécharge, sans nouveau dialogue si l'autorisation machine est déjà accordée, les outils listés dans le manifeste. Chaque contrôle exécuté (réussi, échec ou erreur) a **Ouvrir les sorties**. **Ouvrir à la ligne** ouvre le fichier de l'anomalie, reconstitué depuis la racine du contrôle, à la ligne indiquée. Le bandeau utilise le logo `media/icon.png` et des icônes SVG, sans emoji.
 
@@ -105,11 +107,11 @@ Une seule demande, mémorisée sur la machine (`compliance.machineConsent`) : t�
 
 ## Outils
 
-L'installation du VSIX ne télécharge pas les outils d'audit. Après l'autorisation machine, un outil manquant du manifeste est téléchargé en HTTPS depuis le registre auto-hébergé `tools-v1` (`https://github.com/LORD-SOUPEX/Compliance_Platform/releases/tag/tools-v1`) sans nouvelle fenêtre. L'archive est extraite sous `~/.compliance/tools`, sans droits administrateur. Une signature ou une somme SHA-256 différente est signalée par un avertissement journalisé mais ne bloque pas l'installation. Une coupure réseau ou un proxy (`HTTP_PROXY` / `HTTPS_PROXY`) n'installe rien.
+L'installation du VSIX ne télécharge pas les outils d'audit. Après l'autorisation machine, un outil manquant du manifeste est téléchargé en HTTPS depuis le registre auto-hébergé `tools-v1` (`https://github.com/LORD-SOUPEX/Compliance_Platform/releases/tag/tools-v1`) sans nouvelle fenêtre. L'archive est extraite sous `~/.compliance/tools`, sans droits administrateur. Une signature absente ou différente est signalée par un avertissement journalisé sans bloquer l'installation. Une somme SHA-256 différente refuse l'outil. Une coupure réseau ou un proxy (`HTTP_PROXY` / `HTTPS_PROXY`) n'installe rien.
 
 Sur le registre `tools-v1`, les 10 outils natifs sont fournis pour les 5 plateformes cibles (`windows-x64`, `linux-x64`, `linux-arm64`, `macos-x64`, `macos-arm64`). Les bundles Python (`checkov`, `bandit`, `pylint`, `pytest`, `pip-audit`, `yamllint`), Node (`eslint`, `tsc`) et `PSScriptAnalyzer` sont publiés et qualifiés pour `windows-x64` (sur Linux et macOS, les bundles peuvent être construits sur un hôte POSIX avec `scripts/build_and_publish_tools.py` ou résolus via le PATH du système).
 
-Les outils natifs sont extraits sous `~/.compliance/tools/bin/<plateforme>`. Les outils Python s'installent dans le bundle autonome `~/.compliance/tools/python` et s'exécutent via leur interpréteur relatif (`python -m <module>`). `Invoke-ScriptAnalyzer` s'installe depuis le registre dans `~/.compliance/tools/powershell-modules/PSScriptAnalyzer`. Les entreprises peuvent rediriger les téléchargements vers un miroir privé via le réglage `compliance.registryUrl` et un jeton optionnel `compliance.registryToken` (transmis de manière sécurisée au démon via la variable d'environnement `COMPLIANCE_REGISTRY_TOKEN`). Détail : `docs/architecture.md`.
+Les outils natifs sont extraits sous `~/.compliance/tools/bin/<plateforme>`. Les outils Python s'installent dans le bundle autonome `~/.compliance/tools/python` et s'exécutent via leur interpréteur relatif (`python -m <module>`). `Invoke-ScriptAnalyzer` s'installe depuis le registre dans `~/.compliance/tools/powershell-modules/PSScriptAnalyzer`. Les entreprises peuvent rediriger les téléchargements vers un miroir privé via le réglage `compliance.registryUrl` et un jeton optionnel enregistré par **ICP: Définir le jeton du registre d'outils**. Le jeton reste dans le stockage sécurisé de VS Code et passe au moteur par la variable d'environnement `COMPLIANCE_REGISTRY_TOKEN`, jamais en argument. Un ancien `compliance.registryToken` de `settings.json` y est déplacé au démarrage. Détail : `docs/architecture.md`.
 
 ## Rapports et sessions
 

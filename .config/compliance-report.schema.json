@@ -35,7 +35,33 @@
         "status": { "enum": ["success", "fail", "error", "skipped"] },
         "severity": { "enum": ["low", "medium", "high", "critical"] },
         "duration_ms": { "type": "integer", "minimum": 0 },
-        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } }
+        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } },
+        "invocations": { "type": "array", "items": { "$ref": "#/$defs/invocation" } }
+      }
+    },
+    "invocation": {
+      "type": "object",
+      "required": ["executable", "args", "cwd", "env_added", "env_removed", "timeout_ms", "started_at", "duration_ms", "exit_code", "timed_out", "cancelled", "stdout_bytes", "stderr_bytes"],
+      "properties": {
+        "executable": { "type": "string" },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "raw_command_line": { "type": ["string", "null"] },
+        "cwd": { "type": "string" },
+        "env_added": { "type": "object", "additionalProperties": { "type": "string" } },
+        "env_removed": { "type": ["array", "null"], "items": { "type": "string" } },
+        "timeout_ms": { "type": "integer", "minimum": 0 },
+        "started_at": { "type": "string", "format": "date-time" },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "exit_code": { "type": ["integer", "null"] },
+        "timed_out": { "type": "boolean" },
+        "cancelled": { "type": "boolean" },
+        "stdout_bytes": { "type": "integer", "minimum": 0 },
+        "stderr_bytes": { "type": "integer", "minimum": 0 },
+        "stdout_path": { "type": ["string", "null"] },
+        "stderr_path": { "type": ["string", "null"] },
+        "truncated_on_disk": { "type": "boolean" },
+        "truncated_in_report": { "type": "boolean" },
+        "error": { "type": ["string", "null"] }
       }
     },
     "finding": {

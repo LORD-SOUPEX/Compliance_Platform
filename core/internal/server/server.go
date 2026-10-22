@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -24,6 +25,7 @@ import (
 
 	"compliance/internal/discovery"
 	"compliance/internal/engine"
+	"compliance/internal/logging"
 	"compliance/internal/matrix"
 	"compliance/internal/osutil"
 	"compliance/internal/report"
@@ -529,9 +531,20 @@ func (sm *SessionManager) purgeRuns(runDir, protect string, reserve int) {
 }
 
 func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req CreateRunRequest) {
+	log := slog.Default().With("run_id", s.ID)
+	started := time.Now()
+	log.Info("session_started", "target", req.TargetPath, "plan_only", req.PlanOnly, "network", req.AllowNetwork,
+		"code_execution", req.AllowCodeExecution, "output_dir", s.OutputDir)
+	defer func() {
+		s.mu.RLock()
+		state := s.State
+		s.mu.RUnlock()
+		log.Info("session_ended", "state", state, "duration_ms", time.Since(started).Milliseconds())
+	}()
 	defer sm.purgeRuns(s.OutputDir, s.ID, 0)
 	defer func() {
 		if r := recover(); r != nil {
+			log.Error("session_panic", "panic", fmt.Sprint(r))
 			s.mu.Lock()
 			s.State = "failed"
 			now := time.Now().UTC()
@@ -572,15 +585,23 @@ func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req Create
 			if b, err := json.MarshalIndent(planRep, "", "  "); err == nil {
 				planPath := filepath.Join(s.OutputDir, "execution-plan.json")
 				if wErr := os.WriteFile(planPath, b, 0600); wErr != nil {
-					fmt.Fprintf(os.Stderr, "[ERROR] Écriture de %s : %v\n", planPath, wErr)
+					slog.Error("write_failed", "path", planPath, "err", wErr)
 				}
 			}
 			s.emitEvent("plan_available", nil, nil, nil, planRep)
+		},
+		LogDir: filepath.Join(s.OutputDir, "logs"),
+		OnInvocation: func(ctrl *engine.PlannedControl, inv report.Invocation) {
+			ctrlID := ctrl.ID
+			tech := ctrl.Technology
+			root := ctrl.Root
+			s.emitEvent("control_invocation", &ctrlID, &tech, &root, inv)
 		},
 		OnControlStart: func(ctrl *engine.PlannedControl) {
 			ctrlID := ctrl.ID
 			tech := ctrl.Technology
 			root := ctrl.Root
+			log.Info("control_started", "control_id", ctrl.ID, "root", ctrl.Root)
 			s.emitEvent("control_started", &ctrlID, &tech, &root, map[string]interface{}{
 				"name":            ctrl.Name,
 				"capability":      ctrl.Capability,
@@ -624,9 +645,20 @@ func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req Create
 				}
 			}
 
+			level := slog.LevelInfo
+			if res.Status == "error" {
+				level = slog.LevelWarn
+			}
+			reasonCode := ""
+			if len(res.Diagnostics) > 0 {
+				reasonCode = res.Diagnostics[0].Code
+			}
+			log.Log(context.Background(), level, "control_completed", "control_id", ctrl.ID, "status", res.Status,
+				"presentation", presStatus, "reason", reasonCode, "exit_code", res.ExitCode, "duration_ms", res.DurationMs,
+				"findings", len(res.Leaks), "output_truncated", res.OutputTruncated)
 			logPath, lErr := WriteControlLog(s.OutputDir, ctrl.ID, res.Stdout, res.Stderr)
 			if lErr != nil {
-				fmt.Fprintf(os.Stderr, "[ERROR] Écriture des logs de contrôle %s : %v\n", ctrl.ID, lErr)
+				slog.Error("control_log_write_failed", "run_id", s.ID, "control_id", ctrl.ID, "err", lErr)
 			}
 
 			s.emitEvent("control_completed", &ctrlID, &tech, &root, map[string]interface{}{
@@ -660,7 +692,7 @@ func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req Create
 		if rep != nil {
 			if b, err := json.MarshalIndent(rep, "", "  "); err == nil {
 				if wErr := os.WriteFile(reportPath, b, 0600); wErr != nil {
-					fmt.Fprintf(os.Stderr, "[ERROR] Écriture de %s : %v\n", reportPath, wErr)
+					slog.Error("write_failed", "path", reportPath, "err", wErr)
 				}
 			}
 		}
@@ -686,6 +718,7 @@ func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req Create
 	if err != nil {
 		s.State = "failed"
 		s.mu.Unlock()
+		log.Error("session_failed", "err", err)
 		s.emitEvent("session_failed", nil, nil, nil, map[string]interface{}{
 			"error": err.Error(),
 		})
@@ -699,7 +732,7 @@ func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req Create
 	reportPath := filepath.Join(s.OutputDir, "compliance-report.json")
 	if repBytes, mErr := json.MarshalIndent(rep, "", "  "); mErr == nil {
 		if wErr := os.WriteFile(reportPath, repBytes, 0600); wErr != nil {
-			fmt.Fprintf(os.Stderr, "[ERROR] Écriture de %s : %v\n", reportPath, wErr)
+			slog.Error("write_failed", "path", reportPath, "err", wErr)
 		}
 	}
 
@@ -707,7 +740,7 @@ func (sm *SessionManager) executeRun(ctx context.Context, s *Session, req Create
 	if _, err := os.Stat(planPath); os.IsNotExist(err) {
 		if planBytes, pErr := json.MarshalIndent(rep, "", "  "); pErr == nil {
 			if wErr := os.WriteFile(planPath, planBytes, 0600); wErr != nil {
-				fmt.Fprintf(os.Stderr, "[ERROR] Écriture de %s : %v\n", planPath, wErr)
+				slog.Error("write_failed", "path", planPath, "err", wErr)
 			}
 		}
 	}
@@ -738,7 +771,7 @@ func mergeSessionFile(sessionPath string, updates map[string]interface{}) {
 	}
 	if sessBytes, err := json.MarshalIndent(data, "", "  "); err == nil {
 		if wErr := os.WriteFile(sessionPath, sessBytes, 0600); wErr != nil {
-			fmt.Fprintf(os.Stderr, "[ERROR] Écriture de %s : %v\n", sessionPath, wErr)
+			slog.Error("write_failed", "path", sessionPath, "err", wErr)
 		} else {
 			_ = os.Chmod(sessionPath, 0600)
 		}
@@ -763,12 +796,7 @@ func writeSessionSnapshot(sessionPath string, s *Session, state string, ended ti
 
 // ControlLogName maps a control id to a file name. filepath.Base("javascript/linting/eslint/.") is "." on Windows.
 func ControlLogName(controlID string) string {
-	name := strings.NewReplacer("/", "__", "\\", "__", ":", "_", "..", "_").Replace(strings.TrimSpace(controlID))
-	name = strings.Trim(name, "._ ")
-	if name == "" {
-		name = "control"
-	}
-	return name + ".log"
+	return engine.LogFileBase(controlID) + ".log"
 }
 
 // WriteControlLog stores stdout and stderr for one control, including an empty capture.
@@ -1094,6 +1122,7 @@ func (s *DaemonServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/runs/{id}/logs/{control_id...}", s.handleControlLogs)
 	mux.HandleFunc("POST /api/v1/reports/validate", s.handleValidateReport)
 	mux.HandleFunc("POST /api/v1/shutdown", s.handleShutdown)
+	mux.HandleFunc("GET /api/v1/logs/stream", s.handleLogStream)
 }
 
 func (s *DaemonServer) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -1307,6 +1336,49 @@ func (s *DaemonServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if ev.Type == "session_completed" || ev.Type == "session_cancelled" || ev.Type == "session_failed" {
 				return
 			}
+		}
+	}
+}
+
+// handleLogStream relays the daemon journal over SSE from the moment the client connects.
+// ?level=trace|debug|info|warn|error, debug by default. Records a slow client cannot take are dropped.
+func (s *DaemonServer) handleLogStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming SSE non supporté", http.StatusInternalServerError)
+		return
+	}
+	level := logging.ParseLevel(r.URL.Query().Get("level"))
+	feed, unsubscribe := logging.Stream().Subscribe(level, 512)
+	defer unsubscribe()
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	fmt.Fprint(w, ": journal\n\n")
+	flusher.Flush()
+
+	keepAlive := time.NewTicker(15 * time.Second)
+	defer keepAlive.Stop()
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-keepAlive.C:
+			fmt.Fprint(w, ": ping\n\n")
+			flusher.Flush()
+		case entry, ok := <-feed:
+			if !ok {
+				return
+			}
+			body, err := json.Marshal(entry)
+			if err != nil {
+				continue
+			}
+			fmt.Fprintf(w, "event: daemon_log\ndata: %s\n\n", body)
+			flusher.Flush()
 		}
 	}
 }

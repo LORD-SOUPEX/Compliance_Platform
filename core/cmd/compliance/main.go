@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,6 +18,7 @@ import (
 	"compliance/internal/distribution"
 	"compliance/internal/embedded"
 	"compliance/internal/engine"
+	"compliance/internal/logging"
 	"compliance/internal/osutil"
 	"compliance/internal/report"
 	"compliance/internal/selftest"
@@ -114,10 +117,19 @@ func runDaemon(args []string) {
 		cwd, _ := os.Getwd()
 		*platformRoot = cwd
 	}
+	bootStarted := time.Now()
+	closeLog := setupDaemonLog(*stateDir)
+	defer closeLog()
+	slog.Info("daemon_starting", "version", version, "pid", os.Getpid(), "os", runtime.GOOS, "arch", runtime.GOARCH,
+		"platform", distribution.DetectPlatform(), "state_dir", *stateDir, "platform_root", *platformRoot,
+		"path", logging.RedactText(os.Getenv("PATH")))
+	registryStarted := time.Now()
 	selection := distribution.RefreshRegistry(context.Background(), distribution.RefreshOptions{
 		LocalRoot: *platformRoot,
 		Timeout:   3 * time.Second,
 	})
+	slog.Info("registry_selected", "source", selection.Source, "manifest", selection.ManifestPath, "catalog", selection.CatalogPath,
+		"registry_url", logging.RedactText(selection.RegistryURL), "duration_ms", time.Since(registryStarted).Milliseconds())
 	if strings.TrimSpace(*catalogPath) == "" && selection.Source != "local" && selection.CatalogPath != "" {
 		*catalogPath = selection.CatalogPath
 	}
@@ -130,7 +142,9 @@ func runDaemon(args []string) {
 	})
 	resolvedCatalog, err := embedded.ResolveAsset("control-catalog.json", *catalogPath, filepath.Join(*platformRoot, ".config", "control-catalog.json"))
 	if err != nil {
+		slog.Error("catalog_missing", "err", err)
 		fmt.Fprintf(os.Stderr, "[ERROR] Catalogue de contrôles introuvable: %v\n", err)
+		closeLog()
 		os.Exit(1)
 	}
 	*catalogPath = resolvedCatalog
@@ -144,10 +158,17 @@ func runDaemon(args []string) {
 		Version:            version,
 	})
 	if err != nil {
+		code := 1
+		if errors.Is(err, server.ErrDaemonAlreadyRunning) {
+			code = server.ExitAlreadyRunning
+		}
+		slog.Error("daemon_start_failed", "err", err, "exit_code", code, "duration_ms", time.Since(bootStarted).Milliseconds())
 		fmt.Fprintf(os.Stderr, "[ERROR] Échec de démarrage du démon: %v\n", err)
-		os.Exit(1)
+		closeLog()
+		os.Exit(code)
 	}
 
+	slog.Info("daemon_ready", "url", srv.URL(), "catalog", *catalogPath, "duration_ms", time.Since(bootStarted).Milliseconds())
 	fmt.Printf("[INFO] Démon compliance démarré sur %s (PID %d)\n", srv.URL(), os.Getpid())
 	fmt.Printf("[INFO] Jeton Bearer généré et protégé avec succès\n")
 
@@ -157,11 +178,36 @@ func runDaemon(args []string) {
 	<-sigCh
 
 	fmt.Println("\n[INFO] Arrêt du démon compliance en cours...")
+	slog.Info("daemon_stopping")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Close(ctx)
 	fmt.Println("[INFO] Démon arrêté proprement.")
+	slog.Info("daemon_stopped")
+	closeLog()
 	os.Exit(0)
+}
+
+// setupDaemonLog writes the JSON journal to <state-dir>/logs/daemon.log.
+// COMPLIANCE_LOG_LEVEL selects trace, debug (default), info, warn or error.
+// Without a writable folder the daemon keeps running with the stderr logger.
+func setupDaemonLog(stateDir string) func() {
+	if stateDir == "" {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			stateDir = filepath.Join(home, ".compliance")
+		} else {
+			stateDir = ".compliance"
+		}
+	}
+	closeLog, err := logging.Setup(logging.Options{
+		Dir:   filepath.Join(stateDir, "logs"),
+		Level: logging.ParseLevel(os.Getenv("COMPLIANCE_LOG_LEVEL")),
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] Journal du démon indisponible : %v\n", err)
+		return func() {}
+	}
+	return closeLog
 }
 
 func runDiscovery(args []string) {

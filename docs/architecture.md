@@ -46,7 +46,7 @@ Le registre est la release GitHub `tools-v1` (`https://github.com/LORD-SOUPEX/Co
 - Bundle Node Windows x64 : Node 22.14.0, ESLint 9.21.0, TypeScript 5.7.3. Aucun `npm install`.
 - `PSScriptAnalyzer` 1.23.0 dans `~/.compliance/tools/powershell-modules`.
 
-L'URL du registre se change avec `compliance.registryUrl`, `-registry-url` ou `COMPLIANCE_REGISTRY_URL`. Le jeton passe par `compliance.registryToken` ou `COMPLIANCE_REGISTRY_TOKEN`, jamais en argument de ligne de commande. Une signature Ed25519 absente ou différente produit un avertissement et n'empêche pas l'installation. Une somme SHA-256 d'archive ou de binaire différente refuse l'outil. Le bundle d'autorité de certification d'entreprise est lu depuis `COMPLIANCE_CA_BUNDLE`, `SSL_CERT_FILE`, un fichier local, puis le magasin Windows, et il est transmis aux sondes, aux contrôles et aux téléchargements. Les variables `HTTPS_PROXY` et `HTTP_PROXY` du processus sont conservées.
+L'URL du registre se change avec `compliance.registryUrl`, `-registry-url` ou `COMPLIANCE_REGISTRY_URL`. Le jeton est conservé dans le stockage sécurisé de VS Code (`SecretStorage`) et passe au moteur par `COMPLIANCE_REGISTRY_TOKEN`, jamais en argument de ligne de commande. Une signature Ed25519 absente ou différente produit un avertissement et n'empêche pas l'installation. Une somme SHA-256 d'archive ou de binaire différente refuse l'outil. Le bundle d'autorité de certification d'entreprise est lu depuis `COMPLIANCE_CA_BUNDLE`, `SSL_CERT_FILE`, un fichier local, puis le magasin Windows, et il est transmis aux sondes, aux contrôles et aux téléchargements. Les variables `HTTPS_PROXY` et `HTTP_PROXY` du processus sont conservées.
 
 Au démarrage, le démon interroge `<registry_base_url>/runtime-manifest.json` et `<registry_base_url>/control-catalog.json` pendant au plus 3 secondes. Si le manifeste distant annonce une version d'outil plus haute, un `catalog_revision` plus grand, ou un outil nouveau, les deux fichiers sont écrits dans `~/.compliance/registry-cache/`. Un outil déjà installé dans `~/.compliance/tools/` est alors remplacé par cette version. Hors ligne, le démon utilise ce cache, puis les fichiers embarqués dans le binaire. La version du `.vsix` ne change pas.
 
@@ -66,6 +66,20 @@ Un contrôle écarté n'entre pas dans **Applicables**. Les codes hors périmèt
 - `bandit` écrit une ligne par anomalie (`{abspath}:{line}:{col}: {test_id} {severity}: {msg}`), pour que le bloc `metrics` du JSON ne consomme pas la capture avant les résultats. Un JSON précédé de texte ou coupé après un objet complet reste lu.
 - `hadolint` reste en `--format json`, une anomalie par fichier et par ligne.
 - Sans `eslint.config.*` ni `.eslintrc`, ESLint reçoit `--no-config-lookup` et une configuration minimale de règles de base. Les fichiers TypeScript utilisent `@typescript-eslint/parser` s'il est installé, sinon le TypeScript du bundle Node pour effacer les types avant l'analyse. `tsc` exige toujours un `tsconfig.json`.
+
+## Journaux
+
+Les trois OS suivent la même disposition, sous `~/.compliance` ou `COMPLIANCE_STATE_DIR`.
+
+| Fichier ou flux | Contenu |
+| --- | --- |
+| `logs/daemon.log` | Journal JSON du démon, une ligne par évènement (`daemon_starting`, `registry_selected`, `daemon_ready`, `tool_probe`, `control_invocation`, `control_completed`, `session_ended`…). Rotation à 5 Mio, 5 fichiers conservés, mode `0600`. `COMPLIANCE_LOG_LEVEL` : `trace`, `debug` (défaut), `info`, `warn`, `error`. |
+| `logs/daemon-console.log` | stdout et stderr du processus démon (panique, erreur avant l'ouverture du journal). Les dernières lignes sont reprises dans le message d'échec de démarrage. |
+| `GET /api/v1/logs/stream?level=…` | Flux SSE du journal (`event: daemon_log`) à partir de la connexion. L'extension le suit pendant une préparation ou un audit. |
+| `<session>/logs/<contrôle>.stdout.log` et `.stderr.log` | Flux complets de chaque processus (50 Mio au plus par flux), après application des motifs de masquage. Les appels suivants d'un même contrôle sont numérotés `.2`, `.3`. |
+| `execution_results[].invocations[]` | Exécutable, arguments, `cwd`, variables ajoutées ou retirées, timeout, durée, code retour, octets lus et chemins des flux. Les valeurs de variables sensibles (`*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*KEY*`…) et les identifiants dans les URL sont masqués. |
+
+Le canal **Compliance** de VS Code est un `LogOutputChannel` : le niveau se règle par « Developer: Set Log Level… ». Au niveau Info, il affiche le déroulé de l'audit et les avertissements du démon. Au niveau Debug, il ajoute la commande exacte de chaque outil, son dossier, ses variables et ses fichiers de sortie. Au niveau Trace, il reprend tout le journal du démon.
 
 ## Sécurité du démon
 

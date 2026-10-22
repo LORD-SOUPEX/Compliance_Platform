@@ -18,13 +18,71 @@ import {
 import { daemonBinaryDirectory, isOurDaemonImage } from './daemonLifecycle.js';
 import { countsAsUnavailable, groupUnavailableLines } from './reportLayout';
 import { engineVersionMismatch, expectedEngineVersion } from './engineVersion.js';
+import { DaemonLogEntry, errorMessage, formatInvocation, InvocationRecord, Logger, silentLogger } from './logger';
+import { SseEvent, SseParser } from './sse';
 
 export { engineVersionMismatch, expectedEngineVersion, setExpectedEngineVersion } from './engineVersion.js';
+
+let daemonLog: Logger = silentLogger;
+/** Routes daemon lifecycle and child-process traces to the extension channel. */
+export function setDaemonLogger(logger: Logger): void { daemonLog = logger; }
+
+function defaultStateDir(): string {
+    return process.env.COMPLIANCE_STATE_DIR || path.join(os.homedir(), '.compliance');
+}
+
+/** Exit code of `compliance daemon` when another instance holds the lock (server.ExitAlreadyRunning). */
+export const exitAlreadyRunning = 3;
+
+/** Journal written by the daemon (JSON lines) and console capture of its stdout and stderr. */
+export function daemonLogPaths(stateDir = defaultStateDir()): { journal: string; console: string } {
+    const logs = path.join(stateDir, 'logs');
+    return { journal: path.join(logs, 'daemon.log'), console: path.join(logs, 'daemon-console.log') };
+}
 
 function registryAsset(name: string, fallback: string): string {
     const cached = path.join(os.homedir(), '.compliance', 'registry-cache', name);
     return fsSync.existsSync(cached) ? cached : fallback;
 }
+
+/** Manifest the daemon and `runtime sync` actually use: registry cache first, then the copy shipped in the VSIX. */
+export function activeManifestPath(platformRoot: string): string {
+    return registryAsset('runtime-manifest.json', path.join(platformRoot, '.config', 'runtime-manifest.json'));
+}
+
+/** Opens the console capture for append, rotating it past 5 MiB. Returns undefined when the folder is not writable. */
+function openConsoleLog(file: string): number | undefined {
+    try {
+        fsSync.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+        try {
+            if (fsSync.statSync(file).size > 5 * 1024 * 1024) { fsSync.renameSync(file, `${file}.1`); }
+        } catch { /* absent, or still open by a previous daemon on Windows: keep appending */ }
+        const fd = fsSync.openSync(file, 'a', 0o600);
+        fsSync.writeSync(fd, `\n--- ${new Date().toISOString()} lancement par l'extension (pid ${process.pid}) ---\n`);
+        return fd;
+    } catch (error) {
+        daemonLog.warn('journal console du démon indisponible', { file, error: errorMessage(error) });
+        return undefined;
+    }
+}
+
+/** Last lines of a text file, for error messages. Never throws. */
+export async function tailFile(file: string, lines = 20): Promise<string> {
+    try {
+        const handle = await fs.open(file, 'r');
+        try {
+            const { size } = await handle.stat();
+            const length = Math.min(size, 16 * 1024);
+            const buffer = Buffer.alloc(length);
+            await handle.read(buffer, 0, length, size - length);
+            return buffer.toString('utf8').split(/\r?\n/).filter(Boolean).slice(-lines).join('\n');
+        } finally { await handle.close(); }
+    } catch { return ''; }
+}
+
+interface DaemonConnection { port: number; token: string; health: DaemonHealth }
+/** One start per state folder: concurrent callers (report restore, commands) share it instead of spawning twice. */
+const startups = new Map<string, Promise<DaemonConnection>>();
 
 export interface DaemonState {
     pid: number;
@@ -107,6 +165,26 @@ export class DaemonClient {
     }
 
     public async ensureDaemon(platformRoot: string): Promise<DaemonHealth> {
+        const key = path.resolve(this.stateDir!);
+        let pending = startups.get(key);
+        if (!pending) {
+            pending = this.startOrAttach(platformRoot).finally(() => startups.delete(key));
+            startups.set(key, pending);
+        }
+        const connection = await pending;
+        this.port = connection.port;
+        this.token = connection.token;
+        return connection.health;
+    }
+
+    private async startOrAttach(platformRoot: string): Promise<DaemonConnection> {
+        const started = Date.now();
+        const connection = await this.startOrAttachUnlogged(platformRoot);
+        daemonLog.debug('démon prêt', { version: connection.health.version, pid: connection.health.pid, port: connection.port, ms: Date.now() - started });
+        return connection;
+    }
+
+    private async startOrAttachUnlogged(platformRoot: string): Promise<DaemonConnection> {
         if (process.platform === 'win32' && process.env.SystemRoot) {
             try {
                 await fs.access(path.join(process.env.SystemRoot, 'System32'));
@@ -126,33 +204,53 @@ export class DaemonClient {
             const health = await this.getHealth();
             if (health && health.status === 'ok') {
                 if (!engineVersionMismatch(health.version, expectedEngineVersion())) {
-                    return health;
+                    daemonLog.debug('démon existant réutilisé', { pid: health.pid, port: state.port, version: health.version });
+                    return { port: this.port, token: this.token, health };
                 }
+                daemonLog.warn('démon d\'une autre version : remplacement', { running: health.version, expected: expectedEngineVersion(), pid: health.pid });
                 await this.shutdown();
             }
-        } catch {
-            // Daemon not running or invalid state file
+        } catch (error) {
+            daemonLog.debug('aucun démon joignable : lancement', { reason: errorMessage(error) });
         }
 
         const staged = await this.stagedRuntime(platformRoot);
 
         const args = ['daemon', '-state-dir', this.stateDir!, '-platform-root', staged.platformRoot];
+        const journals = daemonLogPaths(this.stateDir);
+        const consoleFd = openConsoleLog(journals.console);
         let spawnError: Error | undefined;
         let earlyExit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
-        this.daemonProcess = spawn(staged.binary, args, {
-            cwd: staged.cwd,
-            detached: true,
-            windowsHide: true,
-            stdio: 'ignore'
-        });
+        let otherInstance = false;
+        daemonLog.command('démon', staged.binary, args, staged.cwd);
+        try {
+            this.daemonProcess = spawn(staged.binary, args, {
+                cwd: staged.cwd,
+                detached: true,
+                windowsHide: true,
+                stdio: consoleFd === undefined ? 'ignore' : ['ignore', consoleFd, consoleFd]
+            });
+        } finally {
+            // The child holds its own handle; the extension host must not keep the file open.
+            if (consoleFd !== undefined) { try { fsSync.closeSync(consoleFd); } catch { /* already closed */ } }
+        }
         this.daemonProcess.once('error', (error) => { spawnError = error; });
-        this.daemonProcess.once('exit', (code, signal) => { earlyExit = { code, signal }; });
+        this.daemonProcess.once('exit', (code, signal) => {
+            if (code === exitAlreadyRunning) { otherInstance = true; return; }
+            earlyExit = { code, signal };
+        });
         this.daemonProcess.unref();
+        daemonLog.debug('démon lancé', { pid: this.daemonProcess.pid });
 
         const deadline = Date.now() + 15000;
         while (Date.now() < deadline) {
             if (spawnError || earlyExit) {
-                throw describeDaemonLaunchFailure(spawnError, earlyExit);
+                throw await describeWithJournal(describeDaemonLaunchFailure(spawnError, earlyExit), journals);
+            }
+            if (otherInstance) {
+                // Another window started the daemon first: wait for its daemon.json instead of failing.
+                daemonLog.debug('verrou détenu par un autre démon : attente de son état');
+                otherInstance = false;
             }
             await new Promise(r => setTimeout(r, 200));
             try {
@@ -167,14 +265,14 @@ export class DaemonClient {
                     if (engineVersionMismatch(health.version, expectedEngineVersion())) {
                         throw new Error(`Démon ${health.version} encore actif ; version attendue ${expectedEngineVersion()}.`);
                     }
-                    return health;
+                    return { port: this.port, token: this.token, health };
                 }
             } catch {
-                // Continue polling
+                // daemon.json absent, stale, or still the replaced daemon while the new one starts: keep polling
             }
         }
 
-        throw describeDaemonLaunchFailure(spawnError, earlyExit);
+        throw await describeWithJournal(describeDaemonLaunchFailure(spawnError, earlyExit), journals);
     }
 
     private async findComplianceBinary(platformRoot: string): Promise<string | null> {
@@ -224,20 +322,27 @@ export class DaemonClient {
         const bounded = Math.min(1000, Math.max(1, keep || 5));
         const args = ['sessions', 'purge', '-root', root, '-keep', String(bounded), '-reserve', String(reserve)];
         for (const name of protect) { if (name) { args.push('-protect', name); } }
+        daemonLog.command('purge des sessions', staged.binary, args, staged.cwd);
+        const started = Date.now();
         const output = await new Promise<string>((resolve, reject) => {
             execFile(staged.binary, args, { cwd: staged.cwd, windowsHide: true }, (error, stdout, stderr) => {
-                if (error) { reject(new Error(String(stderr || error.message))); return; }
+                if (error) {
+                    daemonLog.warn('purge des sessions en échec', { exit: (error as NodeJS.ErrnoException & { code?: unknown }).code, stderr: String(stderr).trim() });
+                    reject(new Error(String(stderr || error.message)));
+                    return;
+                }
+                daemonLog.debug('purge des sessions terminée', { ms: Date.now() - started });
                 resolve(String(stdout));
             });
         });
         return output.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
     }
 
-    public async installNodeToolchain(platformRoot: string, options?: { registryUrl?: string; registryToken?: string }): Promise<void> {
+    public async installNodeToolchain(platformRoot: string, options?: SyncOptions): Promise<void> {
         await this.syncTools(platformRoot, ['node'], options);
     }
 
-    public async syncTools(platformRoot: string, tools: string[], options?: { registryUrl?: string; registryToken?: string }): Promise<void> {
+    public async syncTools(platformRoot: string, tools: string[], options?: SyncOptions): Promise<void> {
         const staged = await this.stagedRuntime(platformRoot);
         const manifest = registryAsset('runtime-manifest.json', path.join(staged.platformRoot, '.config', 'runtime-manifest.json'));
         const signature = registryAsset('runtime-manifest.json.sig', path.join(staged.platformRoot, '.config', 'runtime-manifest.json.sig'));
@@ -251,12 +356,20 @@ export class DaemonClient {
         if (options?.registryToken) {
             spawnEnv.COMPLIANCE_REGISTRY_TOKEN = options.registryToken;
         }
+        const log = options?.log || daemonLog;
         for (const tool of tools) {
+            const args = ['runtime', 'sync', '-manifest', manifest, '-sig', signature, '-tool', tool, ...extraArgs];
+            const started = Date.now();
+            log.command(`installation de ${tool}`, staged.binary, args, staged.cwd);
             try {
                 await new Promise<void>((resolve, reject) => {
-                    const child = spawn(staged.binary, ['runtime', 'sync', '-manifest', manifest, '-sig', signature, '-tool', tool, ...extraArgs], { cwd: staged.cwd, env: spawnEnv, windowsHide: true });
+                    const child = spawn(staged.binary, args, { cwd: staged.cwd, env: spawnEnv, windowsHide: true });
                     let stderr = '';
-                    child.stderr?.on('data', chunk => { stderr += String(chunk); });
+                    relayLines(child.stdout, line => log.info(`${tool} : ${line}`));
+                    relayLines(child.stderr, line => {
+                        stderr += `${line}\n`;
+                        log.write(/^\[(ERROR|WARN)/.test(line) ? 'warn' : 'info', `${tool} : ${line}`);
+                    });
                     child.on('error', reject);
                     child.on('close', code => {
                         if (code === 0) { resolve(); }
@@ -264,8 +377,10 @@ export class DaemonClient {
                     });
                 });
                 installed.push(tool);
+                log.info(`${tool} installé`, { ms: Date.now() - started });
             } catch (error) {
-                const detail = error instanceof Error ? error.message : String(error);
+                const detail = errorMessage(error);
+                log.error(`${tool} non installé`, { ms: Date.now() - started, error: detail });
                 failed.push(`${tool} (${detail})`);
             }
         }
@@ -275,20 +390,21 @@ export class DaemonClient {
     }
 
     public async getHealth(): Promise<DaemonHealth> {
-        return this.request<DaemonHealth>('GET', '/api/v1/health');
+        return this.request<DaemonHealth>('GET', '/api/v1/health', undefined, 3000);
     }
 
     public async approveWorkspace(workspacePath: string): Promise<void> {
         await this.request('POST', '/api/v1/workspaces/approve', { workspace_path: workspacePath });
     }
 
-    public async getPlan(targetPath: string, options: { allowNetwork?: boolean; allowCodeExecution?: boolean; includeApplyDestroy?: boolean } = {}): Promise<PreparationReport> {
+    /** Planning probes every candidate tool (Checkov alone may take 60 s): ten minutes before giving up. */
+    public async getPlan(targetPath: string, options: { allowNetwork?: boolean; allowCodeExecution?: boolean; includeApplyDestroy?: boolean } = {}, signal?: AbortSignal): Promise<PreparationReport> {
         return this.request<PreparationReport>('POST', '/api/v1/plans', {
             target_path: targetPath,
             allow_network: options.allowNetwork ?? false,
             allow_code_execution: options.allowCodeExecution ?? false,
             include_apply_destroy: options.includeApplyDestroy ?? false
-        });
+        }, 10 * 60 * 1000, signal);
     }
 
     public async createRun(targetPath: string, options: CreateRunOptions = {}): Promise<RunCreationResult> {
@@ -307,128 +423,108 @@ export class DaemonClient {
         });
     }
 
-    public streamEvents(runId: string, onEvent: (event: any) => void, signal?: AbortSignal, lastEventId?: string): Promise<void> {
+    /**
+     * Session events until a terminal event. An exception thrown by onEvent rejects
+     * the promise (it used to escape as an uncaught exception from the socket handler).
+     */
+    public streamEvents(runId: string, onEvent: (event: unknown) => void, signal?: AbortSignal, lastEventId?: string): Promise<void> {
+        return this.openSse(`/api/v1/runs/${runId}/events`, event => {
+            let parsed: Record<string, unknown>;
+            try {
+                const value: unknown = JSON.parse(event.data);
+                if (!value || typeof value !== 'object' || Array.isArray(value)) { throw new Error('objet attendu'); }
+                parsed = value as Record<string, unknown>;
+            } catch (error) {
+                daemonLog.warn('événement SSE illisible ignoré', { event: event.event, id: event.id, error: errorMessage(error) });
+                return false;
+            }
+            if (event.event && !parsed.type) { parsed.type = event.event; }
+            if (event.id && !parsed.id) { parsed.id = event.id; }
+            onEvent(parsed);
+            return parsed.type === 'session_completed' || parsed.type === 'session_cancelled' || parsed.type === 'session_failed';
+        }, signal, lastEventId, 8000);
+    }
+
+    /** Live daemon journal from now on, until signal aborts. */
+    public streamLogs(level: string, onEntry: (entry: DaemonLogEntry) => void, signal: AbortSignal): Promise<void> {
+        return this.openSse(`/api/v1/logs/stream?level=${encodeURIComponent(level)}`, event => {
+            if (event.event !== 'daemon_log') { return false; }
+            try { onEntry(JSON.parse(event.data) as DaemonLogEntry); } catch { /* malformed record */ }
+            return false;
+        }, signal, undefined, 0);
+    }
+
+    /**
+     * One SSE connection. handle returns true to close after a terminal event.
+     * On abort, the connection stays open graceMs to receive the terminal event, then closes.
+     */
+    private openSse(urlPath: string, handle: (event: SseEvent) => boolean, signal: AbortSignal | undefined, lastEventId: string | undefined, graceMs: number): Promise<void> {
         return new Promise<void>((resolve, reject) => {
+            let settled = false;
+            let graceTimer: NodeJS.Timeout | undefined;
+            const finish = (error?: unknown) => {
+                if (settled) { return; }
+                settled = true;
+                if (graceTimer) { clearTimeout(graceTimer); }
+                signal?.removeEventListener('abort', onAbort);
+                req.destroy();
+                if (error) { reject(error instanceof Error ? error : new Error(String(error))); } else { resolve(); }
+            };
+            const onAbort = () => {
+                if (graceMs <= 0) { finish(); return; }
+                graceTimer = setTimeout(() => finish(), graceMs);
+            };
             const headers: Record<string, string> = {
                 'Host': `127.0.0.1:${this.port}`,
                 'Authorization': `Bearer ${this.token}`,
                 'Accept': 'text/event-stream'
             };
-            if (lastEventId) {
-                headers['Last-Event-ID'] = lastEventId;
-            }
+            if (lastEventId) { headers['Last-Event-ID'] = lastEventId; }
 
-            const req = http.request({
-                hostname: '127.0.0.1',
-                port: this.port,
-                path: `/api/v1/runs/${runId}/events`,
-                method: 'GET',
-                headers: headers,
-                agent: false
-            }, (res) => {
+            const req = http.request({ hostname: '127.0.0.1', port: this.port, path: urlPath, method: 'GET', headers, agent: false }, (res) => {
                 if (res.statusCode !== 200) {
-                    reject(new Error(`Connexion SSE rejetée avec statut ${res.statusCode}`));
+                    res.resume();
+                    finish(new Error(`Connexion SSE ${urlPath} rejetée avec statut ${res.statusCode}`));
                     return;
                 }
-
                 res.setEncoding('utf8');
-                let buffer = '';
-
+                const parser = new SseParser();
                 res.on('data', (chunk: string) => {
-                    buffer += chunk;
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop() || '';
-
-                    let eventType = '';
-                    let eventData = '';
-                    let eventId = '';
-
-                    for (const line of lines) {
-                        const trimmed = line.trim();
-                        if (trimmed === '') {
-                            if (eventData) {
-                                try {
-                                    const parsed = JSON.parse(eventData);
-                                    if (eventType && !parsed.type) {
-                                        parsed.type = eventType;
-                                    }
-                                    if (eventId && !parsed.id) {
-                                        parsed.id = eventId;
-                                    }
-                                    onEvent(parsed);
-                                    if (parsed.type === 'session_completed' || parsed.type === 'session_cancelled' || parsed.type === 'session_failed') {
-                                        req.destroy();
-                                        resolve();
-                                    }
-                                } catch {
-                                    // Parse error
-                                }
-                            }
-                            eventType = '';
-                            eventData = '';
-                            eventId = '';
-                        } else if (trimmed.startsWith('event:')) {
-                            eventType = trimmed.substring(6).trim();
-                        } else if (trimmed.startsWith('data:')) {
-                            eventData = trimmed.substring(5).trim();
-                        } else if (trimmed.startsWith('id:')) {
-                            eventId = trimmed.substring(3).trim();
+                    if (settled) { return; }
+                    try {
+                        for (const event of parser.feed(chunk)) {
+                            if (handle(event)) { finish(); return; }
                         }
-                    }
+                    } catch (error) { finish(error); }
                 });
-
-                res.on('end', () => {
-                    resolve();
-                });
-
-                res.on('error', (err) => {
-                    reject(err);
-                });
+                res.on('end', () => finish());
+                res.on('error', error => finish(signal?.aborted ? undefined : error));
             });
-
+            req.on('error', error => finish(signal?.aborted ? undefined : error));
             if (signal) {
-                const onAbort = () => {
-                    setTimeout(() => {
-                        req.destroy();
-                        resolve();
-                    }, 8000);
-                };
-                if (signal.aborted) {
-                    onAbort();
-                } else {
-                    signal.addEventListener('abort', onAbort, { once: true });
-                }
+                if (signal.aborted) { onAbort(); } else { signal.addEventListener('abort', onAbort, { once: true }); }
             }
-
-            req.on('error', (err) => {
-                if (signal?.aborted) {
-                    resolve();
-                } else {
-                    reject(err);
-                }
-            });
-
             req.end();
         });
     }
 
     public async getReport(runId: string): Promise<Record<string, unknown>> {
-        return this.request('GET', `/api/v1/runs/${runId}/report`);
+        return this.request('GET', `/api/v1/runs/${runId}/report`, undefined, 120000);
     }
 
     public async cancelRun(runId: string): Promise<{ cancelled: boolean }> {
-        return this.request('POST', `/api/v1/runs/${runId}/cancel`);
+        return this.request('POST', `/api/v1/runs/${runId}/cancel`, undefined, 10000);
     }
 
     public async getLogs(runId: string, controlId: string): Promise<ControlLogs> {
         return this.request('GET', `/api/v1/runs/${runId}/logs/${encodeURIComponent(controlId)}`);
     }
 
-    public async validateReport(reportData: Record<string, unknown>, reportSha256: string): Promise<any> {
+    public async validateReport(reportData: Record<string, unknown>, reportSha256: string): Promise<unknown> {
         return this.request('POST', '/api/v1/reports/validate', {
             report: reportData,
             report_sha256: reportSha256
-        });
+        }, 120000);
     }
 
     public async shutdown(): Promise<void> {
@@ -440,8 +536,10 @@ export class DaemonClient {
         await killStagedDaemons();
     }
 
-    private request<T>(method: string, path: string, body?: any): Promise<T> {
+    /** A request without an answer after timeoutMs fails instead of freezing the extension. */
+    private request<T>(method: string, path: string, body?: unknown, timeoutMs = 30000, signal?: AbortSignal): Promise<T> {
         return new Promise<T>((resolve, reject) => {
+            if (signal?.aborted) { reject(new Error(`Requête ${method} ${path} annulée.`)); return; }
             const bodyData = body ? JSON.stringify(body) : undefined;
             const headers: Record<string, string> = {
                 'Host': `127.0.0.1:${this.port}`,
@@ -478,6 +576,10 @@ export class DaemonClient {
                 });
             });
 
+            req.setTimeout(timeoutMs, () => req.destroy(new Error(`Requête ${method} ${path} sans réponse du démon après ${Math.round(timeoutMs / 1000)} s.`)));
+            const onAbort = () => req.destroy(new Error(`Requête ${method} ${path} annulée.`));
+            signal?.addEventListener('abort', onAbort, { once: true });
+            req.on('close', () => signal?.removeEventListener('abort', onAbort));
             req.on('error', err => reject(err));
             if (bodyData) {
                 req.write(bodyData);
@@ -485,6 +587,29 @@ export class DaemonClient {
             req.end();
         });
     }
+}
+
+export interface SyncOptions { registryUrl?: string; registryToken?: string; log?: Logger }
+
+/** Splits a child stream into lines across chunk boundaries (LF or CRLF). */
+function relayLines(stream: NodeJS.ReadableStream | null | undefined, onLine: (line: string) => void): void {
+    if (!stream) { return; }
+    let pending = '';
+    stream.setEncoding('utf8');
+    stream.on('data', (chunk: string) => {
+        pending += chunk;
+        const lines = pending.split(/\r?\n/);
+        pending = lines.pop() || '';
+        for (const line of lines) { if (line.trim()) { onLine(line.trimEnd()); } }
+    });
+    stream.on('end', () => { if (pending.trim()) { onLine(pending.trimEnd()); } });
+}
+
+async function describeWithJournal(error: Error, journals: { journal: string; console: string }): Promise<Error> {
+    const tail = await tailFile(journals.console, 15);
+    daemonLog.error(error.message, { journal: journals.journal, console: journals.console });
+    if (tail) { daemonLog.error(`dernières lignes de ${journals.console} :\n${tail}`); }
+    return new Error(`${error.message} Journal : ${journals.journal}`);
 }
 
 const auditFilters = { technologies: [] as string[], controls: [] as string[] };
@@ -645,7 +770,7 @@ export class AuditState {
         if (event.sequence === 1 && event.type !== 'session_started') { throw new Error('Debut de session absent.'); }
         const data = event.data || {};
         switch (event.type) {
-            case 'session_started': case 'preparation_started': case 'preparation_completed': break;
+            case 'session_started': case 'preparation_started': case 'preparation_completed': case 'control_invocation': break;
             case 'plan_available': {
                 this.snapshot = parsePreparation(JSON.stringify(data), this.target, true);
                 if (this.snapshot.metadata.run_id !== this.runId) { throw new Error('Snapshot d une autre session.'); }
@@ -837,7 +962,7 @@ export async function validateTarget(source: string, target: string): Promise<st
     return canonicalTarget;
 }
 
-export async function prepare(source: string, target: string, client?: DaemonClient, _signal?: AbortSignal, sessionDirectory?: string, log?: (line: string) => void): Promise<Preparation> {
+export async function prepare(source: string, target: string, client?: DaemonClient, signal?: AbortSignal, sessionDirectory?: string, log: Logger = silentLogger): Promise<Preparation> {
     const canonicalSource = await fs.realpath(source);
     const canonicalTarget = await validateTarget(canonicalSource, target);
     const id = randomUUID();
@@ -852,19 +977,21 @@ export async function prepare(source: string, target: string, client?: DaemonCli
     try {
         const daemonStarted = Date.now();
         await daemon.ensureDaemon(canonicalSource);
-        log?.(`demon : ${Date.now() - daemonStarted} ms`);
+        log.debug('démon disponible', { ms: Date.now() - daemonStarted });
         await daemon.approveWorkspace(canonicalTarget);
         const planStarted = Date.now();
-        const plan = parsePreparation(JSON.stringify(await daemon.getPlan(canonicalTarget)), canonicalTarget, true);
+        const plan = parsePreparation(JSON.stringify(await daemon.getPlan(canonicalTarget, {}, signal)), canonicalTarget, true);
         const body = JSON.stringify(plan);
-        log?.(`plan recu : ${Date.now() - planStarted} ms, ${Buffer.byteLength(body)} octets`);
+        log.info('plan reçu', { ms: Date.now() - planStarted, bytes: Buffer.byteLength(body), controls: plan.execution_plan.controls.length });
         const writeStarted = Date.now();
         await fs.writeFile(reportPath, body, 'utf8');
-        log?.(`ecriture plan.json : ${Date.now() - writeStarted} ms`);
+        log.debug('plan.json écrit', { ms: Date.now() - writeStarted, file: reportPath });
         return { report: plan, directory, target: canonicalTarget };
     } catch (daemonErr) {
-        const message = daemonErr instanceof Error ? daemonErr.message : String(daemonErr);
-        await fs.appendFile(path.join(directory, 'preparation.log'), `\n${message}\n`, 'utf8').catch(() => {});
+        const message = errorMessage(daemonErr);
+        log.error('préparation en échec', { error: message, directory });
+        await fs.appendFile(path.join(directory, 'preparation.log'), `\n${new Date().toISOString()} ${message}\n`, 'utf8')
+            .catch(error => log.warn('preparation.log non écrit', { error: errorMessage(error) }));
         throw new Error(`Preparation impossible : ${message}. Journal : ${path.join(directory, 'preparation.log')}`);
     }
 }
@@ -916,7 +1043,7 @@ async function stream(
     changed: () => void,
     signal: AbortSignal,
     daemon: DaemonClient,
-    log?: (line: string) => void
+    log: Logger
 ): Promise<void> {
     await daemon.ensureDaemon(source);
     await daemon.approveWorkspace(target);
@@ -931,8 +1058,11 @@ async function stream(
         redactionPatterns: redactionPatterns
     });
 
+    const runLog = log.child({ runId: run.run_id });
+    runLog.info('session lancée', { target, network: permissions.network, code_execution: permissions.code_execution, directory });
     const cancelHandler = () => {
-        void daemon.cancelRun(run.run_id).catch(() => {});
+        runLog.info('annulation demandée au démon');
+        void daemon.cancelRun(run.run_id).catch(error => runLog.warn('annulation non transmise', { error: errorMessage(error) }));
     };
     signal.addEventListener('abort', cancelHandler, { once: true });
 
@@ -943,34 +1073,42 @@ async function stream(
         await daemon.streamEvents(run.run_id, (ev) => {
             try {
                 state.receive(ev);
-                if (log && ev && typeof ev === 'object') {
+                if (ev && typeof ev === 'object') {
                     const event = ev as { type?: string; control_id?: string; data?: Record<string, unknown> | null };
                     const data = event.data || {};
-                    const result = data.result as { status?: string } | undefined;
+                    const result = data.result as { status?: string; duration_ms?: number; exit_code?: number | null } | undefined;
                     const reason = data.reason as { code?: string; message?: string } | undefined;
-                    if (event.type === 'control_started') {
-                        log(`exécuté en cours : ${event.control_id ?? ''}`);
+                    const id = event.control_id ?? '';
+                    const controlLog = runLog.child({ controlId: id });
+                    if (event.type === 'control_invocation') {
+                        controlLog.debug(formatInvocation(data as InvocationRecord));
+                    } else if (event.type === 'control_started') {
+                        controlLog.info('exécution en cours');
                     } else if (event.type === 'control_completed') {
                         const code = reason?.code || '';
-                        const id = event.control_id ?? '';
                         const technology = id.split('/')[0] || '';
+                        const fields = { ms: result?.duration_ms, exit: result?.exit_code, output: data.output_path };
                         if (result?.status === 'success' || result?.status === 'fail' || result?.status === 'error') { executed.push(technology); }
-                        if (result?.status === 'success') { log(`exécuté OK : ${id}`); }
-                        else if (result?.status === 'fail') { log(`exécuté KO : ${id}`); }
-                        else if (result?.status === 'error') { log(`erreur : ${id} — ${reason?.message || ''}`); }
+                        if (result?.status === 'success') { controlLog.info('exécuté OK', fields); }
+                        else if (result?.status === 'fail') { controlLog.info('exécuté KO', { ...fields, reason: reason?.message }); }
+                        else if (result?.status === 'error') { controlLog.error('erreur', { ...fields, reason: reason?.message }); }
                         else if (code === 'technology_absent') { absent.push(technology); }
                         else if (countsAsUnavailable(code)) { unavailable.push(`${id} — ${reason?.message || 'indisponible'}`); }
+                        else { controlLog.debug('non exécuté', { reason: code, message: reason?.message }); }
                     } else if (event.type === 'session_completed' || event.type === 'session_cancelled') {
                         const technologies = technologiesAbsentFromRun(executed, absent);
-                        if (technologies.length) { log(`ignorés (technologie absente) : ${technologies.join(', ')}`); }
-                        for (const line of groupUnavailableLines(unavailable)) { log(`indisponible : ${line}`); }
-                        log(`session ${sessionHeadline(state, event.type === 'session_cancelled')}`);
+                        if (technologies.length) { runLog.info(`ignorés (technologie absente) : ${technologies.join(', ')}`); }
+                        for (const line of groupUnavailableLines(unavailable)) { runLog.warn(`indisponible : ${line}`); }
+                        runLog.info(`session ${sessionHeadline(state, event.type === 'session_cancelled')}`);
+                    } else if (event.type === 'session_failed') {
+                        runLog.error('session en échec côté démon', { error: data.error });
                     }
                 }
                 changed();
             } catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
+                const message = errorMessage(error);
                 if (message.includes('Controle du plan') || message.includes('Inventaire de technologies') || message.includes('plan v1')) { throw error; }
+                runLog.warn('événement de session ignoré', { error: message });
             }
         }, signal);
     } finally {
@@ -983,8 +1121,8 @@ async function stream(
         if (!state.reportPath) {
             state.reportPath = path.join(directory, 'compliance-report.json');
         }
-    } catch {
-        // Rapport non disponible si annulé ou échoué
+    } catch (error) {
+        runLog.debug('rapport final non récupéré (session annulée ou en échec)', { error: errorMessage(error) });
     }
 }
 
@@ -996,7 +1134,7 @@ export async function audit(
     signal: AbortSignal,
     redaction?: string,
     client?: DaemonClient,
-    log?: (line: string) => void
+    log: Logger = silentLogger
 ): Promise<string> {
     const daemon = client || new DaemonClient();
     const target = await validateTarget(source, state.target);

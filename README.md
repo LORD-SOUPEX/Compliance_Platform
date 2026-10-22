@@ -27,7 +27,7 @@ Le moteur d'exécution autonome écrit en Go (`core/`) et son démon local HTTP/
 
 ESLint et `tsc` viennent du `node_modules` de la cible, ou de `~/.compliance/tools/node` après synchronisation. Sans configuration ESLint, le moteur applique une configuration minimale et audite les fichiers. `tsc` exige un `tsconfig.json`. Les outils de répertoire (Terraform, etc.) restent un contrôle par racine. Le rapport regroupe ces racines sous une carte par outil. Chaque racine se déroule vers les fichiers touchés, puis vers la ligne, la règle et le message. Checkov, TFLint, ShellCheck, Trivy et `terraform fmt` alimentent ces listes. Une technologie déjà exécutée sur une racine n'apparaît pas dans les contrôles non applicables. Markdown utilise `rumdl check`. Sans configuration Markdown du dépôt, la règle de longueur de ligne MD013 est désactivée. `pytest` qui ne collecte aucun test (code 5) n'est pas un échec. Gitleaks ignore les dossiers d'artefacts et les binaires. `testdata`, `fixtures` et `__snapshots__` ne sont ni des racines ni des anomalies.
 
-Les outils du registre `tools-v1` peuvent être téléchargés en HTTPS après accord (version, source, dossier utilisateur). Une signature ou une somme SHA-256 différente génère un avertissement journalisé mais ne bloque pas l'installation. Ce n'est pas le cas à l'installation du VSIX. Les entreprises peuvent configurer un miroir privé via `compliance.registryUrl` (ou variable d'environnement `COMPLIANCE_REGISTRY_URL`) et `compliance.registryToken` (`COMPLIANCE_REGISTRY_TOKEN`). Voir `docs/architecture.md`.
+Les outils du registre `tools-v1` peuvent être téléchargés en HTTPS après accord (version, source, dossier utilisateur). Une signature Ed25519 absente ou différente génère un avertissement journalisé sans bloquer l'installation. Une somme SHA-256 d'archive ou de binaire différente refuse l'outil. Rien n'est téléchargé à l'installation du VSIX. Les entreprises peuvent configurer un miroir privé via `compliance.registryUrl` (ou variable d'environnement `COMPLIANCE_REGISTRY_URL`) et un jeton enregistré par **ICP: Définir le jeton du registre d'outils** (stockage sécurisé de VS Code) ou `COMPLIANCE_REGISTRY_TOKEN`. Voir `docs/architecture.md`.
 
 Les sessions conservées vont de 1 à 1000 (`compliance.maxSessions`, défaut 5). Extension installée : `~/.compliance/sessions/runs` (`%USERPROFILE%` sous Windows, `$HOME` ailleurs). Développement depuis le dépôt : `<dépôt>/.tools/state/runs`. `COMPLIANCE_SESSIONS_DIR` remplace ce chemin. Le démon utilise `~/.compliance` ou `COMPLIANCE_STATE_DIR`.
 
@@ -82,6 +82,7 @@ Compliance_Platform/
 │   │   ├── distribution/               # Synchronisation et intégrité des outils
 │   │   ├── embedded/                   # Catalogue et schémas embarqués (//go:embed)
 │   │   ├── engine/                     # Moteur d'exécution DAG et gestion des runs
+│   │   ├── logging/                    # Journal JSON du démon, rotation, flux en direct
 │   │   ├── matrix/                     # Capability Matrix et sondes d'outils
 │   │   ├── osutil/                     # Confinement multi-OS (Job Objects / POSIX)
 │   │   ├── report/                     # Génération et validation du rapport v1
@@ -90,10 +91,18 @@ Compliance_Platform/
 │   └── go.mod
 ├── vscode-extension/                   # Extension VS Code officielle (TypeScript)
 │   ├── src/
-│   │   ├── extension.ts                # Activation, commandes et TreeView
-│   │   ├── daemonClient.ts             # Client HTTP/SSE et gestion du cycle de vie du démon
+│   │   ├── extension.ts                # Activation, commandes, TreeView, canal de log
+│   │   ├── daemonClient.ts             # Client HTTP/SSE et cycle de vie du démon
+│   │   ├── logger.ts                   # Journal structuré, niveaux et masquage des secrets
+│   │   ├── sse.ts                      # Analyseur Server-Sent Events incrémental
 │   │   ├── model.ts                    # Modèles d'état et normalisation multi-OS
-│   │   └── reportPanel.ts              # Panneau Webview interactif de visualisation
+│   │   ├── reportPanel.ts              # Panneau Webview du rapport
+│   │   ├── reportLayout.ts             # Compteurs et sections du rapport
+│   │   ├── reportActions.ts            # Actions de la Webview
+│   │   ├── toolProvision.ts            # Autorisation machine et outils manquants
+│   │   ├── daemonLifecycle.ts          # Identification des binaires du démon
+│   │   ├── engineVersion.ts            # Version attendue du moteur
+│   │   └── localSettings.ts            # Réglages de portée application
 │   ├── package_vsix.py                 # Packaging OPC universel et cross-compilation
 │   ├── package.json                    # Manifeste d'extension VS Code (v2.1.3)
 │   └── tsconfig.json
@@ -105,11 +114,9 @@ Compliance_Platform/
 ├── docs/                               # Documentation technique exhaustive
 │   ├── extension.md                    # Page Marketplace, copiée dans le VSIX
 │   ├── architecture.md                 # Architecture, flux et sécurité
-│   ├── outils.md                       # Catalogue, manifeste et réglages
 │   ├── developpement.md                # Tests, packaging, signature
 │   └── CHANGELOG.md                    # Historique publié avec l'extension
 ├── .gitignore                          # Règles d'exclusion Git (0 binaire versionné)
-├── go.work                             # Espace de travail Go multi-modules
 └── README.md                           # Documentation de référence du projet
 ```
 

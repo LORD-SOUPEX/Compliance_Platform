@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -178,6 +179,7 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 			st := val.(CandidateToolState)
 			st.Name = name
 			st.Command = command
+			slog.Debug("tool_probe", "command", command, "path", norm, "cache", "hit", "status", st.Status)
 			return st
 		}
 
@@ -208,9 +210,12 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 				Platform:       platform.ID,
 				Reason:         osutil.FormatProbeFailure(exePath, err, stdout, stderr, time.Since(started)),
 			}
-			if !transientProbeError(ctx, err) {
+			cached := !transientProbeError(ctx, err)
+			if cached {
 				r.cache.Store(cacheKey, st)
 			}
+			slog.Warn("tool_probe", "command", command, "path", norm, "cache", "miss", "status", st.Status,
+				"cached", cached, "duration_ms", time.Since(started).Milliseconds(), "reason", st.Reason)
 			return st
 		}
 
@@ -240,6 +245,8 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 			Reason:         reason,
 		}
 		r.cache.Store(cacheKey, st)
+		slog.Debug("tool_probe", "command", command, "path", norm, "cache", "miss", "status", st.Status,
+			"version", st.Version, "duration_ms", time.Since(started).Milliseconds())
 		return st
 	}
 
@@ -250,6 +257,7 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 			st := val.(CandidateToolState)
 			st.Name = name
 			st.Command = command
+			slog.Debug("tool_probe", "command", command, "path", norm, "cache", "hit", "status", st.Status)
 			return st
 		}
 
@@ -281,9 +289,12 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 				Platform:       platform.ID,
 				Reason:         osutil.FormatProbeFailure(pyExe, err, stdout, stderr, time.Since(started)),
 			}
-			if !transientProbeError(ctx, err) {
+			cached := !transientProbeError(ctx, err)
+			if cached {
 				r.cache.Store(cacheKey, st)
 			}
+			slog.Warn("tool_probe", "command", command, "path", norm, "cache", "miss", "status", st.Status,
+				"cached", cached, "duration_ms", time.Since(started).Milliseconds(), "reason", st.Reason)
 			return st
 		}
 
@@ -309,6 +320,8 @@ func (r *DefaultCandidateResolver) ResolveCandidate(name, command string, platfo
 			Reason:         reason,
 		}
 		r.cache.Store(cacheKey, st)
+		slog.Debug("tool_probe", "command", command, "path", norm, "cache", "miss", "status", st.Status,
+			"version", st.Version, "duration_ms", time.Since(started).Milliseconds())
 		return st
 	}
 

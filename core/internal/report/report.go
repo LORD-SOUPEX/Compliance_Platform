@@ -85,7 +85,32 @@ type ExecutionResult struct {
 	OutputTruncated  bool          `json:"output_truncated"`
 	Critical         bool          `json:"critical"`
 	Diagnostics      []Diagnostic  `json:"diagnostics"`
+	Invocations      []Invocation  `json:"invocations,omitempty"`
 	Leaks            []LocatedLeak `json:"-"`
+}
+
+// Invocation is one process launched for a control, as it was actually run.
+// Secrets in arguments and environment values are masked before recording.
+type Invocation struct {
+	Executable        string            `json:"executable"`
+	Args              []string          `json:"args"`
+	RawCommandLine    *string           `json:"raw_command_line"`
+	Cwd               string            `json:"cwd"`
+	EnvAdded          map[string]string `json:"env_added"`
+	EnvRemoved        []string          `json:"env_removed"`
+	TimeoutMs         int64             `json:"timeout_ms"`
+	StartedAt         string            `json:"started_at"`
+	DurationMs        int64             `json:"duration_ms"`
+	ExitCode          *int              `json:"exit_code"`
+	TimedOut          bool              `json:"timed_out"`
+	Cancelled         bool              `json:"cancelled"`
+	StdoutBytes       int64             `json:"stdout_bytes"`
+	StderrBytes       int64             `json:"stderr_bytes"`
+	StdoutPath        *string           `json:"stdout_path"`
+	StderrPath        *string           `json:"stderr_path"`
+	TruncatedOnDisk   bool              `json:"truncated_on_disk"`
+	TruncatedInReport bool              `json:"truncated_in_report"`
+	Error             *string           `json:"error"`
 }
 
 // LocatedLeak is one secret location. The secret value itself is never stored.

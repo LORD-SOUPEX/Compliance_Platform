@@ -34,35 +34,13 @@ repos:
         types: [markdown]
       - id: scan-emojis
         name: Recherche des pictogrammes interdits
-        entry: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-emoji.ps1 -Path .
-        language: system
-        pass_filenames: false
+        entry: python scripts/check_emoji.py
+        language: python
+        types: [text]
+        exclude: '\.(svg|sig)$'
+  # Hooks officiels : binaires construits par pre-commit pour l'OS courant
+  # (Windows, Linux, macOS), sans dépendre de .tools/bin.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
       - id: gitleaks
-        name: Recherche de secrets
-        entry: .tools/bin/gitleaks.exe dir --config .gitleaks.toml --redact .
-        language: system
-        pass_filenames: false
-      - id: powershell-analysis
-        name: Analyse PowerShell
-        entry: >-
-          powershell -NoProfile -ExecutionPolicy Bypass -File
-          scripts/quality-gate.ps1 -Mode Quick -Category PowerShell -NoColor
-        language: system
-        pass_filenames: false
-        files: '\.(ps1|psm1|psd1)$'
-      - id: ansible-analysis
-        name: Analyse Ansible
-        entry: >-
-          powershell -NoProfile -ExecutionPolicy Bypass -File
-          scripts/quality-gate.ps1 -Mode Quick -Category Ansible -NoColor
-        language: system
-        pass_filenames: false
-        files: '\.(yml|yaml)$'
-      - id: terraform-analysis
-        name: Analyse Terraform
-        entry: >-
-          powershell -NoProfile -ExecutionPolicy Bypass -File
-          scripts/quality-gate.ps1 -Mode Quick -Category Terraform -NoColor
-        language: system
-        pass_filenames: false
-        files: '\.(tf|tfvars)$'
