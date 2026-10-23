@@ -1,0 +1,33 @@
+# Dependabot en mode calme : une PR groupée par écosystème et par mois,
+# et une PR groupée seulement quand une faille de sécurité est publiée.
+version: 2
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/core"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 2
+    groups:
+      monthly-updates:
+        applies-to: version-updates
+        patterns: ["*"]
+      security-fixes:
+        applies-to: security-updates
+        patterns: ["*"]
+    commit-message:
+      prefix: "build(deps)"
+
+  - package-ecosystem: "npm"
+    directory: "/vscode-extension"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 2
+    groups:
+      monthly-updates:
+        applies-to: version-updates
+        patterns: ["*"]
+      security-fixes:
+        applies-to: security-updates
+        patterns: ["*"]
+    commit-message:
+      prefix: "build(deps)"
